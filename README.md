@@ -1,7 +1,12 @@
 # apkc studio
 
-Una página para crear proyectos de [apkc](../apkc) en el navegador y medir dónde se atasca
-quien los usa. Sin dependencias ni build: se sirve por `http(s)` con `servidor.js` o un host
+> Repositorio independiente del editor web. El compilador, el gate pesado y la documentación
+> medida viven en [apkc-web](https://github.com/Leonisaurov/apkc-web), que lo monta como
+> submódulo en `studio/`. Aquí se prueban las vistas y el editor; `e2e.sh` necesita el binario
+> `APKC` de apkc-web.
+
+Una página para crear proyectos de [apkc](https://github.com/Leonisaurov/apkc-web) en el navegador
+y medir dónde se atasca quien los usa. Sin dependencias ni build: se sirve por `http(s)` con `servidor.js` o un host
 estático con COOP/COEP. Los ES modules no cargan por `file://`; allí solo se muestra un aviso.
 
 Qué hace, en el orden en que duele:

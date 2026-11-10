@@ -1,0 +1,4 @@
+apkc.wasm
+wasm_exec.js
+node_modules/
+*.log
