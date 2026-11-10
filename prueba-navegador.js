@@ -36,7 +36,8 @@ servidor.listen(HTTP_PORT, "127.0.0.1");
 // perfil propio y limpio: chromium deja un SingletonLock cuando muere con SIGKILL, y el
 // siguiente arranque con el perfil de ~ no subre el debugger — el fallo parece de la pagina
 // y es del perfil. TMPDIR de Termux, nunca /tmp.
-const PERFIL = path.join(process.env.PREFIX || "/data/data/com.termux/files/usr", "tmp", "studio-chrome-perfil");
+const TMP = process.env.PREFIX ? process.env.PREFIX + "/tmp" : (process.env.TMPDIR || "/tmp");
+const PERFIL = path.join(TMP, "studio-chrome-perfil");
 fs.rmSync(PERFIL, { recursive: true, force: true });
 
 const navegador = spawn(CHROME, [
