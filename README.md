@@ -150,7 +150,8 @@ worker y llenar la caché.
 
 ## Publicar
 
-La carpeta `studio/` es el sitio: no hay build. Para que OPFS y el worker funcionen, el host
+La carpeta `studio/` es el sitio: no hay build. `tools/sitio.sh` (en el repo `apkc-web`) empaqueta
+solo lo versionado, añade `apkc.wasm` y `wasm_exec.js` y comprueba COOP/COEP. Para que OPFS y el worker funcionen, el host
 tiene que mandar `Cross-Origin-Opener-Policy: same-origin` y
 `Cross-Origin-Embedder-Policy: require-corp`; `_headers` ya las declara para Netlify y Cloudflare
 Pages. **GitHub Pages no permite fijar cabeceras**, así que allí Inicio y el diagnóstico
