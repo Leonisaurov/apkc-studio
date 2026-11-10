@@ -42,7 +42,8 @@ servidor.stderr.on("data", (d) => { salidaServidor += d; });
 const PERFIL = path.join(TMP, "crear-chrome-perfil");
 fs.rmSync(PERFIL, { recursive: true, force: true });
 const navegador = spawn(CHROME, [
-  "--headless=new", "--no-sandbox", "--disable-gpu", "--disable-dev-shm-usage",
+  "--headless=new", "--no-sandbox", "--disable-setuid-sandbox", "--disable-gpu",
+  "--disable-dev-shm-usage", "--remote-allow-origins=*",
   "--no-first-run", "--disable-extensions", "--disable-sync",
   "--user-data-dir=" + PERFIL, "--remote-debugging-port=" + CDP, URL_PAGINA,
 ], { stdio: ["ignore", "pipe", "pipe"] });

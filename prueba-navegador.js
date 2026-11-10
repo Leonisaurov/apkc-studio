@@ -40,7 +40,8 @@ const PERFIL = path.join(process.env.PREFIX || "/data/data/com.termux/files/usr"
 fs.rmSync(PERFIL, { recursive: true, force: true });
 
 const navegador = spawn(CHROME, [
-  "--headless=new", "--no-sandbox", "--disable-gpu", "--disable-dev-shm-usage",
+  "--headless=new", "--no-sandbox", "--disable-setuid-sandbox", "--disable-gpu",
+  "--disable-dev-shm-usage", "--remote-allow-origins=*",
   "--no-first-run", "--disable-extensions", "--disable-sync", "--user-data-dir=" + PERFIL,
   "--remote-debugging-port=" + PUERTO, URL_PAGINA,
 ], { stdio: ["ignore", "pipe", "pipe"] });
@@ -58,7 +59,7 @@ async function target() {
     } catch (e) { /* aun no escucha */ }
     await esperar(500);
   }
-  throw new Error("chromium no subio el debugger:\n" + salidaNavegador.slice(0, 400));
+  throw new Error("chromium no subio el debugger:\n" + salidaNavegador.slice(0, 2000));
 }
 
 const conductor = `(async () => {
