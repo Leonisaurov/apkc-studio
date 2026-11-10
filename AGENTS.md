@@ -51,6 +51,8 @@ dar el editor por probado, comprueba en la salida `pestaña: N comprobaciones` y
 | `pestana.js` | editor, pestañas, árbol de OPFS, comandos y el puente `hospedador`; `export` de lo que consumen `vistas.js`, `main.js` y las pruebas. |
 | `consola.js` | salida ANSI, enlaces `ruta:línea`, buffer de la consola y velo de carga. |
 | `editor.js` | `resaltar()` y `esXml()`: puros, sin DOM, probados en node. |
+| `busqueda.js` | barra de buscar/reemplazar y `Ctrl+G`; se monta con `EDITOR` e `irALinea`. |
+| `ajustes.js` | ajustes del proyecto leídos y escritos en el manifiesto. |
 | `historial.js` | undo tree por documento: deltas, checkpoints, poda, IndexedDB por ventana. |
 | `fusion.js` | fusión de tres vías (base/local/remoto) por líneas; conflicto explícito si se pisan. |
 | `proyecto.js` | zip de exportar/importar (STORE/DEFLATE, CRC y rutas seguras) y ajustes leídos/escritos en el manifiesto. |

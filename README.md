@@ -122,6 +122,8 @@ Qué hace de verdad, y qué no:
 | `pestana.js` | editor, pestañas, árbol y botones de la sección; `resaltar()` es puro y se prueba en node |
 | `historial.js` | undo tree por documento: deltas, checkpoints, poda e IndexedDB por ventana; sus funciones puras se prueban en node |
 | `fusion.js` | fusión de tres vías (base, local, remoto) para resolver cambios de dos ventanas sin perder ramas |
+| `busqueda.js` | barra de buscar/reemplazar e ir a línea, montada con las piezas del editor. |
+| `ajustes.js` | lectura y escritura de minSdk/targetSdk/versionCode/versionName en el manifiesto. |
 | `proyecto.js` | exportar/importar el proyecto en `.zip` (STORE y DEFLATE, con CRC y rutas seguras) y leer/escribir los ajustes en el manifiesto |
 | `temas.js` | temas de interfaz y de terminal; solo cambia `data-tema` y variables CSS, sin dependencias |
 | `offline.js` | registra el service worker cuando la página se sirve por http(s) |
