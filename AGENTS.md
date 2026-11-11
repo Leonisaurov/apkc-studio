@@ -23,8 +23,9 @@ APKC="$PREFIX/tmp/apkc-gate" APKC_WASM="$PREFIX/tmp/apkc-wasm.wasm" sh e2e.sh
 ```
 
 `npm start` es `node servidor.js` y exige `APKC_WASM` y un `wasm_exec.js` en
-`$(go env GOROOT)/lib/wasm`; sin uno de los dos sale con código 2. `e2e.sh` llama a `tcr` para
-los `apkc build` nativos: tiene que estar en el PATH. No hay lint, typecheck ni formatter; para
+`$(go env GOROOT)/lib/wasm`; sin uno de los dos sale con código 2. `e2e.sh` usa `TCR` si está,
+`tcr` del PATH si existe y, si no, ejecuta directo: en Termux conviene tenerlo, en un runner Linux
+no hace falta. No hay lint, typecheck ni formatter; para
 una comprobación rápida de sintaxis, `node --check <fichero>`.
 `prueba-pestana.js` exige `APKC_WASM`, `APK_EJEMPLO` y `KS_EJEMPLO`; con `KS_RELEASE` y
 `AAB_EJEMPLO` añade release, v4, `.aab` y rotación (es lo que le pasa `e2e.sh`). `prueba.js`
