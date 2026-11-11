@@ -103,7 +103,16 @@ export function crearFs(carpeta) {
     // read, write, getSize, flush). Guardar la promesa sin aguardarla dejaba el acceso
     // inservible: las escrituras se tragaban en el try/catch y el fichero nunca se espejaba
     try { n.acceso = await fh.createSyncAccessHandle(); } catch (e) { n.acceso = null; }
-    if (!n.acceso) return;
+    if (!n.acceso) {
+      // el acceso exclusivo puede estar en otra pestaña; la lectura no tiene por qué perderse
+      if (n.sinCargar !== true) {
+        try {
+          const copia = await fh.getFile();
+          n.data = new Uint8Array(await copia.arrayBuffer());
+        } catch (e) { /* se queda en memoria lo que hubiera */ }
+      }
+      return;
+    }
     if (n.sinCargar !== true) {
       const largo = n.acceso.getSize();
       if (largo > 0) {
@@ -485,7 +494,15 @@ export function crearFs(carpeta) {
       if (n && !n.dir && !n.descubierto) return n.data;
       const fh = await ficheroOPFS(a, false);
       if (!fh) return null;
-      const sh = await fh.createSyncAccessHandle();
+      // Otra pestaña del mismo origen puede tener el acceso exclusivo abierto en este momento.
+      // Antes eso reventaba la lectura y la pestaña nueva decía «no existe» (un e2e intermitente
+      // lo destapó). getFile() no pide el acceso exclusivo y da una copia consistente.
+      let sh = null;
+      try { sh = await fh.createSyncAccessHandle(); } catch (e) { sh = null; }
+      if (!sh) {
+        const copia = await fh.getFile();
+        return new Uint8Array(await copia.arrayBuffer());
+      }
       const buf = new Uint8Array(sh.getSize());
       sh.read(buf, { at: 0 });
       sh.close();
