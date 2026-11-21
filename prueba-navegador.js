@@ -118,7 +118,7 @@ const conductor = `(async () => {
 
   // el diagnóstico explica una salida real de apkc sin sacarla del navegador
   document.getElementById("salida-apkc").value =
-    "[build] aapt2 compile never started: pipe: not implemented on js\n" +
+    "[build] aapt2 compile never started: pipe: not implemented on js\\n" +
     "[build] mensaje nuevo sin explicar xyz";
   document.getElementById("analizar-salida").click();
   await new Promise((ok) => setTimeout(ok, 300));
@@ -224,7 +224,7 @@ function comprueba(cond, msg) { if (!cond) { fallos++; console.log("  FALLO:", m
     comprueba(/navegador no puede hablar con un proceso/.test(String(v.diagnostico)),
       "el diagnóstico no dice por qué el build clásico no corre en wasm: " + String(v.diagnostico).slice(0, 160));
     comprueba(v.informe, "el diagnóstico no ofreció el informe descargable");
-    comprueba(/lineas sin explicar/.test(String(v.informeTexto)) &&
+    comprueba(/l[ií]neas sin explicar/.test(String(v.informeTexto)) &&
       /sin explicar xyz/.test(String(v.informeTexto)),
       "el informe agregado no contó la línea no reconocida: " + String(v.informeTexto).slice(0, 200));
     comprueba(v.temas && v.temas.ui === "catppuccin" && v.temas.term === "rose-pine",
