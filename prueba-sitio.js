@@ -148,6 +148,19 @@ async function conductor() {
   })()`);
   comprueba("no hay endpoints de desarrollo en el sitio", endpoints.estado === 404, JSON.stringify(endpoints));
 
+  // El módulo de la pestaña publica sus funciones en window al terminar de cargar; esperar a
+  // que estén antes de tocar nada, porque la recarga del SW puede haber invalidado un contexto
+  // previo donde sí estaban.
+  const listo = await evaluar(`(async () => {
+    for (let i = 0; i < 60; i++) {
+      if (typeof usarJarElegido === "function" && typeof compilarDebug === "function" &&
+          typeof hospedador !== "undefined" && typeof correr === "function") return true;
+      await new Promise((r) => setTimeout(r, 500));
+    }
+    return false;
+  })()`);
+  comprueba("el módulo de la pestaña está listo tras la recarga", listo === true, String(listo));
+
   const doc = await exec("DOM.getDocument");
   const entrada = await exec("DOM.querySelector", { nodeId: doc.result.root.nodeId, selector: "#android-jar" });
   const puesto = await exec("DOM.setFileInputFiles", { files: [JAR], nodeId: entrada.result.nodeId });
