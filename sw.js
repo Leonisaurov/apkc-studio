@@ -33,6 +33,7 @@ const SHELL = [
   "./", "./index.html", "./style.css", "./main.js", "./offline.js",
   "./app.js", "./historial.js", "./fusion.js", "./pestana.js", "./vistas.js",
   "./diagnostico.js", "./temas.js", "./apkc.wasm", "./wasm_exec.js",
+  "./manifest.webmanifest", "./icons/icon-192.png", "./icons/icon-512.png",
 ];
 
 const SOLO_RED = [

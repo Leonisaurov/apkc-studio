@@ -148,6 +148,19 @@ async function conductor() {
   })()`);
   comprueba("no hay endpoints de desarrollo en el sitio", endpoints.estado === 404, JSON.stringify(endpoints));
 
+  const pwa = await evaluar(`(async () => {
+    const r = await fetch("/manifest.webmanifest");
+    const m = await r.json();
+    const estados = await Promise.all((m.icons || []).map(async (i) =>
+      (await fetch(i.src)).status));
+    return { tipo: r.headers.get("content-type"), id: m.id, display: m.display,
+      iconos: m.icons ? m.icons.length : 0, estados };
+  })()`);
+  comprueba("el manifiesto PWA y sus dos iconos se sirven",
+    pwa.id === "/" && pwa.display === "standalone" && pwa.iconos === 2 &&
+      pwa.estados.every((s) => s === 200),
+    JSON.stringify(pwa));
+
   // El módulo de la pestaña publica sus funciones en window al terminar de cargar; esperar a
   // que estén antes de tocar nada, porque la recarga del SW puede haber invalidado un contexto
   // previo donde sí estaban.

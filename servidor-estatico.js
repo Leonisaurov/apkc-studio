@@ -15,6 +15,7 @@ const MIME = {
   ".css": "text/css; charset=utf-8", ".json": "application/json; charset=utf-8",
   ".wasm": "application/wasm", ".png": "image/png", ".svg": "image/svg+xml",
   ".txt": "text/plain; charset=utf-8", ".jar": "application/java-archive",
+  ".webmanifest": "application/manifest+json",
 };
 
 const servidor = http.createServer((req, res) => {
