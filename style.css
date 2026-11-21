@@ -14,6 +14,16 @@ html.apkc-aislando::after {
   font: 14px/1.4 system-ui, sans-serif;
 }
 
+/* Enlace de salto: invisible hasta que recibe el foco, y entonces se ve arriba a la izquierda. */
+.skip-link {
+  position: fixed; left: 8px; top: 8px; z-index: 10000;
+  padding: 6px 10px; background: var(--fondo2, #252526); color: var(--brillo, #e6edf3);
+  border: 1px solid var(--foco, #007acc); border-radius: 4px;
+  transform: translateY(-200%);
+}
+.skip-link:focus-visible { transform: none; outline: 2px solid var(--foco, #007acc); outline-offset: 2px; }
+#area-principal:focus-visible { outline: 2px solid var(--foco, #007acc); outline-offset: -2px; }
+
 :root {
   color-scheme: dark;
   --fondo: #1e1e1e;
@@ -469,7 +479,11 @@ input, textarea, select {
   padding: 5px 8px;
   min-width: 0;
 }
-input:focus, textarea:focus, select:focus { outline: none; border-color: var(--foco); }
+input:focus, textarea:focus, select:focus { border-color: var(--foco); }
+/* No se suprime el indicador de foco: se refuerza solo en :focus-visible (§174). */
+input:focus-visible, textarea:focus-visible, select:focus-visible {
+  outline: 2px solid var(--foco, #007acc); outline-offset: 1px;
+}
 input[type=number] { max-width: 8rem; }
 input[type=checkbox] { accent-color: #0078d4; }
 input[type=file] { padding: 4px; background: var(--superficie3); }
@@ -945,6 +959,7 @@ pre {
 #codigo::placeholder { color: var(--numero-linea); -webkit-text-fill-color: var(--numero-linea); }
 #codigo::selection { background: rgba(38, 79, 120, .55); }
 #codigo:focus { outline: none; }
+#codigo:focus-visible { outline: 2px solid var(--foco, #007acc); outline-offset: -2px; }
 .capas:focus-within { box-shadow: inset 0 0 0 1px var(--foco); }
 .resalto {
   z-index: 1;

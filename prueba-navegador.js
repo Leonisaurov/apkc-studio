@@ -81,6 +81,10 @@ const conductor = `(async () => {
   r.aislada = crossOriginIsolated;
   r.recarga = sessionStorage.getItem("apkc-coi-reintento");
   r.titulo = document.title;
+  r.lang = document.documentElement.lang;
+  const salto = document.querySelector(".skip-link");
+  r.salto = salto ? salto.textContent.trim() : "";
+  r.principal = document.getElementById("area-principal")?.tabIndex ?? null;
   r.vistas = [...document.querySelectorAll(".pestana-vista")].map((b) => b.textContent.trim());
   r.actividad = [...document.querySelectorAll(".actividad [data-vista]")].map((b) => b.dataset.vista);
 
@@ -190,6 +194,9 @@ function comprueba(cond, msg) { if (!cond) { fallos++; console.log("  FALLO:", m
     console.log("  inicio:", v.tituloTrasNombre, "|", v.paqueteLateral, "| editor:", v.editorVisible,
       "| aviso:", String(v.avisoCrear).slice(0, 120));
     comprueba(/apkc studio/.test(v.titulo), "el título no nombra el studio: " + v.titulo);
+    comprueba(v.lang === "es" && /Saltar/.test(v.salto) && v.principal === -1,
+      "falta el enlace de salto o el destino con foco programable: " +
+        JSON.stringify({ lang: v.lang, salto: v.salto, principal: v.principal }));
     comprueba(v.vistas.join(",") === "Inicio,Editor", "las pestañas no son las dos medidas: " + v.vistas);
     comprueba(v.actividad.join(",") === "crear,pestana", "la barra de actividad no tiene las dos vistas: " + v.actividad);
     comprueba(v.tituloTrasNombre === "Prueba", "el nombre no llegó a la barra de título: " + v.tituloTrasNombre);
