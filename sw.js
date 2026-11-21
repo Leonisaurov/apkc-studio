@@ -12,6 +12,10 @@ const CABECERAS = {
   "X-Content-Type-Options": "nosniff",
   "Referrer-Policy": "no-referrer",
   "Permissions-Policy": "geolocation=(), microphone=(), camera=()",
+  // En desarrollo se permite inline; tools/sitio.sh sustituye el marcador por los hashes SHA-256
+  // de los <script> inline de index.html (§172), para que la página publicada no necesite
+  // 'unsafe-inline'. Surge no deja fijar cabeceras, así que el SW las añade también aquí.
+  "Content-Security-Policy": "__APKC_CSP__",
 };
 
 // Las respuestas que vienen de Cache no traen las cabeceras que pusimos al guardarlas: se añaden
