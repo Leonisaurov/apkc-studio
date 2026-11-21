@@ -1,10 +1,11 @@
 // prueba en navegador real (chromium headless, por CDP sin dependencias): lo que node no puede
 // ejercitar —el DOM, los manejadores de click, el localStorage— que es justo donde una pagina de
-// este tipo se cae. Se sirve por http sin COOP/COEP para comprobar el aviso de «sin OPFS»; la
-// pestaña completa se prueba aparte con servidor.js.
+// este tipo se cae. Se sirve por http sin COOP/COEP: la página tiene que registrar el service
+// worker, recargarse y recuperar el OPFS ella sola. La pestaña completa se prueba aparte con
+// servidor.js y, en un host estático, con prueba-sitio.js.
 //
 // uso: node prueba-navegador.js   (lanza el servidor, conduce la pagina y apaga todo)
-import { spawn } from "node:child_process";
+import { spawn, execSync } from "node:child_process";
 import fs from "node:fs";
 import path from "node:path";
 import http from "node:http";
@@ -20,12 +21,23 @@ const URL_PAGINA = "http://127.0.0.1:" + HTTP_PORT + "/index.html";
 const MIME = {
   ".html": "text/html; charset=utf-8", ".js": "text/javascript; charset=utf-8",
   ".css": "text/css; charset=utf-8", ".json": "application/json; charset=utf-8",
-  ".png": "image/png", ".svg": "image/svg+xml",
+  ".png": "image/png", ".svg": "image/svg+xml", ".wasm": "application/wasm",
 };
+// El SW recupera el aislamiento y el create llega al worker: este servidor mínimo tiene que
+// saber servir lo que el worker importa, o el fallo parecería un problema de OPFS.
+const WASM = process.env.APKC_WASM || "";
+let GOROOT = process.env.GOROOT || "";
+if (!GOROOT) {
+  try { GOROOT = execSync("go env GOROOT", { encoding: "utf8" }).trim(); } catch (e) { GOROOT = ""; }
+}
+const WASM_EXEC = path.join(GOROOT, "lib", "wasm", "wasm_exec.js");
 const servidor = http.createServer((peticion, respuesta) => {
   const ruta = decodeURIComponent((peticion.url || "/").split("?")[0]);
-  const fichero = path.normalize(path.join(__dirname, ruta === "/" ? "index.html" : ruta));
-  if (!fichero.startsWith(__dirname + path.sep) || !fs.existsSync(fichero) || fs.statSync(fichero).isDirectory()) {
+  let fichero = path.normalize(path.join(__dirname, ruta === "/" ? "index.html" : ruta));
+  if (ruta === "/wasm_exec.js" && fs.existsSync(WASM_EXEC)) fichero = WASM_EXEC;
+  else if (ruta === "/apkc.wasm" && WASM && fs.existsSync(WASM)) fichero = WASM;
+  if ((fichero !== WASM_EXEC && fichero !== WASM && !fichero.startsWith(__dirname + path.sep)) ||
+      !fs.existsSync(fichero) || fs.statSync(fichero).isDirectory()) {
     respuesta.writeHead(404); return void respuesta.end("no existe\n");
   }
   respuesta.writeHead(200, { "Content-Type": MIME[path.extname(fichero)] || "application/octet-stream" });
@@ -66,6 +78,8 @@ async function target() {
 const conductor = `(async () => {
   const r = {};
   const sa = (f) => { try { return f(); } catch (e) { return "EXCEPCION: " + e.message; } };
+  r.aislada = crossOriginIsolated;
+  r.recarga = sessionStorage.getItem("apkc-coi-reintento");
   r.titulo = document.title;
   r.vistas = [...document.querySelectorAll(".pestana-vista")].map((b) => b.textContent.trim());
   r.actividad = [...document.querySelectorAll(".actividad [data-vista]")].map((b) => b.dataset.vista);
@@ -87,7 +101,7 @@ const conductor = `(async () => {
   document.querySelector('.pestana-vista[data-vista="crear"]').click();
   r.vueltaInicio = document.getElementById("crear").classList.contains("activa");
 
-  // sin COOP/COEP no hay OPFS sincrónico: el botón tiene que decirlo, no quedarse colgado
+  // sin cabeceras del servidor, el SW debió aislar la página y el create tiene que funcionar
   document.getElementById("crear-proyecto").click();
   await new Promise((ok) => setTimeout(ok, 1200));
   r.avisoCrear = document.getElementById("estado-crear").textContent;
@@ -184,7 +198,13 @@ function comprueba(cond, msg) { if (!cond) { fallos++; console.log("  FALLO:", m
     comprueba(v.estadoBarra === "Editor", "la barra de estado no dijo Editor: " + v.estadoBarra);
     comprueba(v.vueltaInicio, "no se pudo volver a Inicio");
     comprueba(v.icono, "falta el campo del icono");
-    comprueba(/OPFS|no se pudo crear/.test(String(v.avisoCrear)), "sin COOP/COEP no avisó de que no hay OPFS: " + v.avisoCrear);
+    // Sin APKC_WASM esta prueba es solo de DOM: basta con que el SW haya aislado la página y el
+    // create no culpe a OPFS. Con el binario presente (es lo que hace e2e.sh) tiene que crear.
+    const creo = /proyecto creado/.test(String(v.avisoCrear));
+    comprueba(v.aislada === true && v.recarga === "1" &&
+      (WASM ? creo : !/OPFS/.test(String(v.avisoCrear))),
+      "sin cabeceras, el SW no recuperó el aislamiento ni pudo crear: " +
+        JSON.stringify({ aislada: v.aislada, recarga: v.recarga, aviso: v.avisoCrear }));
     comprueba(v.sinUndefined, "quedó un 'undefined' visible en la página");
     comprueba(v.localStorage === "funciona", "localStorage en http: " + v.localStorage);
     comprueba(v.diagnosticoVisible && /herramienta-no-arranca/.test(String(v.diagnostico)),
