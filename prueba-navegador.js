@@ -118,13 +118,18 @@ const conductor = `(async () => {
 
   // el diagnóstico explica una salida real de apkc sin sacarla del navegador
   document.getElementById("salida-apkc").value =
-    "[build] aapt2 compile never started: pipe: not implemented on js";
+    "[build] aapt2 compile never started: pipe: not implemented on js\n" +
+    "[build] mensaje nuevo sin explicar xyz";
   document.getElementById("analizar-salida").click();
   await new Promise((ok) => setTimeout(ok, 300));
   const resultado = document.getElementById("resultado-analisis");
   r.diagnosticoVisible = !resultado.hidden;
   r.diagnostico = resultado.textContent;
   r.informe = !document.getElementById("descargar-informe").hidden;
+  const enlaceInforme = document.getElementById("descargar-informe");
+  enlaceInforme.click();
+  r.informeTexto = enlaceInforme.href.startsWith("blob:")
+    ? (await (await fetch(enlaceInforme.href)).text()).slice(0, 4000) : "";
 
   // temas: el selector cambia data-tema y la paleta del terminal
   const temaUI = document.getElementById("tema-ui");
@@ -219,6 +224,9 @@ function comprueba(cond, msg) { if (!cond) { fallos++; console.log("  FALLO:", m
     comprueba(/navegador no puede hablar con un proceso/.test(String(v.diagnostico)),
       "el diagnóstico no dice por qué el build clásico no corre en wasm: " + String(v.diagnostico).slice(0, 160));
     comprueba(v.informe, "el diagnóstico no ofreció el informe descargable");
+    comprueba(/lineas sin explicar/.test(String(v.informeTexto)) &&
+      /sin explicar xyz/.test(String(v.informeTexto)),
+      "el informe agregado no contó la línea no reconocida: " + String(v.informeTexto).slice(0, 200));
     comprueba(v.temas && v.temas.ui === "catppuccin" && v.temas.term === "rose-pine",
       "los temas no se aplican: " + JSON.stringify(v.temas));
     comprueba(v.temas && v.temas.opcionesUI >= 4 && v.temas.opcionesTerm >= 4,

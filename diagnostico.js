@@ -49,6 +49,10 @@ import { analyze, informe, registrar } from "./app.js";
       hits.length + (hits.length === 1 ? " regla reconocida" : " reglas reconocidas") +
       (desconocidas.length ? " · " + desconocidas.length + " línea(s) sin explicar" : "")));
 
+    // Una línea que la página no sabe explicar también es fricción: se cuenta sin pegar el log
+    // completo, para que el informe agregado diga qué mensajes faltan por diagnosticar (§175).
+    for (const linea of desconocidas) registrar("friccion", linea.slice(0, 120));
+
     for (const h of hits) {
       registrar("regla", h.id);
       const ficha = nodo("article", "hallazgo");

@@ -466,6 +466,12 @@ function informe() {
     for (const [c, n] of Object.entries(porCapa).sort((a, b) => b[1] - a[1]))
       md += `- ${c}: ${n}\n`;
   }
+  const friccion = Object.entries(cuenta).filter(([k]) => k.startsWith("friccion: "))
+    .sort((a, b) => b[1] - a[1]).slice(0, 10);
+  if (friccion.length) {
+    md += "\n## líneas sin explicar (lo que más fricción dio)\n\n";
+    for (const [k, n] of friccion) md += `- ${k.slice("friccion: ".length)} ×${n}\n`;
+  }
   if (Object.keys(cuenta).length) {
     md += "\n## conteo\n\n";
     for (const [k, n] of Object.entries(cuenta).sort((a, b) => b[1] - a[1]))
