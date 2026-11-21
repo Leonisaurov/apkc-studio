@@ -67,6 +67,7 @@ async function wd(method, ruta, cuerpo) {
   const id = sesion.sessionId || (sesion.session && sesion.session.sessionId) || sesion.value?.sessionId;
   if (!id) throw new Error("geckodriver no devolvió sessionId: " + JSON.stringify(sesion).slice(0, 300));
   const S = "/session/" + id;
+  await wd("POST", S + "/timeouts", { script: 180000, "page load": 180000 });
   const js = async (expresion, args = []) =>
     wd("POST", S + "/execute/sync", { script: expresion, args });
 
