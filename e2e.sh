@@ -406,6 +406,17 @@ if [ -n "${APKC_WASM:-}" ] && [ -f "$APKC_WASM" ] && [ -n "$APK_FIXTURE" ] && [ 
         # d8 tiene que leer el dex que salio del navegador: es lo mas cerca de ART que hay sin telefono
         dex=$TMP/studio-e46-dex; rm -rf "$dex"; mkdir -p "$dex"
         unzip -qo "$estudio" classes.dex -d "$dex"
+        # dexdump es un oráculo de ART que corre en el host: valida y desarma el dex del
+        # navegador sin teléfono. Va ANTES del d8, que reescribe classes.dex en la misma carpeta.
+        # En el runner de GitHub no hay dispositivo con Shizuku, así que es lo más cerca de
+        # app_process que puede correr en CI (§166).
+        if [ -x "$BUILD_TOOLS/dexdump" ]; then
+          if ! "$BUILD_TOOLS/dexdump" -d "$dex/classes.dex" \
+               >"$TMP/studio-e46-dexdump.log" 2>&1; then
+            falla "dexdump no desarma el classes.dex que escribio la pestaña"
+            tail -5 "$TMP/studio-e46-dexdump.log"
+          fi
+        fi
         if ! timeout 200 "$BUILD_TOOLS/d8" --release --lib "$ANDROID_JAR" --min-api 21 \
              --output "$dex" "$dex/classes.dex" >"$TMP/studio-e46-d8.log" 2>&1; then
           falla "d8 no lee el classes.dex que escribio la pestaña"; tail -5 "$TMP/studio-e46-d8.log"
@@ -533,8 +544,8 @@ if [ -n "$BUILD_TOOLS" ] && [ -n "$apk_base" ]; then
   if timeout 200 "$BUILD_TOOLS/apksigner" sign --ks "${KS_EJEMPLO:-$HOME/.android/debug.keystore}" \
        --ks-pass pass:android --v3-signing-enabled true --out "$con_v3" "$apk_base" >"$TMP/studio-cotejo-sign.log" 2>&1; then
     cotejo con-v3 "$con_v3" si
-    grep -q "no se verificó aquí" "$TMP/studio-cotejo-con-v3.log" ||
-      falla "la v3 presente no se anotó como no verificada en apkc verify"
+    grep -q "v3 (APK Signature Scheme v3): ok" "$TMP/studio-cotejo-con-v3.log" ||
+      falla "apkc verify no comprobó la v3 del cotejo de apksigner"
   else
     avisa "con-v3: apksigner no pudo firmar el cotejo ($(tail -2 "$TMP/studio-cotejo-sign.log" | tr '\n' ' '))"
   fi
