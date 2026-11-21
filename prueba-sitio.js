@@ -121,11 +121,22 @@ async function conductor() {
 (async () => {
   const { exec, evaluar, peticiones } = await conductor();
 
-  const aislamiento = await evaluar(`({
-    aislada: crossOriginIsolated,
-    controlado: !!navigator.serviceWorker.controller,
-    recarga: sessionStorage.getItem("apkc-coi-reintento")
-  })`);
+  // En un host remoto la primera carga, el registro del SW y la recarga pueden tardar varios
+  // segundos: esperar al aislamiento antes de tocar el DOM, o la recarga destruye el contexto
+  // en mitad de una evaluación y el fallo parece un error del selector de fichero.
+  let aislamiento = null;
+  for (let i = 0; i < 80; i++) {
+    try {
+      aislamiento = await evaluar(`({
+        aislada: crossOriginIsolated,
+        controlado: !!navigator.serviceWorker.controller,
+        recarga: sessionStorage.getItem("apkc-coi-reintento")
+      })`);
+      if (aislamiento.aislada && aislamiento.controlado) break;
+    } catch (e) { /* la recarga puede caer en mitad de la lectura */ }
+    await esperar(500);
+  }
+  aislamiento = aislamiento || { aislada: false, controlado: false, recarga: null };
   comprueba("la página se recargó sola y el service worker la controla",
     aislamiento.recarga === "1" && aislamiento.controlado === true, JSON.stringify(aislamiento));
   comprueba("el sitio es crossOriginIsolated sin cabeceras del servidor",
