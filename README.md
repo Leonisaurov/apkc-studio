@@ -98,17 +98,32 @@ Qué hace de verdad, y qué no:
   palabras de `d8`. Y la **app del contador** (§54): un botón con `@+id`, un `OnClickListener` anónimo que
   escribe el campo de la Activity, decide con `if` y arma el texto que muestra — compilada, firmada y
   dictaminada dentro de la pestaña. El editor guarda, compila y descarga ese apk.
-- **no hace**: el `build` de siempre. En wasm `js` no puede crear tuberías, así que `aapt2`/`javac`/`d8` no
-  arrancan; por eso la interfaz no ofrece ese botón. apkc lo diría con su texto:
-  `[build] aapt2 compile never started: pipe: not implemented on js`. Y dentro del `--compiler go` el
-  fuente tiene frontera: sin bucles, sin arreglos, sin `switch` ni `try` — lo que no está medido se rechaza
-  con su línea, no se compila a medias.
+- **no hace**: el `build` **con procesos**. En `js/wasm` no hay `fork/exec`, así que el `aapt2`/`javac`/`d8`
+  de siempre no arrancan (apkc lo diría con `[build] aapt2 compile never started: pipe: not implemented
+  on js`). En su lugar la pestaña usa `--linker go --compiler go`, que sí compila el proyecto entero:
+  bucles, arreglos, `switch`, `try`, lambdas y recursos incluidos. Lo que no está medido del subconjunto
+  se rechaza con su línea, no se compila a medias.
 - **dictamina**: `apkc verify build/app.apk` vuelve a leer el apk desde OPFS y comprueba las dos firmas con
   lectores propios —digest de cada entrada, `.SF` sección a sección, PKCS#7 y bloque v2—, sin `apksigner` y
   sin conexión. El botón `verificar el apk` lo corre y el veredicto se lee en la página. Cotejado con
   `apksigner` en ocho casos, mismo veredicto y misma salida (`docs/evidencia.md` §47); la cadena de
   confianza no se valida porque no hay ancla, y lo no medido (DSA, SHA-1, v3, v4, varios firmantes) se
   rechaza por nombre.
+
+## En un host estático
+
+El sitio publicado está en **https://apkc-studio.surge.sh/**. Surge no permite fijar cabeceras, así
+que `_headers` no sirve allí: `sw.js` pone COOP/COEP en las respuestas del mismo origen y `index.html`
+recarga la página **una vez** al abrirla para conseguir `crossOriginIsolated`. Eso es lo que hace
+posible el `createSyncAccessHandle` de OPFS. La primera carga tarda un poco más; si el navegador no
+lo consigue, la página lo dice en un aviso en vez de recargar en bucle.
+
+El `android.jar` no viaja con el sitio: se elige del disco en **Compilar** o se baja del paquete
+oficial de Google pulsando un enlace (una navegación de la persona, no una petición de la página).
+Las pruebas de desarrollo (`prueba-pestana.js`, `e2e.sh`) usan `servidor.js`, que sí pone las
+cabeceras; `prueba-sitio.js` sirve el paquete sin cabeceras ni endpoints y comprueba lo que verá
+el visitante, tanto en local (`SITIO_DIR=…`) como en el host real (`SITIO_URL=…`). Medido en
+`docs/evidencia.md` §153 y §155.
 
 | Fichero | Qué es |
 | --- | --- |

@@ -18,6 +18,10 @@ sh -c 'cd ../apkc && GOOS=js GOARCH=wasm CGO_ENABLED=0 go build -o "$PREFIX/tmp/
 APKC_WASM="$PREFIX/tmp/apkc-wasm.wasm" node prueba-crear.js
 APKC_WASM=… APK_EJEMPLO=… KS_EJEMPLO=… node prueba-pestana.js
 
+# el sitio empaquetado, sin cabeceras ni endpoints: en local o en el host real
+SITIO_DIR=../sitio ANDROID_JAR=… APKSIGNER=… node prueba-sitio.js
+SITIO_URL=https://apkc-studio.surge.sh/ ANDROID_JAR=… APKSIGNER=… node prueba-sitio.js
+
 # el gate de verdad: descomprime, compila, firma y verifica con oráculos externos
 APKC="$PREFIX/tmp/apkc-gate" APKC_WASM="$PREFIX/tmp/apkc-wasm.wasm" sh e2e.sh
 ```
@@ -151,8 +155,13 @@ los imports y no debe depender de ese puente.
   cerrar hasta marcar que se guardó. La contraseña no se persiste. Si el fichero existe,
   `decirEstadoClave()` deja `#detalle-release` plegado con `.jar-listo` y `#clave-badge`.
 - **Service worker.** `sw.js` cachea el shell e intenta cachear `apkc.wasm`/`wasm_exec.js`; nunca
-  `/android-jar`, keystores ni OPFS. `offline.js` lo registra solo por http(s). Las respuestas
-  cacheadas deben conservar COOP/COEP; `prueba-pestana.js` prueba la recarga offline.
+  `/android-jar`, keystores ni OPFS. Además pone **COOP/COEP en todas las respuestas del mismo
+  origen**, incluidas las de caché: es la única forma de aislar el origen en un host que no fija
+  cabeceras. `index.html` lo registra antes de los módulos y recarga una vez si no hay
+  `crossOriginIsolated`; la marca `apkc-coi-reintento` evita el bucle y un aviso dice cuándo el
+  navegador no lo consiguió. No borrar la marca al recargar. `offline.js` vuelve a registrarlo por
+  http(s) con la misma URL versionada. `prueba-pestana.js` prueba la recarga offline y, con
+  `SIN_CABECERAS=1`, la recarga del arranque.
 - **Nada fuera del origen.** Sin CDN, fuentes, telemetría ni runtimes de terceros. El favicon es
   un `data:` y el informe se descarga como `blob:`.
 - **`apkc build` clásico no corre en wasm.** `js` no tiene `fork/exec`; la interfaz no ofrece ese
@@ -170,12 +179,14 @@ los imports y no debe depender de ese puente.
 - Un binario de Go en wasm **no se reutiliza**: `hospedador.js` guarda los bytes y crea una
   instancia por comando. Un comando por vez, en cola; no hay tuberías.
 - Los ES modules no cargan por `file://`: la página muestra un aviso. Todo (Inicio, Editor,
-  OPFS y `apkc.wasm`) exige `servidor.js` o un host con COOP/COEP.
+  OPFS y `apkc.wasm`) exige `servidor.js` o un host estático donde el SW pueda poner COOP/COEP.
 
 ## Publicar
 
-`_headers` cubre Netlify y Cloudflare Pages. GitHub Pages no permite fijar COOP/COEP, así que
-allí el editor no arranca. El `android.jar` y el keystore no se versionan ni se empaquetan: la
+`_headers` cubre Netlify y Cloudflare Pages. **Surge no cubre cabeceras**, pero el `sw.js` de la
+propia página las pone y el sitio publicado funciona en `https://apkc-studio.surge.sh/`: eso sí,
+la primera visita se recarga una vez. GitHub Pages sí permite service workers, así que el mismo
+mecanismo sirve allí. El `android.jar` y el keystore no se versionan ni se empaquetan: la
 página los pide al SDK local (mismo origen) o al selector de fichero, y el paquete oficial de
 Google se descarga como navegación del usuario: el diálogo exige un acuse y los términos se aceptan en el sitio de Google, no aquí.
 
