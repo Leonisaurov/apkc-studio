@@ -201,6 +201,7 @@ async function conductor() {
       bytes: apk ? apk.length : 0,
       veredicto: document.getElementById("estado-verificacion").textContent,
       codigo: document.getElementById("ultimo-codigo").textContent,
+      consola: String(document.getElementById("consola-pestana").textContent).slice(-500),
     };
   })()`);
   comprueba("compila y firma entero en el sitio estático",

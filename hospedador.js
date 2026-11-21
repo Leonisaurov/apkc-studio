@@ -143,9 +143,23 @@ async function ejecutar(argv, env) {
   };
 
   if (!bytesModule) {
-    const respuesta = await fetch("/apkc.wasm");
-    if (!respuesta.ok) throw new Error("apkc.wasm no está servido (levanta servidor.js con APKC_WASM)");
-    bytesModule = new Uint8Array(await respuesta.arrayBuffer());
+    // El paquete publicado sirve apkc.wasm.gz (3,4 MB frente a 12,8 MB) y se descomprime en el
+    // navegador con DecompressionStream; si no está o no existe la API, cae al .wasm sin comprimir.
+    // Ambos caminos son del mismo origen (regla 4).
+    let bytes = null;
+    if (typeof DecompressionStream === "function") {
+      const comprimido = await fetch("/apkc.wasm.gz");
+      if (comprimido.ok && comprimido.body) {
+        const llano = comprimido.body.pipeThrough(new DecompressionStream("gzip"));
+        bytes = new Uint8Array(await new Response(llano).arrayBuffer());
+      }
+    }
+    if (!bytes) {
+      const respuesta = await fetch("/apkc.wasm");
+      if (!respuesta.ok) throw new Error("apkc.wasm no está servido (levanta servidor.js con APKC_WASM)");
+      bytes = new Uint8Array(await respuesta.arrayBuffer());
+    }
+    bytesModule = bytes;
   }
   // la instancia se crea CADA VEZ: un binario de Go en wasm no puede volver a correrse sobre la
   // misma instancia después de salir, así que lo que se guarda son los bytes, no la instancia
