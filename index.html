@@ -29,10 +29,9 @@
     var CLAVE = "apkc-coi-reintento";
     var yaRecargo = false;
     try { yaRecargo = sessionStorage.getItem(CLAVE) === "1"; } catch (e) { /* */ }
-    if (crossOriginIsolated) {
-      try { sessionStorage.removeItem(CLAVE); } catch (e) { /* */ }
-      return;
-    }
+    // No se borra la marca al recargar: es la prueba de que este origen ya pasó por el SW. Si el
+    // navegador no la respetara, el aviso de abajo lo dice en vez de recargar en bucle.
+    if (crossOriginIsolated) return;
     if (yaRecargo) {
       document.addEventListener("DOMContentLoaded", function () {
         var aviso = document.createElement("p");
