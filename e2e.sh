@@ -192,7 +192,13 @@ variancia() { # $1 nombre, $2 kotlin (0/1)
     rm -f build/app.aab
     if ejecutar "$APKC" build --aab >"$TMP/studio-$nombre-aab.log" 2>&1; then
       if [ -f build/app.aab ]; then
-        bundletool_jar=$(ls "$HOME"/Android/bundletool/bundletool-*.jar 2>/dev/null | sort -V | tail -1)
+        bundletool_jar=${BUNDLETOOL_JAR:-}
+        if [ -z "$bundletool_jar" ]; then
+          for raiz in "${ANDROID_HOME:-$HOME/Android}" "$HOME/Android" "$HOME/opt/android-sdk"; do
+            bundletool_jar=$(ls "$raiz"/bundletool/bundletool-*.jar 2>/dev/null | sort -V | tail -1)
+            [ -n "$bundletool_jar" ] && break
+          done
+        fi
         if [ -n "$bundletool_jar" ]; then
           if ! "$JAVA" -jar "$bundletool_jar" validate --bundle build/app.aab >"$TMP/studio-$nombre-aab-validate.log" 2>&1; then
             falla "$nombre: bundletool no valida el .aab"; head -8 "$TMP/studio-$nombre-aab-validate.log"

@@ -14,7 +14,7 @@ const MIME = {
   ".html": "text/html; charset=utf-8", ".js": "text/javascript; charset=utf-8",
   ".css": "text/css; charset=utf-8", ".json": "application/json; charset=utf-8",
   ".wasm": "application/wasm", ".png": "image/png", ".svg": "image/svg+xml",
-  ".txt": "text/plain; charset=utf-8",
+  ".txt": "text/plain; charset=utf-8", ".jar": "application/java-archive",
 };
 
 const servidor = http.createServer((req, res) => {
@@ -25,8 +25,13 @@ const servidor = http.createServer((req, res) => {
   let ruta;
   try { ruta = decodeURIComponent((req.url || "/").split("?")[0]); }
   catch (e) { res.writeHead(400); return void res.end("URL mal formada\n"); }
-  const fichero = path.normalize(path.join(DIR, ruta === "/" ? "index.html" : ruta));
-  if (fichero !== DIR && !fichero.startsWith(DIR + path.sep)) {
+  let fichero = path.normalize(path.join(DIR, ruta === "/" ? "index.html" : ruta));
+  // Ruta SOLO de desarrollo para la prueba de Firefox: envía el android.jar del disco al mismo
+  // origen, igual que hace servidor.js en Chromium. El sitio publicado no la sirve.
+  if (ruta === "/android-jar" && process.env.ANDROID_JAR && fs.existsSync(process.env.ANDROID_JAR)) {
+    fichero = process.env.ANDROID_JAR;
+  }
+  if (fichero !== DIR && fichero !== process.env.ANDROID_JAR && !fichero.startsWith(DIR + path.sep)) {
     res.writeHead(403); return void res.end("fuera\n");
   }
   if (!fs.existsSync(fichero) || fs.statSync(fichero).isDirectory()) {
