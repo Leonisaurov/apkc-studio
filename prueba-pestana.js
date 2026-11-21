@@ -140,6 +140,18 @@ async function conductor() {
 
   comprueba("la página está aislada (OPFS sincrónico disponible)",
     await evaluar("crossOriginIsolated === true"));
+  if (process.env.SIN_CABECERAS) {
+    // Modo Surge: el servidor NO pone COOP/COEP. La única forma de llegar aquí es que el service
+    // worker los haya puesto y la página se haya recargado una vez por su cuenta.
+    const aislamiento = await evaluar(`({
+      recarga: sessionStorage.getItem("apkc-coi-reintento"),
+      controlado: !!navigator.serviceWorker.controller,
+      aislada: crossOriginIsolated
+    })`);
+    comprueba("sin cabeceras del servidor, la página se recargó sola y el SW la controla",
+      aislamiento.recarga === "1" && aislamiento.controlado === true && aislamiento.aislada === true,
+      JSON.stringify(aislamiento));
+  }
 
   // 1. crear el proyecto CON apkc dentro de la pestaña, desde cero: OPFS es por origen y una
   // sesión anterior puede haber dejado /proyecto, que entonces se traga el create

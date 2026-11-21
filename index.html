@@ -19,6 +19,41 @@
     });
   }
 </script>
+<script>
+  // Surge y GitHub Pages no dejan fijar COOP/COEP en el servidor. El service worker los pone en
+  // cada respuesta del mismo origen; mientras no controla la página, no hay crossOriginIsolated
+  // y el worker de OPFS no puede abrir handles sincrónicos. Registrar, esperar y recargar UNA vez.
+  (function () {
+    if (!("serviceWorker" in navigator)) return;
+    if (location.protocol !== "http:" && location.protocol !== "https:") return;
+    var CLAVE = "apkc-coi-reintento";
+    var yaRecargo = false;
+    try { yaRecargo = sessionStorage.getItem(CLAVE) === "1"; } catch (e) { /* */ }
+    if (crossOriginIsolated) {
+      try { sessionStorage.removeItem(CLAVE); } catch (e) { /* */ }
+      return;
+    }
+    if (yaRecargo) {
+      document.addEventListener("DOMContentLoaded", function () {
+        var aviso = document.createElement("p");
+        aviso.className = "sin-js";
+        aviso.textContent = "Este navegador no consiguió aislar el origen (COOP/COEP): apkc necesita crossOriginIsolated para usar OPFS. Prueba con Chromium o sirve la página con esas cabeceras.";
+        document.body.prepend(aviso);
+      });
+      return;
+    }
+    navigator.serviceWorker
+      .register("./sw.js?v=__APKC_VERSION__", { scope: "./", updateViaCache: "none" })
+      .then(function () { return navigator.serviceWorker.ready; })
+      .then(function () {
+        try { sessionStorage.setItem(CLAVE, "1"); } catch (e) { /* */ }
+        location.reload();
+      })
+      .catch(function (e) {
+        console.warn("no se pudo aislar el origen:", e && e.message ? e.message : e);
+      });
+  })();
+</script>
 <link rel="stylesheet" href="style.css">
 </head>
 <body data-vista="crear">

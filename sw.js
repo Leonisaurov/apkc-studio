@@ -1,9 +1,34 @@
-// Service worker de apkc studio: cachea el shell para recargar sin red. No cachea el jar del SDK,
-// los keystores ni el proyecto (OPFS no pasa por HTTP). El binario wasm y wasm_exec.js se intentan
-// cachear en la instalación; si el host no los sirve, se cachean la primera vez que se usan.
-const VERSION = "apkc-studio-v2";
+// Service worker de apkc studio: cachea el shell para recargar sin red y, en hosts que no dejan
+// fijar cabeceras de servidor (Surge, GitHub Pages), añade COOP/COEP a TODAS las respuestas del
+// mismo origen, incluidas las que salen de la caché y la navegación inicial. Sin esas dos
+// cabeceras no hay crossOriginIsolated, no hay createSyncAccessHandle y el fs que exige Go no
+// arranca. index.html registra este worker y se recarga una vez cuando la página no está aislada.
+const VERSION = "apkc-studio-__APKC_VERSION__";
 const CACHE = VERSION;
 
+const CABECERAS = {
+  "Cross-Origin-Opener-Policy": "same-origin",
+  "Cross-Origin-Embedder-Policy": "require-corp",
+  "X-Content-Type-Options": "nosniff",
+  "Referrer-Policy": "no-referrer",
+  "Permissions-Policy": "geolocation=(), microphone=(), camera=()",
+};
+
+// Las respuestas que vienen de Cache no traen las cabeceras que pusimos al guardarlas: se añaden
+// siempre al servir, no al cachear. Las peticiones de otro origen se descartan antes (no se pueden
+// reescribir respuestas opacas), y la página no hace ninguna (regla 4 del repo).
+function conCabeceras(respuesta) {
+  if (!respuesta) return respuesta;
+  const cabeceras = new Headers(respuesta.headers);
+  for (const [nombre, valor] of Object.entries(CABECERAS)) cabeceras.set(nombre, valor);
+  return new Response(respuesta.body, {
+    status: respuesta.status, statusText: respuesta.statusText, headers: cabeceras,
+  });
+}
+
+// No cachea el jar del SDK, los keystores ni el proyecto (OPFS no pasa por HTTP). El binario wasm
+// y wasm_exec.js sí se intentan cachear en la instalación; si el host no los sirve, se cachean la
+// primera vez que se usan.
 const SHELL = [
   "./", "./index.html", "./style.css", "./main.js", "./offline.js",
   "./app.js", "./historial.js", "./fusion.js", "./pestana.js", "./vistas.js",
@@ -52,23 +77,24 @@ self.addEventListener("fetch", (evento) => {
             const clave = peticion.mode === "navigate" ? "./index.html" : peticion;
             caches.open(CACHE).then((cache) => cache.put(clave, copia)).catch(() => {});
           }
-          return respuesta;
+          return conCabeceras(respuesta);
         })
         .catch(() => caches.match(peticion, { ignoreSearch: true })
-          .then((cacheada) => cacheada || caches.match("./index.html")))
+          .then((cacheada) => cacheada || caches.match("./index.html"))
+          .then((respuesta) => conCabeceras(respuesta)))
     );
     return;
   }
 
   evento.respondWith(
     caches.match(peticion, { ignoreSearch: true }).then((cacheada) => {
-      if (cacheada) return cacheada;
+      if (cacheada) return conCabeceras(cacheada);
       return fetch(peticion).then((respuesta) => {
         if (respuesta && respuesta.ok) {
           const copia = respuesta.clone();
           caches.open(CACHE).then((cache) => cache.put(peticion, copia)).catch(() => {});
         }
-        return respuesta;
+        return conCabeceras(respuesta);
       });
     })
   );

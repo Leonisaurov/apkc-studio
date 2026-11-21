@@ -20,6 +20,10 @@ import { execSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
 
 const AQUI = path.dirname(fileURLToPath(import.meta.url));
+// SITIO_DIR permite servir el paqueta empaquetado por tools/sitio.sh en vez del árbol de desarrollo.
+// SIN_CABECERAS=1 simula un host estático que no pone COOP/COEP (Surge): la página tiene que
+// conseguirlos ella sola con el service worker y una recarga.
+const RAIZ_SITIO = process.env.SITIO_DIR || AQUI;
 const PUERTO = Number(process.argv[2] || process.env.STUDIO_SERVIDOR_PORT || 8787);
 const WASM = process.env.APKC_WASM || "";
 let GOROOT = process.env.GOROOT || "";
@@ -75,12 +79,15 @@ if (!fs.existsSync(EJECUTA)) {
 }
 
 const servidor = http.createServer((req, res) => {
-  // el isolation es lo que abre OPFS (createSyncAccessHandle) y SharedArrayBuffer; sin estas
-  // dos cabeceras la página carga, el worker arranca y el fs se cae en el primer handle
-  res.setHeader("Cross-Origin-Opener-Policy", "same-origin");
-  res.setHeader("Cross-Origin-Embedder-Policy", "require-corp");
-  res.setHeader("X-Content-Type-Options", "nosniff");
-  res.setHeader("Referrer-Policy", "no-referrer");
+  // el aislamiento es lo que abre OPFS (createSyncAccessHandle); sin estas dos cabeceras la página
+  // carga, el worker arranca y el fs se cae en el primer handle. En modo SIN_CABECERAS se omiten
+  // a propósito para comprobar que el service worker de la propia página las pone.
+  if (!process.env.SIN_CABECERAS) {
+    res.setHeader("Cross-Origin-Opener-Policy", "same-origin");
+    res.setHeader("Cross-Origin-Embedder-Policy", "require-corp");
+    res.setHeader("X-Content-Type-Options", "nosniff");
+    res.setHeader("Referrer-Policy", "no-referrer");
+  }
   res.setHeader("Cache-Control", "no-store");
 
   if (req.method !== "GET" && req.method !== "HEAD") {
@@ -123,9 +130,9 @@ const servidor = http.createServer((req, res) => {
     }
     fichero = jar;                                          // el jar del SDK, por su origen: la pestaña no habla con nadie más
   } else {
-    const dentro = path.normalize(path.join(AQUI, ruta === "/" ? "index.html" : ruta));
-    // startsWith(AQUI) dejaría pasar un hermano como /studio-viejo; con el separador, no
-    if (dentro !== AQUI && !dentro.startsWith(AQUI + path.sep)) {
+    const dentro = path.normalize(path.join(RAIZ_SITIO, ruta === "/" ? "index.html" : ruta));
+    // startsWith(RAIZ_SITIO) dejaría pasar un hermano como /studio-viejo; con el separador, no
+    if (dentro !== RAIZ_SITIO && !dentro.startsWith(RAIZ_SITIO + path.sep)) {
       res.writeHead(403); return void res.end("fuera\n");
     }
     if (!fs.existsSync(dentro) || fs.statSync(dentro).isDirectory()) {

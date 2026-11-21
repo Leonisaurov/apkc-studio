@@ -1,4 +1,4 @@
-#!/data/data/com.termux/files/usr/bin/sh
+#!/bin/sh
 # punta a punta de la página: lo que apkc-studio genera tiene que compilar, firmar y verificar
 # con las herramientas de build-tools, no solo pasar el test de node. Sin esto, la página se
 # cree buena porque su propio test usa las mismas suposiciones que el código probado.
