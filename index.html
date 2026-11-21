@@ -26,14 +26,21 @@
   (function () {
     if (!("serviceWorker" in navigator)) return;
     if (location.protocol !== "http:" && location.protocol !== "https:") return;
+    // La primera carga se recarga sola. Ocultar el cuerpo mientras tanto evita el destello de una
+    // interfaz que todavía no puede usar OPFS; el velo vive en html, que ya existe aquí.
+    document.documentElement.classList.add("apkc-aislando");
     var CLAVE = "apkc-coi-reintento";
     var yaRecargo = false;
     try { yaRecargo = sessionStorage.getItem(CLAVE) === "1"; } catch (e) { /* */ }
     // No se borra la marca al recargar: es la prueba de que este origen ya pasó por el SW. Si el
     // navegador no la respetara, el aviso de abajo lo dice en vez de recargar en bucle.
-    if (crossOriginIsolated) return;
+    if (crossOriginIsolated) {
+      document.documentElement.classList.remove("apkc-aislando");
+      return;
+    }
     if (yaRecargo) {
       document.addEventListener("DOMContentLoaded", function () {
+        document.documentElement.classList.remove("apkc-aislando");
         var aviso = document.createElement("p");
         aviso.className = "sin-js";
         aviso.textContent = "Este navegador no consiguió aislar el origen (COOP/COEP): apkc necesita crossOriginIsolated para usar OPFS. Prueba con Chromium o sirve la página con esas cabeceras.";
@@ -49,6 +56,7 @@
         location.reload();
       })
       .catch(function (e) {
+        document.documentElement.classList.remove("apkc-aislando");
         console.warn("no se pudo aislar el origen:", e && e.message ? e.message : e);
       });
   })();

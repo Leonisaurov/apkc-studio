@@ -3,6 +3,17 @@
    pestañas, editor, panel inferior y barra de estado. Los ids y las clases que usan
    app.js, pestana.js y las pruebas no cambian. */
 
+/* Mientras el service worker consigue COOP/COEP y la página se recarga, se muestra este velo
+   en vez de una interfaz que aún no puede abrir OPFS. index.html quita la clase al aislarse. */
+html.apkc-aislando body { visibility: hidden; }
+html.apkc-aislando::after {
+  content: "Preparando el navegador…";
+  position: fixed; inset: 0; z-index: 9999;
+  display: grid; place-items: center;
+  background: var(--fondo, #1e1e1e); color: var(--tenue, #858585);
+  font: 14px/1.4 system-ui, sans-serif;
+}
+
 :root {
   color-scheme: dark;
   --fondo: #1e1e1e;
