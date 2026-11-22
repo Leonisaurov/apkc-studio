@@ -268,6 +268,14 @@ self.onmessage = async (evento) => {
       // null y que la página viera ficheros vacíos
       return void postMessage({ id: m.id, tipo: "contenido", ruta: m.ruta, bytes: r || null });
     }
+    if (m.tipo === "rango") {
+      const r = await enCola(() => sistema.rango(m.ruta, m.desde, m.largo));
+      if (!r || r.ok === false) {
+        return void postMessage({ id: m.id, tipo: "error", error: (r && r.error) || "no se pudo leer el rango" });
+      }
+      // solo el trozo pedido, más el tamaño total: el autocompletado del android.jar no copia 50 MB
+      return void postMessage({ id: m.id, tipo: "rango", ruta: m.ruta, bytes: r.bytes, tamano: r.tamano });
+    }
     if (m.tipo === "cwd") {               // apkc build no recibe ruta: trabaja donde esté el proceso
       try { sistema.chdir(m.ruta); } catch (e) { return void postMessage({ id: m.id, tipo: "error", error: String(e && e.message || e) }); }
       return void postMessage({ id: m.id, tipo: "cwd", ruta: sistema.cwd() });

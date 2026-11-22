@@ -1034,6 +1034,58 @@ pre {
   opacity: .9;
 }
 
+/* La caja del autocompletado vive sobre el textarea, como la capa del subrayado: por eso está
+   dentro de `.capas`, que es `position: relative`. Sin colores a mano: todo sale de las variables. */
+.autocompletado {
+  position: absolute;
+  z-index: 4;
+  min-width: 14rem;
+  max-width: 26rem;
+  background: var(--fondo);
+  border: 1px solid var(--borde);
+  box-shadow: 0 6px 18px rgba(0, 0, 0, .35);
+}
+.autocompletado[hidden] { display: none; }
+.autocompletado-lista {
+  margin: 0;
+  padding: 4px 0;
+  list-style: none;
+  max-height: 12rem;
+  overflow: auto;
+}
+.autocompletado-opcion {
+  display: flex;
+  gap: 10px;
+  justify-content: space-between;
+  align-items: baseline;
+  width: 100%;
+  padding: 2px 10px;
+  border: 0;
+  background: none;
+  color: var(--texto);
+  font: var(--ed-fuente);
+  text-align: left;
+  cursor: pointer;
+}
+.autocompletado-opcion.activa { background: var(--boton-hover); }
+.autocompletado-opcion code { font: var(--ed-fuente); color: var(--texto); }
+.autocompletado-pista {
+  color: var(--texto-tenue);
+  font-size: 11px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.autocompletado-estado {
+  padding: 3px 10px;
+  border-top: 1px solid var(--borde);
+  color: var(--texto-tenue);
+  font-size: 11px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
 /* ---- panel inferior ------------------------------------------------------- */
 
 .panel-inferior {

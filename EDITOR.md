@@ -386,6 +386,81 @@ de un IME. La selección del textarea usa un azul con alfa (`rgba(38, 79, 120, .
 texto del `<pre>` se siga leyendo mientras se selecciona. `#estado-cursor` muestra `Ln`/`Col` en
 la barra de estado y se actualiza al teclear, al hacer clic y con `selectionchange`.
 
+### Autocompletado
+
+`autocompletado.js` completa **recursos del proyecto** y **nombres de API del `android.jar`** sin
+salir del origen. Se abre al teclear y solo actúa en ficheros `.java`; en XML o texto no toca Tab.
+
+| Id | Papel |
+| --- | --- |
+| `#autocompletado` | la caja flotante (`hidden` hasta que hay algo que enseñar), hermana de `#codigo` dentro de `.capas` |
+| `#autocompletado-lista` | `role="listbox"`; cada opción es un `<button role="option">` con id `autocompletado-opcion-<i>` y `aria-selected` |
+| `#autocompletado-estado` | `role="status"`: cuántas sugerencias hay, de dónde salen o qué falta (`android.jar`), y el recordatorio de Tab/Esc |
+
+- **Recursos.** `R.` ofrece los tipos declarados; `R.layout.` (o `R.string.`, `R.id.`…) sus
+  nombres. Salen de `res/values*/*.xml` (etiquetas con `name`, incluido `<item type="id">`), de
+  los ficheros de `res/layout`, `drawable`, `mipmap`, `menu`, `xml`, `raw`, `anim`, `color`,
+  `font`… (con calificadores y `.9.png`), de los `@+id/` de los XML y de la `R.java` que deja el
+  build en `src/<package>/R.java`. El barrido se guarda; editar un fichero de `res/` o la `R.java`
+  lo invalida tras una pausa de 800 ms (no se barre por cada pulsación).
+- **API.** Al escribir una clase con mayúscula (`Acti`) se completan las clases del índice del
+  jar; con `View.` se listan sus métodos públicos, leídos del `.class` bajo demanda. Del jar **no
+  se descarga ni se copia nada**: `hospedador.rango` pide el final del fichero (EOCD), después el
+  directorio central y, solo al abrir una clase, su entrada comprimida
+  (`DecompressionStream("deflate-raw")`). Todo sale de `/sdk/android.jar` en OPFS. Sin jar, los
+  recursos funcionan igual y el estado dice con claridad que falta el jar.
+- **Teclado.** `Tab` acepta la opción resaltada, `Esc` cierra y `↑`/`↓` recorren. El manejador
+  está en captura sobre `#codigo` y corta la propagación: con la lista abierta, `Tab` no indenta
+  y `Shift+Tab` sigue desindentando. No toca `Ctrl+S`, `Ctrl+F`, `Ctrl+H`, `Ctrl+P`, `Ctrl+G`,
+  `Ctrl+Mayús+P` ni ``Ctrl + ` ``.
+- **Undo tree.** Aceptar es un solo `EDITOR.cambiar(desde, hasta, texto, selección)`: la
+  inserción entra en el deshacer nativo y el documento queda sucio una vez. No se escribe
+  `value` a mano.
+- **Diagnóstico en vivo.** Mover la lista o cerrarla no dispara `apkc check`; aceptar produce un
+  solo cambio, no uno por letra de la sugerencia.
+- **Fronteras.** El contexto no se detecta dentro de un bloque `/* … */` de varias líneas (sí en
+  `//` y en cadenas). Dos clases del jar con el mismo nombre simple resuelven a la de `android.*`.
+  La lista se corta en 50 opciones y lo dice. `Tab` con la lista vacía (solo el aviso del jar)
+  sigue siendo la sangría del editor.
+
+### Autocompletado
+
+`autocompletado.js` abre una lista con lo que se puede escribir tras un punto, sin red y sin
+dependencias. Los datos salen de dos sitios que ya están en el propio origen:
+
+- **el proyecto**: `res/` (los nombres de fichero dan `R.layout`, `R.drawable`…; los `<string>`,
+  `<color>`, `<style>`… de `res/values` y los `@+id/` de los layouts dan los nombres) y la
+  `R.java` que dejó el build, si está. Los tipos y los nombres se recalculan con
+  `AUTOCOMPLETADO.refrescar()` o al recargar la página.
+- **el `android.jar` de OPFS**: las clases salen de su **directorio central** y los métodos, del
+  `.class` de la clase que se está completando, descomprimido en la página con `deflate-raw`. El jar
+  no se baja ni se copia: se leen por rango su cola (EOCD) y su directorio central —1,35 MB de los
+  26,3 MB del jar en la medición del §200— y, para los métodos, una entrada.
+
+Ids y contrato:
+
+| Id / selector | Papel |
+| --- | --- |
+| `#autocompletado` | la caja; `hidden` cuando no hay nada que sugerir. Se coloca bajo la línea del cursor |
+| `#autocompletado-lista` | las opciones, una por `<li>` con un `<button class="autocompletado-opcion">` |
+| `#autocompletado-opcion-N` | id de cada opción (0, 1, 2…), con la clase `activa` en la resaltada y `aria-selected` |
+| `#autocompletado-estado` | de dónde salen: `recursos del proyecto · N tipos`, `R.layout · N nombres`, `clases del android.jar · N`, `métodos de android.view.View · N` |
+
+Cada opción pinta el texto a completar en un `<code>` (primer hijo) y una pista al lado (el número de
+nombres, la ruta de la clase o el descriptor). `window.AUTOCOMPLETADO` expone `refrescar()`,
+`recursos()`, `cargarJar()` y `textoSinJar()` para las pruebas por CDP y la consola de desarrollo; no
+es la fuente de verdad del módulo.
+
+Teclado: `Ctrl+Espacio` abre la lista; `↑`/`↓` recorren, `Tab`/`Enter` aceptan (el cambio pasa por
+`EDITOR.cambiar`, así que entra en el deshacer) y `Esc` cierra sin tocar el texto. Con la lista
+abierta, las demás teclas pasan de largo: `Ctrl+Mayús+P` abre la paleta y `Ctrl+G` pide la línea.
+El detector de contexto, el lector del zip y el del `.class` están en `autocompletado-datos.js`, que
+es puro y se prueba en `prueba.js`.
+
+Límites escritos: no hay completado tras una variable (`v.`, `this.`) porque haría falta saber su
+tipo; un comentario de bloque de varias líneas no se detecta (solo los de línea y las cadenas); y un
+recurso creado después de la primera lectura no aparece hasta `refrescar()` o recargar.
+
 ### Estado del fichero
 
 - `#fichero-abierto` muestra la ruta **relativa** a `/proyecto`; su `title` guarda la ruta
@@ -529,11 +604,11 @@ En `@media (max-width: 760px)`:
 
 | Comando | Que cubre |
 | --- | --- |
-| `node studio/prueba.js` | genera el zip, comprueba EOCD, plantillas, reglas, ids de `index.html` (también los de `diagnostico.js`, `temas.js` e `historial.js`), el resaltador puro y el undo tree (ramas, reconstrucción y poda) |
+| `node studio/prueba.js` | genera el zip, comprueba EOCD, plantillas, reglas, ids de `index.html` (también los de `diagnostico.js`, `temas.js`, `historial.js` y `autocompletado.js`), el resaltador puro, el undo tree (ramas, reconstrucción y poda) y los datos del autocompletado (recursos, R.java, contexto y lector de zip/.class) |
 | `node studio/prueba-navegador.js` | `http` sin COOP/COEP: DOM, tres vistas, tres botones de actividad, reflejo del nombre/package, aviso de que no hay OPFS, localStorage, el diagnóstico, los temas y la paleta ANSI |
 | `APKC_WASM=... node studio/prueba-crear.js` | por http con OPFS: crear, escribir el proyecto, abrir el manifiesto, comprobar `data-ruta` del arbol, el icono, API 34, el árbol cerrado con sus botones, que `build/` se vea como generado y que el filtro conserve las carpetas, subir un archivo, moverlo de carpeta, exportar/importar el `.zip` (con binario), leer y guardar los ajustes en el manifiesto, varias pestañas, la persistencia tras recargar, el undo tree con ramas/IndexedDB, dos ventanas que se pasan guardados por BroadcastChannel y la fusión/conflicto de la misma línea |
-| `APKC_WASM=... APK_EJEMPLO=... KS_EJEMPLO=... ANDROID_JAR=... node studio/prueba-pestana.js` | 94 comprobaciones: editar, guardar, recargar, resaltar, números de línea, scroll de las tres capas, Tab/Shift+Tab/Enter con deshacer, jar del SDK local, `.zip` oficial con sus términos, compilar debug sin keystore, barra de descargas con descarga real, consola con colores ANSI, menú de fichero, renombrar/borrar, pantalla de carga, firmar, compilar release, verificar, recargar sin red, no pedir nada fuera del origen, la salida por trozos, el enlace `ruta:línea`, Detener y la fase en la barra |
-| `APKC=... APKC_WASM=... sh studio/e2e.sh` | todo lo anterior más los apk/aab nativos y la plantilla Contador; en la pestaña, 94 comprobaciones |
+| `APKC_WASM=... APK_EJEMPLO=... KS_EJEMPLO=... ANDROID_JAR=... node studio/prueba-pestana.js` | 115 comprobaciones: editar, guardar, recargar, resaltar, números de línea, scroll de las tres capas, Tab/Shift+Tab/Enter con deshacer, jar del SDK local, `.zip` oficial con sus términos, compilar debug sin keystore, barra de descargas con descarga real, consola con colores ANSI, menú de fichero, renombrar/borrar, pantalla de carga, firmar, compilar release, verificar, recargar sin red, no pedir nada fuera del origen, el autocompletado (recursos, jar por trozos, Tab/Esc/flechas y aviso sin jar), la salida por trozos, el enlace `ruta:línea`, Detener y la fase en la barra |
+| `APKC=... APKC_WASM=... sh studio/e2e.sh` | todo lo anterior más los apk/aab nativos y la plantilla Contador; en la pestaña, 115 comprobaciones |
 
 El gate completo de la pagina es `e2e.sh`; `prueba-pestana.js` solo no basta para decir que la
 pagina funciona. Los comandos de entorno estan en `tools/entorno.sh` (`test`, `wasm`, `gate`).
@@ -556,6 +631,9 @@ estan en `studio/README.md` y en `docs/evidencia.md` §140. En resumen: se copia
   subir archivos: se suben con el botón del explorador o el menú de la carpeta.
 - **Sin autosave.** El guardado es explicito (`Ctrl+S` o el boton).
 - **Sin plegado de codigo, minimapa, multicursor ni diff.**
+- **El autocompletado no es un LSP.** Completa recursos y nombres de clases/métodos del
+  `android.jar`; no conoce el tipo de una variable local (para `View` hay que escribir la
+  clase, no la variable) ni los campos, y no completa dentro de un bloque `/* … */`.
 - **El resaltado es lexico.** No entiende de tipos, scopes ni errores; no sustituye a un LSP.
 - **La indentacion automatica solo mira `{`.** No conoce `switch`, `try` ni el estilo de cada
   fichero.

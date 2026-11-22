@@ -291,6 +291,12 @@
             <div class="capas">
               <pre id="resalto" class="resalto" aria-hidden="true"></pre>
               <div id="diagnostico-marcas" class="diagnostico-marcas" aria-hidden="true"></div>
+              <div id="autocompletado" class="autocompletado" hidden>
+                <ul id="autocompletado-lista" class="autocompletado-lista" role="listbox"
+                    aria-label="Sugerencias del editor"></ul>
+                <div id="autocompletado-estado" class="autocompletado-estado" role="status"
+                     aria-live="polite"></div>
+              </div>
               <textarea id="codigo" spellcheck="false" wrap="off" autocomplete="off"
                         autocapitalize="off" autocorrect="off" aria-label="Código del fichero"
                         placeholder="Abre un fichero del explorador o crea un proyecto en Inicio."></textarea>
