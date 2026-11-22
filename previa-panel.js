@@ -23,7 +23,9 @@
 //
 // Sobre la lectura «Vista previa» hay un modo **editar** (lápiz): añade nodos, los reordena en un
 // LinearLayout o les fija márgenes en un marco, escribiendo el XML del editor con
-// `layout-editor.js` (puro). El panel sigue sin tocar el documento: se lo pide a `EDITOR.cambiar`.
+// `layout-editor.js` (puro). La paleta y la ficha de propiedades son capas flotantes sobre el
+// dibujo: no comprimen el canvas. Un tipo se puede arrastrar desde la paleta al punto donde se
+// suelta. El panel sigue sin tocar el documento: se lo pide a `EDITOR.cambiar`.
 //
 // Funciones puras, probadas en node (`prueba.js`): `medidaValida`, `anchoValido`,
 // `cajaRedimensionada`, `esRutaDeLayout`, `candidatosDeLayout`, `resumenEjecucion`,
@@ -37,6 +39,7 @@ import { modeloDeLayout, decodificarEntidades, paddingDe, esLineal, atributoLoca
 import {
   insertarElemento, moverEnMarco, reordenarHijo, borrarElemento,
   leerPropiedades, escribirPropiedad, tiposRaizDisponibles, cambiarTipoRaiz,
+  infoTipo,
 } from "./layout-editor.js";
 
 // Persistencia de la vista dividida. Son preferencias de esta ventana, no del proyecto.
@@ -377,6 +380,11 @@ export function crearPreviaPanel({ hospedador, proyecto, estadoPestana, editor }
   let editando = false;
   let seleccion = null;
   let arrastreNodo = null;
+  // el arrastre de un tipo DESDE la paleta es otro gesto: no mueve un nodo, crea uno donde se
+  // suelta. `suprimirClicPaleta` evita que el clic que sigue al soltar añada además al final.
+  let arrastrePaleta = null;
+  // marca de tiempo del último arrastre soltado: si llega su clic en 600 ms, no añade otro nodo
+  let suprimirClicPaleta = 0;
   let notaEdicion = "";
   // La ficha de propiedades se reconstruye solo cuando cambia el nodo; mientras se teclea se
   // actualizan los valores de los campos que no tienen el foco.
@@ -1393,7 +1401,7 @@ export function crearPreviaPanel({ hospedador, proyecto, estadoPestana, editor }
     if (paleta) paleta.hidden = !editando;
     if (!conDocumento()) return;
     const puede = puedeEditar();
-    for (const boton of document.querySelectorAll("#previa-paleta button")) boton.disabled = !puede;
+    for (const boton of document.querySelectorAll("#previa-paleta button[data-tipo]")) boton.disabled = !puede;
   }
 
   // Aplica el XML nuevo al buffer. `editor.cambiar` devuelve el foco al textarea: en modo editar
@@ -1436,6 +1444,174 @@ export function crearPreviaPanel({ hospedador, proyecto, estadoPestana, editor }
     seleccion = r.ruta;
     notaEdicion = "";
     return aplicarXml(r.xml, "Añadido " + tipo + (r.id ? " (id/" + r.id + ")" : "") + ".");
+  }
+
+  // --- soltar un tipo de la paleta en el dibujo ----------------------------------------------
+  // El clic añade al final (rápido y con teclado); arrastrar coloca donde se suelta: en un marco
+  // con márgenes y en un lineal en la posición que marca el punto. Nada se escribe hasta soltar.
+  const UMBRAL_PALETA = 5;
+
+  function esContenedorNodo(nodo) {
+    const info = nodo ? infoTipo(String(nodo.tipo || "")) : null;
+    return !!(info && info.contenedor);
+  }
+
+  function hijosDelModelo(nodo) {
+    return (nodo && Array.isArray(nodo.hijos) ? nodo.hijos : []).filter((h) => h && h.tipo);
+  }
+
+  // El contenedor más profundo bajo el punto: si se suelta sobre una vista, su padre; si sobre un
+  // marco o un lineal, ese mismo. La raíz siempre vale.
+  function contenedorEn(modelo, x, y) {
+    let ruta = [];
+    const golpe = golpeEn(modelo, x, y);
+    if (golpe) ruta = golpe.ruta.slice();
+    while (ruta.length) {
+      const nodo = nodoPorRuta(modelo.raiz, ruta);
+      if (esContenedorNodo(nodo)) return { ruta, nodo };
+      ruta = ruta.slice(0, -1);
+    }
+    return esContenedorNodo(modelo.raiz) ? { ruta: [], nodo: modelo.raiz } : null;
+  }
+
+  function anadirEn(tipo, x, y) {
+    const motivo = motivoNoEditable();
+    if (motivo) { avisarEdicion(motivo); return false; }
+    const modelo = modeloVivo;
+    if (!modelo) { avisarEdicion("No hay un layout dibujado sobre el que soltar."); return false; }
+    const destino = contenedorEn(modelo, x, y);
+    if (!destino) { avisarEdicion("La raíz no admite hijos: elige un contenedor."); return false; }
+    const padre = destino.nodo;
+    const opciones = { tipo, padre: destino.ruta };
+    if (esLineal(padre.tipo)) {
+      // un lineal coloca en orden: el punto decide entre qué hermanos entra
+      const vertical = atributoLocal(padre.atributos, "orientation") !== "horizontal";
+      const pos = vertical ? y : x;
+      let indice = 0;
+      for (const hijo of hijosDelModelo(padre)) {
+        const r = hijo.rect;
+        if (!r || !Number.isFinite(r.x)) continue;
+        const centro = vertical ? r.y + r.alto / 2 : r.x + r.ancho / 2;
+        if (centro < pos) indice++;
+      }
+      opciones.indice = indice;
+    } else {
+      // un marco coloca con márgenes: el punto donde se suelta, respecto al contenido del padre
+      const pad = paddingDe(padre);
+      opciones.indice = hijosDelModelo(padre).length;
+      opciones.margen = {
+        izquierda: Math.max(0, x - (padre.rect.x + pad.izq)),
+        arriba: Math.max(0, y - (padre.rect.y + pad.arriba)),
+      };
+    }
+    const r = insertarElemento(String(editor.texto()), opciones);
+    if (!r.ok) { avisarEdicion("No se pudo añadir: " + r.error); return false; }
+    seleccion = r.ruta;
+    notaEdicion = "";
+    return aplicarXml(r.xml, "Añadido " + tipo + (r.id ? " (id/" + r.id + ")" : "") +
+      (destino.ruta.length ? " dentro de " + etiquetaDe(padre) : "") + ".");
+  }
+
+  function fantasmaDePaleta(tipo) {
+    if (!conDocumento()) return null;
+    const caja = document.createElement("div");
+    caja.className = "previa-arrastre-fantasma";
+    caja.textContent = String(tipo);
+    caja.setAttribute("aria-hidden", "true");
+    document.body.appendChild(caja);
+    return caja;
+  }
+
+  function moverFantasma(fantasma, x, y) {
+    if (!fantasma) return;
+    fantasma.style.left = Math.round(x) + "px";
+    fantasma.style.top = Math.round(y) + "px";
+  }
+
+  function estaSobreCanvas(clientX, clientY) {
+    const canvas = canvasVivo();
+    if (!canvas) return false;
+    const r = canvas.getBoundingClientRect();
+    return clientX >= r.left && clientX <= r.right && clientY >= r.top && clientY <= r.bottom;
+  }
+
+  function limpiarArrastrePaleta(a) {
+    if (a && a.fantasma && a.fantasma.parentNode) a.fantasma.parentNode.removeChild(a.fantasma);
+    if (a && a.boton) a.boton.classList.remove("arrastrando");
+    if (conDocumento()) document.body.classList.remove("arrastrando-paleta");
+    const canvas = canvasVivo();
+    if (canvas) canvas.classList.remove("previa-canvas-recibiendo");
+  }
+
+  function soltarPaleta(tipo, clientX, clientY) {
+    const canvas = canvasVivo();
+    const modelo = modeloVivo;
+    if (!canvas || !modelo) {
+      avisarEdicion("No hay un layout dibujado sobre el que soltar.");
+      return false;
+    }
+    if (!estaSobreCanvas(clientX, clientY)) {
+      avisarEdicion("Suelta " + tipo + " sobre el dibujo del layout.");
+      return false;
+    }
+    const p = puntoModelo(canvas, modelo, { clientX, clientY });
+    if (!p) return false;
+    return anadirEn(tipo, p.x, p.y);
+  }
+
+  // Un solo gesto con puntero: se distingue del clic por el umbral. El fantasma, la marca del
+  // canvas y la clase del botón son la realimentación; el documento solo cambia al soltar.
+  function conectarPaletaArrastre() {
+    const paleta = document.getElementById("previa-paleta");
+    if (!paleta) return;
+    paleta.addEventListener("click", (e) => {
+      // el clic que acompaña a un arrastre no añade además al final
+      if (!suprimirClicPaleta || Date.now() - suprimirClicPaleta > 600) return;
+      suprimirClicPaleta = 0;
+      e.preventDefault();
+      e.stopPropagation();
+    }, true);
+    paleta.addEventListener("pointerdown", (e) => {
+      if (!editando || (typeof e.button === "number" && e.button !== 0)) return;
+      const boton = e.target && typeof e.target.closest === "function"
+        ? e.target.closest("button[data-tipo]") : null;
+      if (!boton || boton.disabled) return;
+      const motivo = motivoNoEditable();
+      if (motivo) { avisarEdicion(motivo); return; }
+      arrastrePaleta = {
+        tipo: boton.dataset.tipo, boton, x0: e.clientX, y0: e.clientY, activo: false, fantasma: null,
+      };
+    });
+    document.addEventListener("pointermove", (e) => {
+      if (!arrastrePaleta) return;
+      if (!arrastrePaleta.activo) {
+        if (Math.abs(e.clientX - arrastrePaleta.x0) < UMBRAL_PALETA &&
+            Math.abs(e.clientY - arrastrePaleta.y0) < UMBRAL_PALETA) return;
+        arrastrePaleta.activo = true;
+        arrastrePaleta.fantasma = fantasmaDePaleta(arrastrePaleta.tipo);
+        arrastrePaleta.boton.classList.add("arrastrando");
+        document.body.classList.add("arrastrando-paleta");
+        try { arrastrePaleta.boton.setPointerCapture(e.pointerId); } catch (err) { /* puntero sintético */ }
+      }
+      moverFantasma(arrastrePaleta.fantasma, e.clientX, e.clientY);
+      const canvas = canvasVivo();
+      if (canvas) canvas.classList.toggle("previa-canvas-recibiendo", estaSobreCanvas(e.clientX, e.clientY));
+      e.preventDefault();
+    });
+    document.addEventListener("pointerup", (e) => {
+      if (!arrastrePaleta) return;
+      const a = arrastrePaleta;
+      arrastrePaleta = null;
+      limpiarArrastrePaleta(a);
+      if (!a.activo) return; // fue un clic: lo atiende el manejador del botón
+      suprimirClicPaleta = Date.now();
+      soltarPaleta(a.tipo, e.clientX, e.clientY);
+    });
+    document.addEventListener("pointercancel", () => {
+      if (!arrastrePaleta) return;
+      limpiarArrastrePaleta(arrastrePaleta);
+      arrastrePaleta = null;
+    });
   }
 
   function borrarSeleccion() {
@@ -1582,31 +1758,28 @@ export function crearPreviaPanel({ hospedador, proyecto, estadoPestana, editor }
   function actualizarPropiedades(force) {
     const seccion = el("previa-propiedades");
     if (!seccion) return;
-    seccion.hidden = !editando;
     const campos = el("previa-propiedades-campos");
     const titulo = el("previa-propiedades-titulo");
     const vacio = el("previa-propiedades-vacio");
     if (!campos) return;
-    if (!editando) {
-      campos.replaceChildren();
-      clavePropiedades = "";
-      if (vacio) vacio.hidden = false;
-      return;
-    }
-    const nodo = modeloVivo && seleccion ? nodoPorRuta(modeloVivo.raiz, seleccion) : null;
-    const raiz = !!nodo && seleccion.length === 0;
-    if (titulo) {
-      titulo.textContent = nodo
-        ? (raiz ? "Propiedades del layout raíz (" + etiquetaDe(nodo) + ")"
-          : "Propiedades de " + etiquetaDe(nodo))
-        : "Propiedades";
-    }
-    if (vacio) vacio.hidden = !!nodo;
+    const nodo = editando && modeloVivo && seleccion ? nodoPorRuta(modeloVivo.raiz, seleccion) : null;
+    // La ficha es del nodo seleccionado: aparece al seleccionarlo y desaparece al soltarlo (Esc, el
+    // botón de cerrar o un clic en el hueco). No ocupa sitio: es una capa sobre el dibujo.
+    seccion.hidden = !nodo;
     if (!nodo) {
       campos.replaceChildren();
       clavePropiedades = "";
+      if (vacio) vacio.hidden = true;
+      if (titulo) titulo.textContent = "Propiedades";
       return;
     }
+    const raiz = seleccion.length === 0;
+    if (titulo) {
+      titulo.textContent = raiz
+        ? "Propiedades del layout raíz (" + etiquetaDe(nodo) + ")"
+        : "Propiedades de " + etiquetaDe(nodo);
+    }
+    if (vacio) vacio.hidden = true;
     const texto = editor && typeof editor.texto === "function" ? String(editor.texto()) : "";
     const leido = leerPropiedades(texto, seleccion);
     if (!leido.ok) {
@@ -1820,9 +1993,10 @@ export function crearPreviaPanel({ hospedador, proyecto, estadoPestana, editor }
     document.addEventListener("pointercancel", () => { arrastreNodo = null; });
   }
 
-  // Supr borra y Esc suelta, solo con el modo editar y una selección. Se ignoran los campos de
-  // texto y cualquier combinación con Ctrl/Alt/Meta: el autocompletado, `Ctrl+Mayús+P`, `Ctrl+G` y
-  // la búsqueda siguen siendo del editor.
+  // Supr borra y Esc suelta, solo con el modo editar y una selección. Esc también cierra la ficha
+  // desde dentro de un campo (es un panel superpuesto, no una columna). Se ignoran las
+  // combinaciones con Ctrl/Alt/Meta: el autocompletado, `Ctrl+Mayús+P`, `Ctrl+G` y la búsqueda
+  // siguen siendo del editor.
   function conectarTecladoEditable() {
     document.addEventListener("keydown", (e) => {
       if (!editando || !seleccion) return;
@@ -1830,13 +2004,24 @@ export function crearPreviaPanel({ hospedador, proyecto, estadoPestana, editor }
       const destino = e.target;
       const esCampo = destino && (destino.tagName === "TEXTAREA" || destino.tagName === "INPUT" ||
         destino.tagName === "SELECT" || destino.isContentEditable);
+      const enFicha = destino && typeof destino.closest === "function" &&
+        !!destino.closest("#previa-propiedades");
+      if (e.key === "Escape") {
+        // en la ficha sí cierra; en los demás campos, Esc es de su dueño (búsqueda, paleta de
+        // comandos, autocompletado) y no se toca
+        if (esCampo && !enFicha) return;
+        e.preventDefault();
+        seleccionar(null);
+        if (esCampo) {
+          const canvas = canvasVivo();
+          if (canvas && typeof canvas.focus === "function") canvas.focus();
+        }
+        return;
+      }
       if (esCampo) return;
       if (e.key === "Delete") {
         e.preventDefault();
         borrarSeleccion();
-      } else if (e.key === "Escape") {
-        e.preventDefault();
-        seleccionar(null);
       }
     });
   }
@@ -1846,6 +2031,8 @@ export function crearPreviaPanel({ hospedador, proyecto, estadoPestana, editor }
     if (activo && modo !== "vivo") aplicarModo("vivo", true);
     editando = activo;
     arrastreNodo = null;
+    if (arrastrePaleta) { limpiarArrastrePaleta(arrastrePaleta); arrastrePaleta = null; }
+    suprimirClicPaleta = 0;
     if (!editando) { seleccion = null; notaEdicion = ""; clavePropiedades = ""; }
     const boton = document.getElementById("previa-modo-editar");
     if (boton) {
@@ -1863,15 +2050,46 @@ export function crearPreviaPanel({ hospedador, proyecto, estadoPestana, editor }
     }
   }
 
+  // Plegar la paleta o la ficha deja solo su cabecera: el dibujo recupera el espacio que tapaba la
+  // capa, sin mover el canvas (la capa no participa en el reparto).
+  function conectarPlegables() {
+    const pares = [
+      { contenedor: "previa-paleta", boton: "previa-paleta-plegar", que: "la paleta" },
+      { contenedor: "previa-propiedades", boton: "previa-propiedades-plegar", que: "las propiedades" },
+    ];
+    for (const par of pares) {
+      const contenedor = document.getElementById(par.contenedor);
+      const boton = document.getElementById(par.boton);
+      if (!contenedor || !boton) continue;
+      boton.addEventListener("click", () => {
+        const plegada = contenedor.dataset.plegada !== "1";
+        contenedor.dataset.plegada = plegada ? "1" : "0";
+        boton.setAttribute("aria-expanded", plegada ? "false" : "true");
+        boton.title = (plegada ? "Desplegar " : "Plegar ") + par.que;
+        boton.setAttribute("aria-label", boton.title);
+      });
+    }
+  }
+
   function conectarEditable() {
     const boton = document.getElementById("previa-modo-editar");
     if (boton) boton.addEventListener("click", () => aplicarEditable(!editando));
     if (conDocumento()) {
-      for (const b of document.querySelectorAll("#previa-paleta button")) {
+      for (const b of document.querySelectorAll("#previa-paleta button[data-tipo]")) {
         b.addEventListener("click", () => anadir(b.dataset.tipo));
       }
       const raiz = document.getElementById("previa-seleccionar-raiz");
       if (raiz) raiz.addEventListener("click", seleccionarRaiz);
+      const cerrarPropiedades = document.getElementById("previa-propiedades-cerrar");
+      if (cerrarPropiedades) {
+        cerrarPropiedades.addEventListener("click", () => {
+          seleccionar(null);
+          const canvas = canvasVivo();
+          if (canvas && typeof canvas.focus === "function") canvas.focus();
+        });
+      }
+      conectarPlegables();
+      conectarPaletaArrastre();
     }
     conectarCanvasEditable();
     conectarTecladoEditable();
@@ -2033,6 +2251,8 @@ export function crearPreviaPanel({ hospedador, proyecto, estadoPestana, editor }
     // el modo editar, para las pruebas de chromium y la consola de desarrollo
     editar: aplicarEditable,
     anadir,
+    // soltar un tipo de la paleta en un punto del layout (coordenadas del modelo)
+    anadirEn,
     borrarSeleccion,
     seleccionar,
     // lectura para las pruebas: el modelo dibujado en el modo Vista previa (no el código)

@@ -147,7 +147,7 @@ del panel, que a su vez contiene los ocho tiradores y el `<aside>`:
     … #tirador-previa-este | -norte | -sur | -noroeste | -noreste | -suroeste | -sureste …
     <aside id="previa-lateral">
       … #previa-modo-vivo (Vista previa) | #previa-modo-render (Emulador) | #previa-modo-editar …
-      <div id="previa-vivo">…#previa-vivo-canvas … #previa-paleta … #previa-editar-estado</div>
+      <div id="previa-vivo">…#previa-vivo-canvas … #previa-paleta (capa) … #previa-propiedades (capa) … #previa-editar-estado</div>
       <div id="previa-render">…#previa-lateral-canvas … #previa-pulsos … #previa-log … #previa-consola</div>
     </aside>
   </div>
@@ -168,10 +168,12 @@ del panel, que a su vez contiene los ocho tiradores y el `<aside>`:
 | `#previa-modo-editar` | el **lápiz** del modo editar: interruptor con `aria-pressed`, `aria-label="Editar layout"` y `aria-controls="previa-paleta"` |
 | `#previa-vivo`, `#previa-render` | los paneles (`role="tabpanel"`) |
 | `#previa-vivo-canvas`, `#previa-vivo-estado` | el canvas del layout dibujado (enfocable: `tabindex="0"`) y su línea de estado |
-| `#previa-paleta` | la paleta de añadir elementos (`role="toolbar"`); `hidden` fuera del modo editar; desplaza si no cabe |
-| `#previa-anadir-textview`, `#previa-anadir-edittext`, `#previa-anadir-button`, `#previa-anadir-imagebutton`, `#previa-anadir-imageview`, `#previa-anadir-checkbox`, `#previa-anadir-radiobutton`, `#previa-anadir-switch`, `#previa-anadir-progressbar`, `#previa-anadir-seekbar`, `#previa-anadir-view`, `#previa-anadir-space`, `#previa-anadir-linearlayout`, `#previa-anadir-framelayout`, `#previa-anadir-relativelayout`, `#previa-anadir-scrollview`, `#previa-anadir-tablelayout`, `#previa-anadir-gridlayout` | los botones de la paleta, en ese orden; cada uno con `data-tipo` y `aria-label` (los tipos con `*` dibujan un bloque que no imita la vista) |
-| `#previa-propiedades`, `#previa-propiedades-titulo`, `#previa-propiedades-campos` | la ficha de propiedades del nodo seleccionado (incluida la raíz), `hidden` fuera del modo editar |
-| `#previa-propiedades-vacio` | el aviso de que no hay nada seleccionado |
+| `#previa-paleta` | la paleta de añadir elementos (`role="toolbar"`), capa flotante a la izquierda del dibujo; `hidden` fuera del modo editar; lleva `data-plegada` |
+| `#previa-paleta-titulo`, `#previa-paleta-plegar`, `#previa-paleta-scroll` | la cabecera («Añadir»), el botón que pliega la paleta (`aria-expanded`, `aria-controls`) y la lista con scroll por categorías (`tabindex="0"`, `aria-label`) |
+| `#previa-anadir-textview`, `#previa-anadir-edittext`, `#previa-anadir-button`, `#previa-anadir-imagebutton`, `#previa-anadir-imageview`, `#previa-anadir-checkbox`, `#previa-anadir-radiobutton`, `#previa-anadir-switch`, `#previa-anadir-progressbar`, `#previa-anadir-seekbar`, `#previa-anadir-view`, `#previa-anadir-space`, `#previa-anadir-linearlayout`, `#previa-anadir-framelayout`, `#previa-anadir-relativelayout`, `#previa-anadir-scrollview`, `#previa-anadir-tablelayout`, `#previa-anadir-gridlayout` | los botones de la paleta; cada uno con `data-tipo` y `aria-label` (los tipos con `*` dibujan un bloque que no imita la vista). El orden y los grupos son los de `gruposPaleta()` |
+| `#previa-propiedades`, `#previa-propiedades-titulo`, `#previa-propiedades-campos` | la ficha de propiedades del nodo seleccionado (incluida la raíz), capa flotante arriba a la derecha; `hidden` si no hay nodo o no está el modo editar; lleva `data-plegada` |
+| `#previa-propiedades-plegar`, `#previa-propiedades-cerrar` | pliegan la ficha (`aria-expanded`) y la cierran (suelta el nodo, como `Esc`) |
+| `#previa-propiedades-vacio` | el aviso de la ficha cuando no hay nada seleccionado (queda oculto: sin selección no hay ficha) |
 | `#previa-seleccionar-raiz` | el botón que selecciona el layout raíz sin tocar el dibujo |
 | `#previa-editar-estado` | el estado del modo editar: qué está seleccionado, el último cambio o el motivo por el que no se puede editar (`role="status"`) |
 | `#previa-lateral-canvas`, `#previa-render-estado` | el canvas del emulador (enfocable y pulsable) y su línea de estado |
@@ -256,11 +258,23 @@ sobre la lectura **Vista previa**. No es una tercera pestaña: es un interruptor
 dibujo en un lienzo de edición. Al encenderlo se fuerza `vivo`; cambiar a **Emulador** u ocultar el
 panel lo apaga, y el modo no se persiste: al recargar se vuelve a la vista de solo lectura.
 
-- **Paleta.** `#previa-paleta` ofrece dieciocho tipos que el render en vivo dibuja o, si no los
-  imita, lo dice con un `*` y su `aria-label`: `TextView`, `EditText`, `Button`, `ImageButton`,
-  `ImageView`, `CheckBox`, `RadioButton`, `Switch`, `ProgressBar`, `SeekBar`, `View`, `Space`,
-  `LinearLayout`, `FrameLayout`, `RelativeLayout`, `ScrollView`, `TableLayout` y `GridLayout`.
-  Cada botón (`data-tipo`, `aria-label` y `title`) añade el elemento como último hijo de la raíz.
+- **Paleta.** `#previa-paleta` es una **capa flotante** pegada al borde izquierdo del dibujo, con
+  scroll propio (`#previa-paleta-scroll`), agrupada por categorías (Contenedores, Texto, Botones,
+  Entradas, Imágenes, Indicadores y Espaciadores; el orden y los grupos salen de `gruposPaleta()` en
+  `layout-editor.js`). No ocupa sitio en la columna: está en `position: absolute` sobre el marco, así
+  que abrirla no encoge el canvas. `#previa-paleta-plegar` deja solo su cabecera (`data-plegada="1"`,
+  `aria-expanded`) y el dibujo recupera lo que tapaba. Sus botones siguen siendo los mismos
+  `#previa-anadir-*`, con `data-tipo`, `title` y `aria-label`; ofrecen dieciocho tipos que el render
+  en vivo dibuja o, si no los imita, lo dice con un `*` y su `aria-label`: `TextView`, `EditText`,
+  `Button`, `ImageButton`, `ImageView`, `CheckBox`, `RadioButton`, `Switch`, `ProgressBar`,
+  `SeekBar`, `View`, `Space`, `LinearLayout`, `FrameLayout`, `RelativeLayout`, `ScrollView`,
+  `TableLayout` y `GridLayout`.
+  Un **clic** añade el elemento como último hijo de la raíz. **Arrastrarlo** (puntero con umbral de
+  5 px; hay un fantasma que sigue al puntero, el botón se atenúa y el canvas se marca con un borde
+  discontinuo) lo suelta donde se quiere: en un **marco** con `android:layout_marginLeft` y
+  `android:layout_marginTop` del punto, y en un **`LinearLayout`** en la posición que marca el punto
+  entre sus hermanos. El destino es el contenedor más profundo bajo el puntero; si se suelta sobre
+  una vista, entra en su padre. Al soltar, el nodo nuevo queda seleccionado y su ficha abierta.
   El XML que se escribe lleva `android:layout_width="wrap_content"`,
   `android:layout_height="wrap_content"`, `android:text` en las vistas de texto y un
   `android:id="@+id/…"` libre (`boton`, `boton2`…): así el elemento se puede tocar en el canvas
@@ -279,15 +293,19 @@ panel lo apaga, y el modo no se persiste: al recargar se vuelve a la vista de so
 - **Selección y borrado.** Un clic selecciona (contorno con `--acento` y estado con el tipo y el
   id), `Supr` borra el nodo del XML y `Esc` suelta la selección. El manejador ignora los campos de
   texto y cualquier combinación con `Ctrl`/`Alt`/`Meta`, así que no toca el autocompletado, la
-  paleta `Ctrl+Mayús+P` ni `Ctrl+G`.
-- **Propiedades del nodo.** Con un nodo seleccionado, `#previa-propiedades` muestra su ficha:
-  `android:id`, `android:text`, `android:textColor`, `android:background`, `android:layout_width`,
-  `android:layout_height`, `android:gravity`, `android:layout_gravity`, `android:padding`,
-  `android:layout_margin`, `android:layout_weight`, `android:orientation` (solo en un lineal) y
-  `android:enabled`. Los campos se crean con `createElement` y se rellenan con `value` y
-  `textContent` —nunca con `innerHTML`—, y el texto se escapa a `&amp;`, `&lt;`, `&gt;` y `&quot;`
-  al escribirlo. Los valores se validan por su nombre: un id que no es un identificador, un color
-  que no es `#RGB`/`#ARGB`/`#RRGGBB`/`#AARRGGBB` ni `@color/…`, una dimensión sin unidad, una
+  paleta `Ctrl+Mayús+P` ni `Ctrl+G`. `Esc` sí funciona desde dentro de la ficha (es una capa, no una
+  columna): cierra la ficha y suelta el nodo.
+- **Propiedades del nodo.** Con un nodo seleccionado, `#previa-propiedades` es una **ficha
+  flotante** en la esquina superior derecha del marco (`position: absolute`): aparece al seleccionar
+  y desaparece al soltar; no reduce el canvas. `#previa-propiedades-cerrar` hace lo mismo que `Esc`
+  y `#previa-propiedades-plegar` la deja en su cabecera (`data-plegada="1"`, `aria-expanded`). La
+  ficha muestra `android:id`, `android:text`, `android:textColor`, `android:background`,
+  `android:layout_width`, `android:layout_height`, `android:gravity`, `android:layout_gravity`,
+  `android:padding`, `android:layout_margin`, `android:layout_weight`, `android:orientation` (solo
+  en un lineal) y `android:enabled`. Los campos se crean con `createElement` y se rellenan con
+  `value` y `textContent` —nunca con `innerHTML`—, y el texto se escapa a `&amp;`, `&lt;`, `&gt;` y
+  `&quot;` al escribirlo. Los valores se validan por su nombre: un id que no es un identificador, un
+  color que no es `#RGB`/`#ARGB`/`#RRGGBB`/`#AARRGGBB` ni `@color/…`, una dimensión sin unidad, una
   gravedad inventada o un peso negativo se rechazan con el motivo en `#previa-editar-estado` sin
   tocar el XML. `change` (salir del campo o `Enter`) aplica el cambio con `escribirPropiedad` y el
   diff mínimo de `EDITOR.cambiar()`: entra en el undo tree, marca el documento sucio y repinta el
@@ -295,7 +313,8 @@ panel lo apaga, y el modo no se persiste: al recargar se vuelve a la vista de so
   llegan al modelo (`vista-xml.js` resuelve también `@color/…` desde `res/values*/colors.xml`) y el
   canvas los usa para rellenar y para el texto.
 - **Propiedades de la raíz.** El hueco del layout —un clic dentro de la raíz que no cae en ningún
-  hijo— selecciona la raíz (ruta `[]`), y `#previa-seleccionar-raiz` hace lo mismo sin puntero.
+  hijo— selecciona la raíz (ruta `[]`), y `#previa-seleccionar-raiz` hace lo mismo sin puntero desde
+  la cabecera de la ficha.
   Su ficha añade el **tipo de layout** (`LinearLayout`, `FrameLayout` y `RelativeLayout`), la
   orientación, gravedad, padding y fondo. `cambiarTipoRaiz` renombra solo la etiqueta de apertura y
   la de cierre, conserva atributos e hijos y pone `android:orientation="vertical"` al volver a un
@@ -983,7 +1002,7 @@ En `@media (max-width: 760px)`:
 | `node studio/prueba.js` | genera el zip, comprueba EOCD, plantillas, reglas, ids de `index.html` (de `diagnostico.js`, `temas.js`, `historial.js`, `vista-previa.js`, `previa-panel.js`, `autocompletado.js`, `diagnostico-vivo.js`), ids viejos prohibidos, sin `<pre>` en el panel, el resaltador puro, el modelo del layout dibujado en vivo, los datos del autocompletado (recursos, `R.java`, contexto y lector de zip/.class), el XML del editor (contexto, catálogo, linter con columna en runes), las funciones puras de los tiradores y las del editor de layout (`leerPropiedades`/`escribirPropiedad`, colores, paleta y `cambiarTipoRaiz`) |
 | `node studio/prueba-navegador.js` | `http` sin COOP/COEP: DOM, tres vistas, tres botones de actividad, reflejo del nombre/package, aviso de que no hay OPFS, localStorage, el diagnóstico, los temas y la paleta ANSI, y el contrato de la vista dividida (separador con teclado, alternancia Vista previa/Emulador, los dos modos y la consola de Pantalla, que no haya `<pre>` con el XML y consola vacía con su motivo) |
 | `APKC_WASM=... node studio/prueba-crear.js` | por http con OPFS: crear, escribir el proyecto, abrir el manifiesto, comprobar `data-ruta` del arbol, API 34, el árbol cerrado, subir/mover ficheros, exportar/importar el `.zip`, ajustes, pestañas, undo tree, dos ventanas y fusión/conflicto |
-| `APKC_WASM=... APK_EJEMPLO=... KS_EJEMPLO=... ANDROID_JAR=... node studio/prueba-pestana.js` | la pestaña completa: editar, guardar, recargar, jar del SDK, compilar debug/release, firmar, verificar, recargar sin red, cero peticiones fuera del origen, el autocompletado Java y XML (con contexto separado), el linter XML con origen `XML` y sin `apkc check`, el enlace `ruta:línea`, Detener, la vista dividida con sus ocho tiradores por marco (puntero, teclado, persistencia), compilar→pintar sin mover el cursor, el layout **dibujado** en vivo, la alternancia Vista previa/Emulador con estado, las dos superficies (Editor y Pantalla), la consola de la ejecución con el `<script>` escapado, que el nodo pinte su texto sin el rótulo `Button · id/pulsar`, y el **modo editar** (lápiz, añadir un `Button` y un `EditText`, arrastrar dentro de un `FrameLayout`, `Supr`, `Esc`, el undo tree, la ficha de propiedades con texto/id/fondo, la orientación del raíz y el cambio de tipo con `RelativeLayout` rechazado) |
+| `APKC_WASM=... APK_EJEMPLO=... KS_EJEMPLO=... ANDROID_JAR=... node studio/prueba-pestana.js` | la pestaña completa: editar, guardar, recargar, jar del SDK, compilar debug/release, firmar, verificar, recargar sin red, cero peticiones fuera del origen, el autocompletado Java y XML (con contexto separado), el linter XML con origen `XML` y sin `apkc check`, el enlace `ruta:línea`, Detener, la vista dividida con sus ocho tiradores por marco (puntero, teclado, persistencia), compilar→pintar sin mover el cursor, el layout **dibujado** en vivo, la alternancia Vista previa/Emulador con estado, las dos superficies (Editor y Pantalla), la consola de la ejecución con el `<script>` escapado, que el nodo pinte su texto sin el rótulo `Button · id/pulsar`, y el **modo editar** (lápiz, añadir un `Button` y un `EditText`, arrastrar dentro de un `FrameLayout`, `Supr`, `Esc`, el undo tree, la ficha de propiedades con texto/id/fondo, la orientación del raíz y el cambio de tipo con `RelativeLayout` rechazado). Además comprueba que la paleta y la ficha son capas que **no cambian `clientWidth`/`clientHeight` del canvas**, que la paleta hace scroll por categorías y se pliega sin moverlo, que arrastrar un `Button` de la paleta al dibujo lo añade donde se suelta y lo selecciona, y que `Esc` cierra la ficha |
 | `APKC=... APKC_WASM=... sh studio/e2e.sh` | todo lo anterior más los apk/aab nativos y la plantilla Contador; el número exacto de comprobaciones se mide en cada gate |
 
 El gate completo de la pagina es `e2e.sh`; `prueba-pestana.js` solo no basta para decir que la
@@ -1008,12 +1027,15 @@ estan en `studio/README.md` y en `docs/evidencia.md` §140. En resumen: se copia
   conoce `ConstraintLayout` por sus constraints, estilos, temas, `drawable` ni medidas de fuente
   reales. No ejecuta la app: los eventos están en **Emulador**.
 - **El XML se edita en el panel, pero solo lo que la vista en vivo entiende.** El lápiz
-  (`#previa-modo-editar`) añade los dieciocho tipos de la paleta, arrastra nodos dentro de su padre
-  (márgenes en un marco, reordenar en un `LinearLayout`), edita sus propiedades —también las del
-  layout raíz— y los borra con `Supr`; no hay `ConstraintLayout`, estilos ni reparentado, y la raíz
-  no se cambia a `RelativeLayout`. El panel escribe con `EDITOR.cambiar()`, así que el texto, el
-  cursor y el undo tree son los del editor de siempre. La vista **Pantalla** y el modo **Emulador**
-  siguen siendo de solo lectura.
+  (`#previa-modo-editar`) añade los dieciocho tipos de la paleta —un clic al final de la raíz o
+  arrastrándolos a un punto del dibujo—, arrastra nodos dentro de su padre (márgenes en un marco,
+  reordenar en un `LinearLayout`), edita sus propiedades —también las del layout raíz— y los borra
+  con `Supr`; no hay `ConstraintLayout`, estilos ni reparentado de un nodo ya dibujado (soltar un
+  tipo en otro contenedor sí crea el nodo dentro de él), y la raíz no se cambia a `RelativeLayout`.
+  El panel escribe con `EDITOR.cambiar()`, así que el texto, el cursor y el undo tree son los del
+  editor de siempre. La paleta y la ficha son capas: tapan parte del dibujo mientras están abiertas,
+  pero no cambian su caja; se pliegan y, la ficha, se cierra con `Esc`. La vista **Pantalla** y el
+  modo **Emulador** siguen siendo de solo lectura.
 - **El render es el modelo de `apkc preview`, no la app ejecutándose.** La consola muestra lo que
   el intérprete capturó en `onCreate` y en los clics registrados; no es un `logcat` ni hay hilos,
   JNI ni excepciones fuera del subconjunto que el intérprete resuelve.

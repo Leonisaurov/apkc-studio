@@ -329,7 +329,13 @@ async function conductor() {
     area.focus();
     area.scrollTop = 500;
     area.scrollLeft = 80;
-    await new Promise((r) => setTimeout(r, 80));
+    // la sincronización de capas corre en el evento scroll: se espera a que llegue (hasta 1 s)
+    // en vez de a un plazo fijo, que con la máquina cargada se queda corto y acusa un fallo falso
+    for (let i = 0; i < 40; i++) {
+      if (resalto.scrollTop === area.scrollTop && numeros.scrollTop === area.scrollTop &&
+          resalto.scrollLeft === area.scrollLeft) break;
+      await new Promise((r) => setTimeout(r, 25));
+    }
     return {
       alto: [area.clientHeight, area.scrollHeight],
       vertical: [area.scrollTop, resalto.scrollTop, numeros.scrollTop],
@@ -2705,6 +2711,245 @@ async function conductor() {
       editorLayout.enRender.editando === false && editorLayout.enRender.pressed === "false" &&
       editorLayout.enRender.paleta === true,
       JSON.stringify(editorLayout.enRender).slice(0, 240));
+
+    // 12a-septies-quinquies. El modo editar es una CAPA, no una columna: la paleta y la ficha de
+    // propiedades flotan sobre el dibujo y el canvas conserva el ancho y el alto de «Vista previa».
+    // Además, un tipo se arrastra desde la paleta y se suelta donde se quiere colocarlo.
+    // Se estrecha la ventana a propósito: así la paleta tiene que desplazarse de verdad y las
+    // medidas se toman en una caja pequeña, que es donde antes se veía el fallo.
+    await exec("Emulation.setDeviceMetricsOverride",
+      { width: 1000, height: 520, deviceScaleFactor: 1, mobile: false });
+    await esperar(500);
+    const editorFlotante = await evaluar(`(async () => {
+      const vp = await import("/vista-previa.js");
+      marcarSucio(false);
+      await abrir("/proyecto/res/layout/main.xml");
+      if (!PREVIA_PANEL.estado().visible) document.getElementById("previa-alternar").click();
+      document.getElementById("previa-modo-vivo").click();
+      await new Promise((ok) => setTimeout(ok, 900));
+      const area = document.getElementById("codigo");
+      const original = area.value;
+      const nav = (ms) => new Promise((ok) => setTimeout(ok, ms));
+      const canvas = document.getElementById("previa-vivo-canvas");
+      const marco = document.querySelector("#previa-vivo .previa-marco-lateral");
+      const paleta = document.getElementById("previa-paleta");
+      const lista = document.getElementById("previa-paleta-scroll");
+      const ficha = document.getElementById("previa-propiedades");
+      const editar = document.getElementById("previa-modo-editar");
+      const medidas = () => ({ ancho: canvas.clientWidth, alto: canvas.clientHeight,
+        marco: marco.clientWidth + "x" + marco.clientHeight });
+      // 1. la referencia es «Vista previa» sin editar
+      if (PREVIA_PANEL.estado().editando) { editar.click(); await nav(350); }
+      const antes = { ...medidas(), paleta: paleta.hidden, ficha: ficha.hidden };
+      // 2. encender el lápiz no mueve ni un píxel el canvas
+      editar.click();
+      await nav(400);
+      const trasEncender = { ...medidas(), paleta: paleta.hidden, ficha: ficha.hidden,
+        editando: PREVIA_PANEL.estado().editando };
+      const capas = {
+        paleta: getComputedStyle(paleta).position,
+        ficha: getComputedStyle(ficha).position,
+        paletaEnPanel: paleta.getBoundingClientRect().top >= marco.getBoundingClientRect().top - 1 &&
+          paleta.getBoundingClientRect().bottom <= marco.getBoundingClientRect().bottom + 1,
+      };
+      // 3. la paleta tiene scroll propio y se puede plegar sin tocar el canvas
+      const scroll = { contenido: lista.scrollHeight, visible: lista.clientHeight,
+        desborda: lista.scrollHeight > lista.clientHeight + 4 };
+      lista.scrollTop = lista.scrollHeight;
+      const desplazado = lista.scrollTop;
+      const cajaAntesPlegar = medidas();
+      document.getElementById("previa-paleta-plegar").click();
+      await nav(120);
+      const plegada = {
+        dato: paleta.dataset.plegada,
+        lista: getComputedStyle(lista).display,
+        aria: document.getElementById("previa-paleta-plegar").getAttribute("aria-expanded"),
+        canvas: medidas(),
+      };
+      document.getElementById("previa-paleta-plegar").click();
+      await nav(120);
+      const desplegada = { dato: paleta.dataset.plegada, lista: getComputedStyle(lista).display };
+      // 4. arrastrar un Button desde la paleta al dibujo: entra donde se suelta y queda seleccionado
+      const botonPaleta = document.getElementById("previa-anadir-button");
+      const cajaBoton = botonPaleta.getBoundingClientRect();
+      const cajaCanvas = canvas.getBoundingClientRect();
+      const destino = {
+        x: cajaCanvas.left + cajaCanvas.width * 0.72,
+        y: cajaCanvas.top + cajaCanvas.height * 0.62,
+      };
+      const antesXml = area.value;
+      const buscarBoton = (nodo, salida) => {
+        if (nodo.tipo === "Button") salida.push(nodo);
+        for (const h of nodo.hijos || []) buscarBoton(h, salida);
+      };
+      const contarBotones = (m) => {
+        const salida = [];
+        if (m) buscarBoton(m.raiz, salida);
+        return salida.length;
+      };
+      const botonesModeloAntes = contarBotones(PREVIA_PANEL.modeloVivo());
+      botonPaleta.dispatchEvent(new PointerEvent("pointerdown", { bubbles: true, button: 0,
+        pointerId: 41, clientX: cajaBoton.left + 10, clientY: cajaBoton.top + 10 }));
+      document.dispatchEvent(new PointerEvent("pointermove", { bubbles: true, pointerId: 41,
+        clientX: (cajaBoton.left + destino.x) / 2, clientY: (cajaBoton.top + destino.y) / 2 }));
+      const realimentacion = {
+        fantasma: !!document.querySelector(".previa-arrastre-fantasma"),
+        boton: botonPaleta.classList.contains("arrastrando"),
+      };
+      document.dispatchEvent(new PointerEvent("pointermove", { bubbles: true, pointerId: 41,
+        clientX: destino.x, clientY: destino.y }));
+      realimentacion.canvas = canvas.classList.contains("previa-canvas-recibiendo");
+      document.dispatchEvent(new PointerEvent("pointerup", { bubbles: true, pointerId: 41,
+        clientX: destino.x, clientY: destino.y }));
+      await nav(900);
+      const modelo = PREVIA_PANEL.modeloVivo();
+      const seleccion = PREVIA_PANEL.estado().seleccion;
+      const enRuta = (raiz, ruta) => {
+        let n = raiz;
+        for (const i of ruta || []) n = n && (n.hijos || [])[i];
+        return n || null;
+      };
+      const nuevo = modelo && seleccion ? enRuta(modelo.raiz, seleccion) : null;
+      // el punto de un lineal decide entre qué hermanos entra: el nodo nuevo tiene que quedar
+      // después del centro del anterior y antes del siguiente (o al final)
+      const padreRuta = seleccion ? seleccion.slice(0, -1) : null;
+      const padre = modelo && padreRuta ? enRuta(modelo.raiz, padreRuta) : null;
+      const hermanos = padre && Array.isArray(padre.hijos) ? padre.hijos : [];
+      const indice = seleccion && seleccion.length ? seleccion[seleccion.length - 1] : -1;
+      const vertical = !padre ||
+        ((padre.atributos || {})["android:orientation"] || "vertical") !== "horizontal";
+      const centro = (n) => n && n.rect
+        ? (vertical ? n.rect.y + n.rect.alto / 2 : n.rect.x + n.rect.ancho / 2) : null;
+      const orden = {
+        indice,
+        hermanos: hermanos.length,
+        raiz: !!padreRuta && padreRuta.length === 0,
+        trasAnterior: indice <= 0 || (!!nuevo && centro(nuevo) >= centro(hermanos[indice - 1])),
+        antesSiguiente: indice < 0 || indice >= hermanos.length - 1 ||
+          (!!nuevo && centro(nuevo) <= centro(hermanos[indice + 1])),
+      };
+      const soltado = {
+        xml: (area.value.match(/<Button\\b/g) || []).length > 0,
+        cambio: area.value !== antesXml,
+        botones: contarBotones(modelo),
+        botonesAntes: botonesModeloAntes,
+        seleccion,
+        nuevo: nuevo ? { tipo: nuevo.tipo, id: nuevo.id, rect: { ...nuevo.rect } } : null,
+        orden,
+        nota: document.getElementById("previa-editar-estado").textContent,
+        sucio: !document.getElementById("marca-sucio").hidden,
+      };
+      // 5. la ficha aparece con la selección y es otra capa: no encoge el canvas
+      const trasSoltar = { ...medidas(), ficha: ficha.hidden,
+        absoluta: getComputedStyle(ficha).position,
+        seleccion: PREVIA_PANEL.estado().seleccion };
+      const camposVisibles = document.querySelectorAll("#previa-propiedades-campos [data-propiedad]").length;
+      const cajaFicha = ficha.getBoundingClientRect();
+      const cajaMarco = marco.getBoundingClientRect();
+      const fichaDentro = cajaFicha.right <= cajaMarco.right + 1 && cajaFicha.left >= cajaMarco.left - 1;
+      document.getElementById("previa-propiedades-plegar").click();
+      await nav(120);
+      const fichaPlegada = {
+        dato: ficha.dataset.plegada,
+        campos: getComputedStyle(document.getElementById("previa-propiedades-campos")).display,
+        aria: document.getElementById("previa-propiedades-plegar").getAttribute("aria-expanded"),
+      };
+      document.getElementById("previa-propiedades-plegar").click();
+      await nav(120);
+      // 6. Esc desde un campo cierra la ficha y suelta el nodo
+      const campo = document.querySelector("#previa-propiedades-campos [data-propiedad]");
+      if (campo) campo.focus();
+      const conFoco = campo === document.activeElement;
+      if (campo) campo.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true }));
+      await nav(220);
+      const trasEsc = { seleccion: PREVIA_PANEL.estado().seleccion, ficha: ficha.hidden,
+        conFoco, foco: document.activeElement === canvas };
+      // 7. el botón de cerrar también, y el tamaño del canvas no se ha movido en todo el gesto
+      PREVIA_PANEL.seleccionar([0]);
+      await nav(180);
+      const fichaAlSeleccionar = ficha.hidden;
+      document.getElementById("previa-propiedades-cerrar").click();
+      await nav(180);
+      const trasCerrar = { seleccion: PREVIA_PANEL.estado().seleccion, ficha: ficha.hidden };
+      // 8. Vista previa y Emulador siguen midiendo lo mismo; el lápiz no los toca
+      document.getElementById("previa-modo-render").click();
+      await nav(200);
+      const enRender = { editando: PREVIA_PANEL.estado().editando, paleta: paleta.hidden };
+      document.getElementById("previa-modo-vivo").click();
+      await nav(400);
+      const final = { ...medidas(), editando: PREVIA_PANEL.estado().editando,
+        paleta: paleta.hidden, ficha: ficha.hidden };
+      // limpieza: la paleta vuelve desplegada y el layout a su texto
+      paleta.dataset.plegada = "0";
+      lista.scrollTop = 0;
+      if (PREVIA_PANEL.estado().editando) { editar.click(); await nav(200); }
+      marcarSucio(false);
+      EDITOR.cambiar(0, area.value.length, original, [0, 0]);
+      await nav(900);
+      marcarSucio(false);
+      return { antes, trasEncender, capas, scroll: { ...scroll, desplazado },
+        plegada, desplegada, cajaAntesPlegar, realimentacion, soltado, trasSoltar,
+        camposVisibles, fichaDentro, fichaPlegada, trasEsc, fichaAlSeleccionar, trasCerrar,
+        enRender, final, restaurado: area.value === original };
+    })()`);
+    await exec("Emulation.clearDeviceMetricsOverride");
+    await esperar(400);
+    comprueba("encender el modo editar no encoge el canvas: paleta y ficha son capas absolutas",
+      editorFlotante.antes.ancho === editorFlotante.trasEncender.ancho &&
+      editorFlotante.antes.alto === editorFlotante.trasEncender.alto &&
+      editorFlotante.trasEncender.paleta === false && editorFlotante.trasEncender.ficha === true &&
+      editorFlotante.capas.paleta === "absolute" && editorFlotante.capas.ficha === "absolute" &&
+      editorFlotante.capas.paletaEnPanel === true,
+      JSON.stringify({ antes: editorFlotante.antes, tras: editorFlotante.trasEncender,
+        capas: editorFlotante.capas }).slice(0, 400));
+    comprueba("la paleta se desplaza por categorías y se pliega sin mover el canvas",
+      editorFlotante.scroll.desborda === true && editorFlotante.scroll.desplazado > 0 &&
+      editorFlotante.plegada.lista === "none" && editorFlotante.plegada.aria === "false" &&
+      editorFlotante.plegada.canvas.ancho === editorFlotante.cajaAntesPlegar.ancho &&
+      editorFlotante.plegada.canvas.alto === editorFlotante.cajaAntesPlegar.alto &&
+      editorFlotante.desplegada.dato === "0" &&
+      editorFlotante.desplegada.lista !== "none",
+      JSON.stringify({ scroll: editorFlotante.scroll, plegada: editorFlotante.plegada,
+        desplegada: editorFlotante.desplegada }).slice(0, 420));
+    comprueba("arrastrar un Button de la paleta al dibujo lo añade donde se suelta y lo selecciona",
+      editorFlotante.realimentacion.fantasma === true &&
+      editorFlotante.realimentacion.boton === true &&
+      editorFlotante.realimentacion.canvas === true &&
+      editorFlotante.soltado.xml === true && editorFlotante.soltado.cambio === true &&
+      editorFlotante.soltado.botones === editorFlotante.soltado.botonesAntes + 1 &&
+      JSON.stringify(editorFlotante.soltado.seleccion) !== "null" &&
+      !!editorFlotante.soltado.nuevo && editorFlotante.soltado.nuevo.tipo === "Button" &&
+      editorFlotante.soltado.orden.raiz === true &&
+      editorFlotante.soltado.orden.trasAnterior === true &&
+      editorFlotante.soltado.orden.antesSiguiente === true &&
+      /Añadido Button/.test(String(editorFlotante.soltado.nota)) &&
+      editorFlotante.soltado.sucio === true,
+      JSON.stringify({ realimentacion: editorFlotante.realimentacion,
+        soltado: editorFlotante.soltado }).slice(0, 520));
+    comprueba("la ficha aparece con la selección, no encoge el canvas, se pliega y Esc la cierra",
+      editorFlotante.trasSoltar.ficha === false && editorFlotante.trasSoltar.absoluta === "absolute" &&
+      editorFlotante.trasSoltar.ancho === editorFlotante.antes.ancho &&
+      editorFlotante.trasSoltar.alto === editorFlotante.antes.alto &&
+      editorFlotante.camposVisibles > 3 && editorFlotante.fichaDentro === true &&
+      editorFlotante.fichaPlegada.dato === "1" &&
+      editorFlotante.fichaPlegada.campos === "none" &&
+      editorFlotante.fichaPlegada.aria === "false" &&
+      editorFlotante.trasEsc.conFoco === true &&
+      editorFlotante.trasEsc.seleccion === null && editorFlotante.trasEsc.ficha === true &&
+      editorFlotante.fichaAlSeleccionar === false &&
+      editorFlotante.trasCerrar.seleccion === null && editorFlotante.trasCerrar.ficha === true,
+      JSON.stringify({ trasSoltar: editorFlotante.trasSoltar,
+        plegada: editorFlotante.fichaPlegada, trasEsc: editorFlotante.trasEsc,
+        trasCerrar: editorFlotante.trasCerrar }).slice(0, 420));
+    comprueba("Vista previa y Emulador quedan como estaban y el canvas conserva su medida",
+      editorFlotante.enRender.editando === false && editorFlotante.enRender.paleta === true &&
+      editorFlotante.final.editando === false && editorFlotante.final.paleta === true &&
+      editorFlotante.final.ficha === true &&
+      editorFlotante.final.ancho === editorFlotante.antes.ancho &&
+      editorFlotante.final.alto === editorFlotante.antes.alto &&
+      editorFlotante.restaurado === true,
+      JSON.stringify({ enRender: editorFlotante.enRender, final: editorFlotante.final,
+        antes: editorFlotante.antes, restaurado: editorFlotante.restaurado }).slice(0, 360));
 
 
     // 12a-octies. el separador: se arrastra con puntero, se mueve con el teclado y guarda el ancho

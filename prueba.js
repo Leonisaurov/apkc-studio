@@ -593,6 +593,72 @@ if (!enVacia.ok || !vistaXml.modeloDeLayout(enVacia.xml).ok || !/<TextView\b/.te
   mal("añadir sobre una raíz autocerrada no abre la etiqueta: " + (enVacia.error || enVacia.xml));
 }
 
+// 6b-quinquies. soltar un tipo de la paleta en el dibujo: entra en el contenedor de la ruta, en la
+// posición pedida y, si es un marco, con los márgenes del punto. Es el gesto que conduce
+// `prueba-pestana.js`; aquí se prueba el texto que devuelve.
+const conAnidado = `<?xml version="1.0" encoding="utf-8"?>
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:orientation="vertical"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent">
+
+    <FrameLayout
+        android:id="@+id/marco"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content">
+
+        <TextView
+            android:id="@+id/uno"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="Uno"/>
+    </FrameLayout>
+
+    <TextView
+        android:id="@+id/dos"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:text="Dos"/>
+</LinearLayout>
+`;
+const soltadoEnMarco = layoutEditor.insertarElemento(conAnidado, {
+  tipo: "Button", padre: [0], indice: 0, margen: { izquierda: 40, arriba: 24 },
+});
+if (!soltadoEnMarco.ok) {
+  mal("el tipo soltado en un marco no se añade: " + soltadoEnMarco.error);
+} else if (JSON.stringify(soltadoEnMarco.ruta) !== "[0,0]") {
+  mal("el tipo soltado en un marco no devuelve su ruta: " + JSON.stringify(soltadoEnMarco.ruta));
+} else {
+  const modeloAnidado = vistaXml.modeloDeLayout(soltadoEnMarco.xml);
+  const botonMarco = modeloAnidado.ok ? modeloAnidado.modelo.raiz.hijos[0].hijos[0] : null;
+  if (!botonMarco || botonMarco.tipo !== "Button" || !botonMarco.rect ||
+      botonMarco.rect.x !== 40 || botonMarco.rect.y !== 24) {
+    mal("soltar en un marco no coloca el nodo en el punto: " +
+      JSON.stringify(botonMarco && { tipo: botonMarco.tipo, rect: botonMarco.rect }));
+  }
+  if (!/android:layout_marginLeft="40dp"/.test(soltadoEnMarco.xml) ||
+      !/android:layout_marginTop="24dp"/.test(soltadoEnMarco.xml)) {
+    mal("soltar en un marco no escribe los márgenes del punto");
+  }
+}
+const soltadoEnLineal = layoutEditor.insertarElemento(conAnidado, { tipo: "Button", indice: 0 });
+if (!soltadoEnLineal.ok) {
+  mal("el tipo soltado en un lineal no se añade: " + soltadoEnLineal.error);
+} else {
+  const modeloLineal = vistaXml.modeloDeLayout(soltadoEnLineal.xml);
+  const primero = modeloLineal.ok ? modeloLineal.modelo.raiz.hijos[0] : null;
+  if (!primero || primero.tipo !== "Button" || JSON.stringify(soltadoEnLineal.ruta) !== "[0]") {
+    mal("soltar en un lineal no respeta la posición pedida: " +
+      JSON.stringify({ tipo: primero && primero.tipo, ruta: soltadoEnLineal.ruta }));
+  }
+}
+const soltadoEnTexto = layoutEditor.insertarElemento(conAnidado, { tipo: "Button", padre: [1] });
+if (soltadoEnTexto.ok || !/no es un contenedor/.test(String(soltadoEnTexto.error))) {
+  mal("el editor de layout mete un hijo en un TextView: " + (soltadoEnTexto.error || soltadoEnTexto.xml));
+}
+const soltadoEnRutaMala = layoutEditor.insertarElemento(conAnidado, { tipo: "Button", padre: [7] });
+if (soltadoEnRutaMala.ok) mal("el editor de layout acepta una ruta de padre que no existe");
+
 // 6b-ter. las propiedades de un nodo: se leen y se escriben sobre el texto, con entidades, ids,
 // colores y la orientación de la raíz. Todo puro; el panel solo pone los campos.
 const conProps = `<?xml version="1.0" encoding="utf-8"?>
@@ -909,6 +975,10 @@ for (const [id, donde] of [
   ["previa-propiedades-titulo", "el título de la ficha de propiedades"],
   ["previa-propiedades-campos", "los campos de la ficha de propiedades"],
   ["previa-propiedades-vacio", "el aviso de que no hay nada seleccionado"],
+  ["previa-propiedades-plegar", "el botón que pliega la ficha de propiedades"],
+  ["previa-propiedades-cerrar", "el botón que cierra la ficha de propiedades"],
+  ["previa-paleta-plegar", "el botón que pliega la paleta"],
+  ["previa-paleta-scroll", "la lista con scroll de la paleta"],
   ["previa-seleccionar-raiz", "el botón que selecciona el layout raíz"],
   ["previa-editar-estado", "la línea de estado del modo editar"],
   ["vista-modo-previa", "la pestaña Vista previa de la vista Pantalla"],
@@ -998,6 +1068,32 @@ for (const tipo of ["TextView", "Button", "ImageView", "LinearLayout", "FrameLay
   if (!new RegExp('<button[^>]*data-tipo="' + tipo + '"[^>]*aria-label=').test(html)) {
     mal("el botón de la paleta de " + tipo + " no tiene aria-label");
   }
+}
+// La paleta se agrupa por categorías y el orden del HTML es el de la herramienta: una lista
+// corrida de 18 tipos no se recorre. Cada tipo aparece una vez y el grupo tiene su encabezado.
+const gruposDePaleta = layoutEditor.gruposPaleta();
+const tiposAgrupados = gruposDePaleta.flatMap((g) => g.tipos);
+const tiposDeLaPaleta = layoutEditor.tiposDisponibles();
+if (gruposDePaleta.length !== 7) mal("la paleta no tiene siete categorías: " + gruposDePaleta.length);
+for (const grupo of gruposDePaleta) {
+  if (!grupo.tipos.length) mal("la categoría " + grupo.titulo + " está vacía");
+  if (!new RegExp('<span class="previa-paleta-categoria">' + grupo.titulo + "</span>").test(html)) {
+    mal("index.html no pinta la categoría " + grupo.titulo);
+  }
+}
+if (tiposAgrupados.length !== tiposDeLaPaleta.length) {
+  mal("la paleta agrupada no cubre los tipos: " + tiposAgrupados.length + " de " + tiposDeLaPaleta.length);
+}
+if (new Set(tiposAgrupados).size !== tiposAgrupados.length) mal("la paleta repite un tipo");
+for (const tipo of tiposDeLaPaleta) {
+  if (!tiposAgrupados.includes(tipo)) mal("la paleta no agrupa " + tipo);
+}
+const tiposEnElHtml = [...html.matchAll(/data-tipo="([^"]+)"/g)].map((m) => m[1]);
+if (tiposEnElHtml.join(",") !== tiposAgrupados.join(",")) {
+  mal("el orden de la paleta del HTML no es el de layout-editor.js: " + tiposEnElHtml.join(","));
+}
+if (!/id="previa-paleta-scroll"[^>]*aria-label=/.test(html)) {
+  mal("la lista de la paleta no se anuncia para lectores de pantalla");
 }
 // el modo «en vivo» dibuja el layout: no puede quedar ni un visor de código XML en el panel
 for (const idViejo of ["previa-xml", "previa-xml-codigo", "previa-xml-estado", "previa-modo-xml"]) {
