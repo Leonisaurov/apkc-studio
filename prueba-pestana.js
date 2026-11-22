@@ -1906,6 +1906,80 @@ async function conductor() {
       comprueba("el botón del oyente declarativo se puede pulsar por CDP", false, "sin botón en #previa-oyentes");
     }
 
+    // 12a-ter-septies-quinquies. la sección elegida sobrevive a recargar la página. Leer
+    // localStorage en el mismo evaluate no lo prueba: hay que navegar de verdad y comprobar que
+    // `conectarSecciones()` restaura las dos superficies al arrancar.
+    const antesRecargaSeccion = await evaluar(`(() => {
+      document.getElementById("previa-seccion-registro").click();
+      document.querySelector('nav.actividad [data-vista="vista"]').click();
+      document.getElementById("vista-seccion-consola").click();
+      document.querySelector('nav.actividad [data-vista="pestana"]').click();
+      return {
+        panel: (() => { try { return localStorage.getItem("apkc-studio/previa-seccion"); } catch (e) { return null; } })(),
+        vista: (() => { try { return localStorage.getItem("apkc-studio/vista-seccion"); } catch (e) { return null; } })(),
+        activa: [...document.querySelectorAll(".previa-secciones [role=tab]")]
+          .filter((b) => b.id.startsWith("previa-seccion-") && b.getAttribute("aria-selected") === "true")
+          .map((b) => b.id),
+      };
+    })()`);
+    await exec("Page.navigate", { url: URL_PAGINA });
+    let listaTrasNavegar = false;
+    for (let i = 0; i < 60; i++) {
+      try {
+        listaTrasNavegar = await evaluar("typeof PREVIA_PANEL !== 'undefined' && !!document.getElementById('previa-seccion-registro') && !!document.getElementById('codigo')");
+      } catch (e) { listaTrasNavegar = false; }
+      if (listaTrasNavegar) break;
+      await esperar(300);
+    }
+    const trasRecargaSeccion = await evaluar(`(async () => {
+      document.getElementById("previa-modo-render").click();
+      document.querySelector('nav.actividad [data-vista="vista"]').click();
+      document.getElementById("vista-modo-emulador").click();
+      await new Promise((ok) => setTimeout(ok, 150));
+      const visible = (id) => { const e = document.getElementById(id); return e ? !e.hidden : null; };
+      return {
+        panel: { registro: visible("previa-log"), pulsos: visible("previa-pulsos"),
+          consola: visible("previa-consola"),
+          activa: [...document.querySelectorAll(".previa-secciones [role=tab]")]
+            .filter((b) => b.id.startsWith("previa-seccion-") && b.getAttribute("aria-selected") === "true")
+            .map((b) => b.id) },
+        vista: { consola: visible("vista-consola"), pulsos: visible("vista-pulsos"),
+          registro: visible("vista-log"),
+          activa: [...document.querySelectorAll("#vista-lado .previa-secciones [role=tab]")]
+            .filter((b) => b.getAttribute("aria-selected") === "true").map((b) => b.id) },
+        guardadas: { panel: (() => { try { return localStorage.getItem("apkc-studio/previa-seccion"); } catch (e) { return null; } })(),
+          vista: (() => { try { return localStorage.getItem("apkc-studio/vista-seccion"); } catch (e) { return null; } })() },
+      };
+    })()`);
+    comprueba("la sección elegida del emulador sobrevive a recargar la página",
+      antesRecargaSeccion.panel === "registro" && antesRecargaSeccion.vista === "consola" &&
+      antesRecargaSeccion.activa.join() === "previa-seccion-registro" &&
+      listaTrasNavegar === true &&
+      trasRecargaSeccion.guardadas.panel === "registro" && trasRecargaSeccion.guardadas.vista === "consola" &&
+      trasRecargaSeccion.panel.registro === true && trasRecargaSeccion.panel.pulsos === false &&
+      trasRecargaSeccion.panel.consola === false &&
+      trasRecargaSeccion.panel.activa.join() === "previa-seccion-registro" &&
+      trasRecargaSeccion.vista.consola === true && trasRecargaSeccion.vista.pulsos === false &&
+      trasRecargaSeccion.vista.registro === false &&
+      trasRecargaSeccion.vista.activa.join() === "vista-seccion-consola",
+      JSON.stringify({ antes: antesRecargaSeccion, lista: listaTrasNavegar,
+        despues: trasRecargaSeccion }).slice(0, 600));
+    // recargar no borra OPFS, pero sí el modelo en memoria: se compila otra vez para que las
+    // pruebas que vienen detrás vuelvan a tener apk y modelo (es lo que hace el tramo 9b)
+    const trasRecargaEmulador = await evaluar(`(async () => {
+      document.querySelector('nav.actividad [data-vista="pestana"]').click();
+      document.getElementById("storepass-compilar").value = "android";
+      await compilarDelTodo();
+      const vp = await import("/vista-previa.js");
+      const m = vp.modeloActual();
+      return { modelo: !!m, codigo: document.getElementById("ultimo-codigo").textContent,
+        oyentes: m && m.ejecucion ? (m.ejecucion.oyentes || []).map((o) => o.id) : [] };
+    })()`);
+    comprueba("tras recargar, compilar vuelve a poblar el emulador desde el apk de OPFS",
+      trasRecargaEmulador.modelo === true && trasRecargaEmulador.codigo === "0" &&
+      trasRecargaEmulador.oyentes.join() === "id/pulsar",
+      JSON.stringify(trasRecargaEmulador).slice(0, 300));
+
     // 12a-ter-sexies. el texto del intérprete es dato: un `<script>` en un `texto` sale escapado y
     // nunca se convierte en marcado. Y el fallo del preview limpia la consola, sin tocar la de apkc.
     const escapado = await evaluar(`(async () => {

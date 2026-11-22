@@ -342,6 +342,15 @@ Los tres paneles no son el mismo canal:
 La consola de los **comandos de compilación** es otra: `#consola-pestana`, en el panel inferior. No
 comparte ni ids ni pintor con la de la app, y un clic del emulador no escribe en ella.
 
+**Fronteras del `android:onClick`.** (a) Se enlaza **solo** el layout de la actividad lanzadora: no se
+siguen `include`, ni `menu`, ni el contexto de un Fragment o un servicio. (b) La firma tiene que ser
+`(Landroid/view/View;)V`; si el método no existe o la vista no lleva `android:id`, no se inventa el
+oyente y el registro del emulador lo dice en un aviso. (c) Las **lambdas Java siguen fuera del
+subconjunto** del compilador propio: `v -> {…}` se rechaza al compilar (`">" no es una expresion que
+este parser reconozca`); el patrón anónimo, `this`, la clase interna y `android:onClick` sí se
+ejecutan. Y el sitio publicado (`https://apkc-studio.surge.sh/`) sigue con la **build anterior**:
+estos cambios no se han empaquetado ni publicado.
+
 Todo se pinta con `textContent`: un `texto` con `<script>` sale escapado y no se convierte en
 marcado. Sin `ejecucion` (por ejemplo con `--sin-ejecutar` o sin `classes.dex`) el vacío explica
 por qué; si el preview falla, los paneles se vacían con el mismo motivo y no tocan `#consola-pestana`
