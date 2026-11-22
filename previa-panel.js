@@ -6,25 +6,29 @@
 //     gravedad y márgenes—, nunca el código XML: no hay `<pre>` ni resaltado de etiquetas. Se
 //     refresca al teclear con un debounce corto, no lanza ningún comando de apkc y, si el XML está
 //     a medias, conserva el último render bueno y lo dice en la línea de estado.
-//   - «Emulador»: el canvas del modelo real de `apkc preview` (tras compilar, con `textoDinamico`)
-//     y la consola de la ejecución: capturas, avisos, pasos y error.
+//   - «Emulador»: el canvas del modelo real de `apkc preview` (tras compilar, con `textoDinamico`),
+//     los botones de las vistas que responden a un clic, el registro del emulador (escrituras de
+//     view, avisos, pasos y error) y la consola de la app (`System.out.println` y `Log.*`). Arranca
+//     en el estado de `onCreate`: el texto cambia solo al pulsar de verdad, y cada clic se manda a
+//     `apkc preview --pulsar` en orden. La consola de compilación es otra (#consola-pestana).
 //
 // Reglas que no se relajan:
-//   - **Nada muta el modelo.** Los tiradores cambian variables CSS del marco y los canvas solo
-//     leen; ningún `pointerdown` de esta pieza escribe en OPFS ni cambia `estadoPestana`.
+//   - **Nada muta el modelo.** Los tiradores cambian variables CSS del marco; los canvas solo leen.
+//     Un clic solo vuelve a pedir `apkc preview` sobre el apk ya compilado con la lista de clics.
 //   - **Todo el texto del intérprete es dato, no marcado.** Se pinta con `textContent`.
 //   - **Sin red.** El layout y los `@string` se leen del OPFS del propio proyecto.
 //
-// Cada marco (el del editor y el de la vista Pantalla) tiene cuatro aristas y cuatro esquinas. Un
-// tirador horizontal cambia el ancho (la arista sigue al puntero según su lado) y uno vertical el
-// alto; las esquinas cambian las dos cosas. El reparto es siempre un clic sobre una preferencia de
-// esta ventana, nunca un cambio del proyecto.
+// Cada marco (editor y Pantalla) tiene cuatro aristas y cuatro esquinas: un tirador horizontal
+// cambia el ancho y uno vertical el alto; las esquinas cambian los dos. Es preferencia de ventana.
 //
-// Las funciones de cabecera —`medidaValida`, `anchoValido`, `cajaRedimensionada`,
-// `esRutaDeLayout`, `candidatosDeLayout` y `resumenEjecucion`— son puras y se prueban en node
-// (`prueba.js`); el modelo en vivo se prueba en `vista-xml.js`. La carpeta de OPFS y el documento
-// activo llegan por el objeto de dependencias: este módulo no importa `pestana.js`.
-import { pintarModelo, modeloActual, EVENTO_PREVIA } from "./vista-previa.js";
+// Funciones puras, probadas en node (`prueba.js`): `medidaValida`, `anchoValido`,
+// `cajaRedimensionada`, `esRutaDeLayout`, `candidatosDeLayout`, `resumenEjecucion`,
+// `oyentesDeModelo` y `nodoEnPunto`. El modelo en vivo se prueba en `vista-xml.js`. La carpeta de
+// OPFS y el documento activo llegan por el objeto de dependencias: no importa `pestana.js`.
+import {
+  pintarModelo, modeloActual, EVENTO_PREVIA, modeloDeSalida, pintarVistaPrevia, nodosAplanados,
+  textoDeNodo, rectsEscalados,
+} from "./vista-previa.js";
 import { modeloDeLayout, decodificarEntidades } from "./vista-xml.js";
 
 // Persistencia de la vista dividida. Son preferencias de esta ventana, no del proyecto.
@@ -59,6 +63,8 @@ const ESPERA_ARBOL = 400;
 const ESPERA_PREVIA = 120;
 const CAPTURAS_MAXIMAS = 64;
 const AVISOS_MAXIMOS = 24;
+const CONSOLA_MAXIMAS = 128;
+const OYENTES_MAXIMOS = 32;
 
 const MENSAJE_SIN_MODELO = "Compila el proyecto (Editor → Compilar → Compilar debug) para ver aquí " +
   "la pantalla del emulador y lo que ejecuta la app.";
@@ -196,15 +202,81 @@ export function resumenEjecucion(modelo) {
     .slice(0, AVISOS_MAXIMOS)
     .map(comoTexto)
     .filter((a) => a.trim() !== "");
+  // la consola de la app es un canal aparte del registro: cada línea lleva su origen y el orden en
+  // que se emitió, porque el reloj no existe en el intérprete y no se finge
+  const consola = (Array.isArray(ejecucion.consola) ? ejecucion.consola : [])
+    .slice(0, CONSOLA_MAXIMAS)
+    .filter((l) => l && typeof l === "object")
+    .map((l) => ({ origen: comoTexto(l.origen), texto: comoTexto(l.texto), secuencia: comoCuenta(l.secuencia) }))
+    .filter((l) => l.origen || l.texto !== "");
+  const pulsaciones = (Array.isArray(ejecucion.pulsaciones) ? ejecucion.pulsaciones : [])
+    .slice(0, OYENTES_MAXIMOS)
+    .map(comoTexto)
+    .filter((p) => p.trim() !== "");
+  const oyentes = (Array.isArray(ejecucion.oyentes) ? ejecucion.oyentes : [])
+    .slice(0, OYENTES_MAXIMOS)
+    .filter((o) => o && typeof o === "object")
+    .map((o) => ({ id: comoTexto(o.id), idRef: comoTexto(o.idRef) }))
+    .filter((o) => o.id || o.idRef);
   return {
     actividad: comoTexto(ejecucion.actividad),
     metodo: comoTexto(ejecucion.metodo),
     pasos: comoCuenta(ejecucion.pasos),
     interacciones: comoCuenta(ejecucion.interacciones),
     capturas,
+    consola,
+    pulsaciones,
+    oyentes,
     avisos,
     error: comoTexto(ejecucion.error),
   };
+}
+
+// Las vistas que responden a un clic, con su aspecto en el modelo. `ejecucion.oyentes` es la fuente
+// (lo que el intérprete registró); el árbol solo aporta el tipo y el texto para la etiqueta. El
+// `idRef` es lo que se manda a `apkc preview --pulsar`, porque no depende del idioma ni del nombre.
+export function oyentesDeModelo(modelo) {
+  const resumen = resumenEjecucion(modelo);
+  if (!resumen || !resumen.oyentes.length) return [];
+  const porRef = new Map();
+  for (const { nodo } of nodosAplanados(modelo)) {
+    if (nodo && typeof nodo.idRef === "string" && nodo.idRef) porRef.set(nodo.idRef, nodo);
+  }
+  return resumen.oyentes.map((o) => {
+    const nodo = o.idRef ? porRef.get(o.idRef) : null;
+    return {
+      id: o.id || o.idRef,
+      idRef: o.idRef,
+      tipo: nodo && typeof nodo.tipo === "string" ? nodo.tipo : "",
+      texto: nodo ? textoDeNodo(nodo) : "",
+    };
+  });
+}
+
+// La vista bajo un punto del canvas, en coordenadas lógicas del panel (las mismas que usa el
+// pintor). Gana la más profunda, que es la que un dedo tocaría. Devuelve null fuera del dibujo.
+export function nodoEnPunto(modelo, ancho, alto, x, y) {
+  if (!Number.isFinite(x) || !Number.isFinite(y)) return null;
+  let elegido = null;
+  for (const r of rectsEscalados(modelo, ancho, alto)) {
+    if (x < r.x || y < r.y || x > r.x + r.ancho || y > r.y + r.alto) continue;
+    if (!elegido || r.profundidad >= elegido.profundidad) elegido = r;
+  }
+  return elegido;
+}
+
+// La vista que ATIENDE un clic en ese punto: la más profunda que además registró el listener. Un
+// toque sobre el hijo de un contenedor con `OnClickListener` sube hasta el contenedor, como el
+// reparto de eventos del framework; si ninguna de las que contienen el punto escucha, no hay clic.
+export function oyenteEnPunto(modelo, ancho, alto, x, y) {
+  if (!Number.isFinite(x) || !Number.isFinite(y)) return null;
+  let elegido = null;
+  for (const r of rectsEscalados(modelo, ancho, alto)) {
+    if (!r.oyente || !r.idRef) continue;
+    if (x < r.x || y < r.y || x > r.x + r.ancho || y > r.y + r.alto) continue;
+    if (!elegido || r.profundidad >= elegido.profundidad) elegido = r;
+  }
+  return elegido;
 }
 
 function leerClave(clave, respaldo) {
@@ -261,6 +333,10 @@ export function crearPreviaPanel({ hospedador, proyecto, estadoPestana, editor }
   let arbolEn = 0;
   let cuadro = 0;
   let iniciado = false;
+  // la lista de clics entregados desde la última compilación: se repite entera en cada `--pulsar`,
+  // que es lo que hace reproducible la pantalla (el comando no guarda estado entre invocaciones)
+  let pulsos = [];
+  let pulsando = false;
 
   const conDocumento = () => typeof document !== "undefined" && !!document.getElementById;
   const el = (id) => (conDocumento() ? document.getElementById(id) : null);
@@ -638,6 +714,61 @@ export function crearPreviaPanel({ hospedador, proyecto, estadoPestana, editor }
         vacio.textContent = texto || MENSAJE_SIN_MODELO;
       }
     }
+    limpiarConsola();
+    limpiarOyentes();
+  }
+
+  // La consola de la app: solo `print`/`println`/`Log.*`. Se pinta con `textContent` y el número de
+  // secuencia que trae el intérprete, que es el orden real de emisión.
+  function limpiarConsola(texto) {
+    const lista = document.getElementById("previa-consola-lista");
+    const cabecera = document.getElementById("previa-consola-cabecera");
+    const vacio = document.getElementById("previa-consola-vacio");
+    if (lista) lista.textContent = "";
+    if (cabecera) cabecera.textContent = "sin salida";
+    if (vacio) {
+      vacio.hidden = false;
+      if (texto) vacio.textContent = texto;
+    }
+  }
+
+  function pintarConsola(modelo) {
+    const lista = document.getElementById("previa-consola-lista");
+    const cabecera = document.getElementById("previa-consola-cabecera");
+    const vacio = document.getElementById("previa-consola-vacio");
+    if (!lista || !cabecera || !vacio) return;
+    const resumen = resumenEjecucion(modelo);
+    lista.textContent = "";
+    if (!resumen) {
+      cabecera.textContent = "sin salida";
+      vacio.hidden = false;
+      vacio.textContent = "Compila el proyecto para ver lo que la app imprime.";
+      return;
+    }
+    for (const linea of resumen.consola) {
+      const li = document.createElement("li");
+      li.className = "previa-consola-linea";
+      const secuencia = document.createElement("span");
+      secuencia.className = "previa-consola-secuencia";
+      secuencia.textContent = String(linea.secuencia || lista.children.length + 1);
+      const origen = document.createElement("span");
+      origen.className = "previa-consola-origen";
+      origen.textContent = linea.origen || "salida";
+      const cuerpo = document.createElement("span");
+      cuerpo.className = "previa-consola-texto";
+      cuerpo.textContent = linea.texto;
+      li.appendChild(secuencia);
+      li.appendChild(origen);
+      li.appendChild(cuerpo);
+      lista.appendChild(li);
+    }
+    cabecera.textContent = resumen.consola.length === 1
+      ? "1 línea · " + resumen.pulsaciones.length + (resumen.pulsaciones.length === 1 ? " clic" : " clics")
+      : resumen.consola.length + " líneas · " + resumen.pulsaciones.length +
+        (resumen.pulsaciones.length === 1 ? " clic" : " clics");
+    const hay = lista.children.length > 0;
+    vacio.hidden = hay;
+    if (!hay) vacio.textContent = "La app no imprimió nada en esta ejecución.";
   }
 
   function lineaLog(clase, origen, texto) {
@@ -690,6 +821,124 @@ export function crearPreviaPanel({ hospedador, proyecto, estadoPestana, editor }
       vacio.hidden = hay;
       if (!hay) vacio.textContent = "La ejecución no capturó escrituras ni dejó avisos.";
     }
+
+  }
+
+  // --- clics del emulador -------------------------------------------------------------------
+  function limpiarOyentes(texto) {
+    const caja = document.getElementById("previa-oyentes");
+    const cuenta = document.getElementById("previa-pulsos-cuenta");
+    const nota = document.getElementById("previa-pulsos-nota");
+    if (caja) caja.textContent = "";
+    if (cuenta) cuenta.textContent = "sin clics";
+    if (nota) {
+      nota.hidden = false;
+      if (texto) nota.textContent = texto;
+    }
+  }
+
+  function pintarOyentes(modelo) {
+    const caja = document.getElementById("previa-oyentes");
+    const cuenta = document.getElementById("previa-pulsos-cuenta");
+    const nota = document.getElementById("previa-pulsos-nota");
+    if (!caja || !cuenta || !nota) return;
+    const oyentes = oyentesDeModelo(modelo);
+    const resumen = resumenEjecucion(modelo);
+    // los clics que la pantalla declara haber ejecutado: el modelo los trae (`pulsaciones`) y, si
+    // esta instancia acaba de pedir uno, la lista local ya los incluye; manda el mayor de los dos
+    const entregados = Math.max(pulsos.length, resumen ? resumen.pulsaciones.length : 0);
+    caja.textContent = "";
+    cuenta.textContent = entregados === 0 ? "sin clics"
+      : entregados + (entregados === 1 ? " clic" : " clics");
+    for (const o of oyentes) {
+      const boton = document.createElement("button");
+      boton.type = "button";
+      boton.className = "previa-oyente";
+      boton.dataset.idref = o.idRef;
+      const etiqueta = o.texto ? o.id + " · " + o.texto : o.id;
+      boton.textContent = etiqueta;
+      boton.title = "Ejecutar el OnClickListener de " + o.id;
+      boton.addEventListener("click", (e) => {
+        e.preventDefault();
+        pulsar(o.idRef);
+      });
+      caja.appendChild(boton);
+    }
+    nota.hidden = oyentes.length > 0;
+    if (!oyentes.length) {
+      nota.textContent = "Esta ejecución no registró ningún OnClickListener sobre una vista con id.";
+    }
+  }
+
+  // Pide la pantalla después de un clic. Se repite TODO el estado desde `onCreate` (más los clics
+  // anteriores), así que la pantalla resultante es la misma siempre para la misma lista: el comando
+  // no puede guardar la máquina entre invocaciones y no lo finge.
+  async function pulsar(idRef) {
+    if (pulsando || typeof idRef !== "string" || !idRef) return null;
+    if (!document.getElementById("previa-render-estado")) return null;
+    const antes = pulsos.length;
+    pulsos.push(idRef);
+    pulsando = true;
+    const estado = document.getElementById("previa-render-estado");
+    if (estado) estado.textContent = "Ejecutando el clic " + pulsos.length + "…";
+    try {
+      await hospedador.cwd(carpeta);
+      const argv = ["preview"];
+      for (const p of pulsos) argv.push("--pulsar", p);
+      argv.push("build/app.apk");
+      const r = await hospedador.ejecutar(argv);
+      const modelo = modeloDeSalida(r && r.consola);
+      if (!modelo) {
+        // el clic no se pudo entregar: se deshace para que la lista siga siendo válida y se dice por qué
+        pulsos.length = antes;
+        const lineas = String((r && (r.error || r.consola)) || "").trim().split("\n").filter(Boolean);
+        mensajeVistaPreviaRender(lineas.length ? lineas[lineas.length - 1].trim() : "el clic no devolvió un modelo legible");
+        return null;
+      }
+      // `pintarVistaPrevia` avisa por el evento; el panel se repinta con el modelo nuevo
+      return pintarVistaPrevia(modelo);
+    } catch (e) {
+      pulsos.length = antes;
+      mensajeVistaPreviaRender("no se pudo ejecutar el clic: " + (e && e.message ? e.message : e));
+      return null;
+    } finally {
+      pulsando = false;
+    }
+  }
+
+  function mensajeVistaPreviaRender(texto) {
+    const estado = document.getElementById("previa-render-estado");
+    if (estado) estado.textContent = texto;
+  }
+
+  // Un clic en el canvas se traduce a la vista que hay debajo, en las coordenadas lógicas del
+  // panel. Si esa vista no tiene listener, el clic no hace nada (y no se inventa un aviso).
+  function conectarCanvas() {
+    const canvas = document.getElementById("previa-lateral-canvas");
+    if (!canvas) return;
+    const alPulsar = (e) => {
+      // el espacio de la pintura manda: con él se midió el modelo y con él se pinta
+      const espacio = canvas.__espacio || { ancho: 0, alto: 0 };
+      const ancho = espacio.ancho;
+      const alto = espacio.alto;
+      const caja = typeof canvas.getBoundingClientRect === "function" ? canvas.getBoundingClientRect() : null;
+      if (!(ancho > 0) || !(alto > 0) || !caja || !(caja.width > 0) || !(caja.height > 0)) return;
+      const x = (e.clientX - caja.left) * (ancho / caja.width);
+      const y = (e.clientY - caja.top) * (alto / caja.height);
+      const nodo = oyenteEnPunto(modeloActual(), ancho, alto, x, y);
+      if (!nodo) return;
+      e.preventDefault();
+      pulsar(nodo.idRef);
+    };
+    canvas.addEventListener("pointerdown", alPulsar);
+    // el teclado también puede pulsar la primera vista que responde: es la misma orden, sin puntero
+    canvas.addEventListener("keydown", (e) => {
+      if (e.key !== "Enter" && e.key !== " ") return;
+      const primero = oyentesDeModelo(modeloActual())[0];
+      if (!primero) return;
+      e.preventDefault();
+      pulsar(primero.idRef);
+    });
   }
 
   // --- pintura ------------------------------------------------------------------------------
@@ -761,9 +1010,29 @@ export function crearPreviaPanel({ hospedador, proyecto, estadoPestana, editor }
       }
       if (!primero) primero = pintado;
     }
-    if (modelo) pintarLog(modelo);
-    else limpiarLog(motivo || MENSAJE_SIN_MODELO);
-    return primero;
+    const pintado = pintarModelo(canvas, modelo);
+    // El clic mide en el espacio con el que se pintó, no en el clientWidth del momento: si el panel
+    // cambió de tamaño entre pintar y pulsar, el punto se desalinearía con los píxeles visibles.
+    if (pintado && pintado.ancho > 0 && pintado.alto > 0) {
+      canvas.__espacio = { ancho: pintado.ancho, alto: pintado.alto };
+    }
+    const layout = modelo.layout ? String(modelo.layout) : "el layout";
+    estado.textContent = "Emulador de " + layout +
+      (modelo.aproximado === false ? ", sin aproximar." : " aproximado.") +
+      " Arranca en onCreate: pulsa una vista para ejecutar su OnClickListener.";
+    if (modelo) {
+      pintarLog(modelo);
+      pintarConsola(modelo);
+      pintarOyentes(modelo);
+    } else {
+      limpiarLog(motivo || MENSAJE_SIN_MODELO);
+      pintarConsola(modelo);
+      pintarOyentes(modelo);
+    }
+    if (pintado && pintado.valida === false) {
+      estado.textContent = "El modelo de vista previa no trae una pantalla medible; no se pinta nada.";
+    }
+    return pintado;
   }
 
   function programarPintado() {
@@ -935,8 +1204,10 @@ export function crearPreviaPanel({ hospedador, proyecto, estadoPestana, editor }
     document.addEventListener(EVENTO_PREVIA, (e) => {
       if (!visible && !vistaActiva()) return;
       const detalle = e && e.detail ? e.detail : {};
-      // el modelo cambió: el canvas y la consola se pintan ya. Un rAF dejaría la consola con las
-      // capturas del build anterior justo cuando el preview falla, que es cuando más importa.
+      // un modelo que no viene de un clic es un build nuevo: la lista de clics vuelve a empezar
+      if (!pulsando) pulsos = [];
+      // el modelo cambió: el canvas y los dos paneles se pintan ya. Un rAF dejaría la consola con
+      // las capturas del build anterior justo cuando el preview falla, que es cuando más importa.
       pintarRender(detalle.mensaje);
       // el layout del modelo puede decir cuál es el layout del proyecto si aún no hay ninguno vivo
       if (modo === "vivo" && !modeloVivo) programarVivo(ESPERA_PREVIA);
@@ -993,6 +1264,7 @@ export function crearPreviaPanel({ hospedador, proyecto, estadoPestana, editor }
 
     conectarModos();
     conectarEntrada();
+    conectarCanvas();
     const alternar = el("previa-alternar");
     if (alternar) alternar.addEventListener("click", () => aplicarVisible(!visible, true));
     const cerrar = el("previa-cerrar");
@@ -1039,12 +1311,14 @@ export function crearPreviaPanel({ hospedador, proyecto, estadoPestana, editor }
     pintarVivo,
     pintarRender,
     repintar,
-    // lectura para las pruebas de chromium: el modelo dibujado en el modo Vista previa (no el código)
+    // un clic desde fuera (la prueba de chromium): la misma orden que el puntero del canvas
+    pulsar,
+    // lectura para las pruebas: el modelo dibujado en el modo Vista previa (no el código)
     modeloVivo: () => modeloVivo,
     estado: () => ({
       ancho: caja.ancho, alto: caja.alto, arriba: caja.arriba,
       lado: cajaLado.ancho, ladoAlto: cajaLado.alto,
-      visible, modo, ruta: rutaViva,
+      visible, modo, ruta: rutaViva, pulsos: [...pulsos],
     }),
   };
 }

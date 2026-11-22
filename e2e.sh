@@ -178,7 +178,9 @@ done
 # 0c. la vista previa sobre el apk que acaba de generar este mismo gate: `apkc preview` lee un
 # paquete real y devuelve el modelo de su primera pantalla. Es el comando que la pestaña ejecuta
 # dentro de wasm, aquí en nativo, así que no depende de APKC_WASM ni de chromium y corre aunque
-# esas secciones se omitan. Lo que se comprueba es el contrato del JSON, no una traza de consola.
+# esas secciones se omitan. Lo que se comprueba es el contrato del JSON, no una traza de consola:
+# el emulador arranca sin pulsar nada («Pulsos: 0») y `--pulsar id/pulsar` ejecuta el onClick, que
+# escribe la vista, el registro y la consola de la app.
 vista_previa() {
   apk=$CONTADOR/build/app.apk
   if [ ! -f "$apk" ]; then
@@ -189,25 +191,71 @@ vista_previa() {
     falla "apkc preview no lee el apk del Contador: $(tail -2 "$TMP/studio-preview.log" | tr '\n' ' ')"
     return
   fi
+  if ! ejecutar "$APKC" preview --pulsar id/pulsar "$apk" \
+      >"$TMP/studio-preview-clic.json" 2>"$TMP/studio-preview-clic.log"; then
+    falla "apkc preview --pulsar no entrega el clic de id/pulsar: $(tail -2 "$TMP/studio-preview-clic.log" | tr '\n' ' ')"
+    return
+  fi
   if ! node -e '
     const fs = require("node:fs");
-    let m;
-    try { m = JSON.parse(fs.readFileSync(process.argv[1], "utf8")); }
-    catch (e) { console.error("no es JSON: " + e.message); process.exit(1); }
-    const hijos = (m.raiz && m.raiz.hijos) || [];
-    const tipos = hijos.map((h) => h.tipo);
-    const total = hijos.find((h) => h.id === "id/total");
+    const leer = (ruta) => {
+      try { return JSON.parse(fs.readFileSync(ruta, "utf8")); }
+      catch (e) { console.error("no es JSON (" + ruta + "): " + e.message); process.exit(1); }
+    };
+    const reposo = leer(process.argv[1]);
+    const clic = leer(process.argv[2]);
     const problemas = [];
-    if (!Number.isInteger(m.nodos) || m.nodos < 1) problemas.push("nodos=" + m.nodos);
-    if (m.layout !== "res/layout/main.xml") problemas.push("layout=" + m.layout);
-    if (!m.raiz || m.raiz.tipo !== "LinearLayout") problemas.push("raiz=" + (m.raiz && m.raiz.tipo));
+    const totalDe = (m) => ((m.raiz && m.raiz.hijos) || []).find((h) => h.id === "id/total");
+    const botonDe = (m) => ((m.raiz && m.raiz.hijos) || []).find((h) => h.id === "id/pulsar");
+    const tipos = ((reposo.raiz && reposo.raiz.hijos) || []).map((h) => h.tipo);
+    if (!Number.isInteger(reposo.nodos) || reposo.nodos < 1) problemas.push("nodos=" + reposo.nodos);
+    if (reposo.layout !== "res/layout/main.xml") problemas.push("layout=" + reposo.layout);
+    if (!reposo.raiz || reposo.raiz.tipo !== "LinearLayout") problemas.push("raiz=" + (reposo.raiz && reposo.raiz.tipo));
     if (!tipos.includes("TextView") || !tipos.includes("Button")) problemas.push("hijos=" + tipos.join(","));
-    if (!total) problemas.push("sin id/total");
-    else if (total.textoDinamico !== "Pulsos: 1") problemas.push("textoDinamico=" + total.textoDinamico);
+    const totalReposo = totalDe(reposo);
+    const boton = botonDe(reposo);
+    if (!totalReposo) problemas.push("sin id/total");
+    else if (totalReposo.textoDinamico) problemas.push("sin clic ya hay textoDinamico=" + totalReposo.textoDinamico);
+    if (!boton) problemas.push("sin id/pulsar");
+    else if (boton.oyente !== true) problemas.push("el botón no se marca como oyente");
+    const ejecucionReposo = reposo.ejecucion || {};
+    if ((ejecucionReposo.interacciones || 0) !== 0) problemas.push("interacciones en reposo=" + ejecucionReposo.interacciones);
+    if (!(ejecucionReposo.oyentes || []).some((o) => o.id === "id/pulsar")) {
+      problemas.push("oyentes=" + JSON.stringify(ejecucionReposo.oyentes));
+    }
+    const totalClic = totalDe(clic);
+    if (!totalClic || totalClic.textoDinamico !== "Pulsos: 1") {
+      problemas.push("tras el clic textoDinamico=" + (totalClic && totalClic.textoDinamico));
+    }
+    const ejecucionClic = clic.ejecucion || {};
+    if (ejecucionClic.interacciones !== 1) problemas.push("interacciones tras el clic=" + ejecucionClic.interacciones);
+    // el contrato de la consola no depende de lo que imprima la plantilla: es una separación. Cada
+    // captura de `print`/`println`/`Log.*` tiene que estar en `consola`, en el mismo orden y con la
+    // misma secuencia, y `consola` no puede llevar nada que no sea salida de la app.
+    const esSalida = (origen) => origen === "print" || origen === "println" || /^Log\./.test(origen);
+    const capturas = ejecucionClic.capturas || [];
+    const esperadas = capturas.filter((c) => esSalida(c.origen));
+    const consola = ejecucionClic.consola || [];
+    if (consola.length !== esperadas.length) {
+      problemas.push("consola=" + consola.length + " líneas y la app capturó " + esperadas.length + " de salida");
+    } else {
+      for (let i = 0; i < consola.length; i++) {
+        if (consola[i].origen !== esperadas[i].origen || consola[i].texto !== esperadas[i].texto ||
+            consola[i].secuencia !== i + 1) {
+          problemas.push("consola[" + i + "]=" + JSON.stringify(consola[i]) + " y la captura es " +
+            JSON.stringify(esperadas[i]));
+          break;
+        }
+      }
+    }
+    if (!capturas.some((c) => c.origen === "TextView.setText")) {
+      problemas.push("el clic no dejó ninguna escritura de view: " + JSON.stringify(capturas.map((c) => c.origen)));
+    }
     if (problemas.length) { console.error(problemas.join("; ")); process.exit(1); }
-    console.log(m.nodos + " nodos, " + m.layout + ", " + m.raiz.tipo + "[" + tipos.join(",") + "], "
-      + "id/total con textoDinamico " + JSON.stringify(total.textoDinamico));
-  ' "$TMP/studio-preview.json" >"$TMP/studio-preview-resumen.log" 2>&1; then
+    console.log(reposo.nodos + " nodos, " + reposo.layout + ", razon " + reposo.raiz.tipo + "[" + tipos.join(",") + "], " +
+      "en reposo sin textoDinamico y oyente id/pulsar; un clic deja " +
+      JSON.stringify(totalClic.textoDinamico) + " y " + consola.length + " líneas de consola");
+  ' "$TMP/studio-preview.json" "$TMP/studio-preview-clic.json" >"$TMP/studio-preview-resumen.log" 2>&1; then
     falla "el modelo de apkc preview no cumple el contrato: $(tail -2 "$TMP/studio-preview-resumen.log" | tr '\n' ' ')"
     return
   fi

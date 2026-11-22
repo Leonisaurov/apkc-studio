@@ -134,6 +134,10 @@ export function rectsEscalados(modelo, ancho, alto) {
       alto: Math.max(1, alto * caja.escala),
       tipo: String(nodo.tipo || ""),
       id: String(nodo.id || ""),
+      // el id de recurso numérico y la marca de oyente son lo que necesita el clic del canvas: el
+      // primero para pedir `--pulsar`, la segunda para saber si esa vista responde
+      idRef: String(nodo.idRef || ""),
+      oyente: nodo.oyente === true,
       texto: textoDeNodo(nodo),
       profundidad,
     };
@@ -264,8 +268,9 @@ export function pintarModelo(canvas, modelo, medir) {
     }
     ctx.fillStyle = marco;
     ctx.fillRect(r.x, r.y, r.ancho, r.alto);
-    ctx.strokeStyle = bordeFuerte;
-    ctx.lineWidth = 1;
+    // la vista que responde a un clic se marca con el acento: es la única que el emulador atiende
+    ctx.strokeStyle = r.oyente ? acento : bordeFuerte;
+    ctx.lineWidth = r.oyente ? 2 : 1;
     ctx.strokeRect(r.x + 0.5, r.y + 0.5, Math.max(1, r.ancho - 1), Math.max(1, r.alto - 1));
     ctx.save();
     ctx.beginPath();

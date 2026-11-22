@@ -653,6 +653,19 @@ body.separando-previa[data-eje="suroeste"] { cursor: nesw-resize; }
   min-height: 120px;
   max-width: 360px;
 }
+/* El render lleva dos paneles debajo (registro y consola) y los botones de pulsar: con la ventana
+   baja, el marco del teléfono no puede quedarse en cero (sin altura, el canvas no recibe clics y
+   el modo Render se ve vacío). El marco conserva un mínimo y el panel entero se desplaza. */
+#previa-render {
+  overflow-y: auto;
+}
+#previa-render .previa-marco-lateral {
+  flex: 0 0 auto;
+  min-height: 220px;
+}
+#previa-render .previa-canvas-lateral {
+  min-height: 220px;
+}
 .previa-log {
   flex: 1 1 44%;
   display: flex;
@@ -717,6 +730,63 @@ body.separando-previa[data-eje="suroeste"] { cursor: nesw-resize; }
 .previa-log-linea.aviso .previa-log-texto { color: var(--aviso); }
 .previa-log-linea.peligro .previa-log-origen,
 .previa-log-linea.peligro .previa-log-texto { color: var(--peligro); }
+
+/* ---- el emulador: pulsar y consola de la app ------------------------------ */
+.previa-pulsos {
+  flex: 0 0 auto;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding-top: 6px;
+  border-top: 1px solid var(--borde);
+}
+.previa-oyentes {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+.previa-oyente {
+  max-width: 100%;
+  padding: 2px 8px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--texto-editor);
+  background: var(--superficie2);
+  border: 1px solid var(--borde2);
+  border-radius: 4px;
+  font: var(--ed-fuente);
+  font-size: 11px;
+  cursor: pointer;
+}
+.previa-oyente:hover { border-color: var(--acento); }
+.previa-oyente:focus-visible { outline: 2px solid var(--acento); outline-offset: 1px; }
+.previa-consola-linea {
+  display: flex;
+  gap: 6px;
+  min-width: 0;
+  padding: 1px 0;
+  color: var(--texto-editor);
+}
+.previa-consola-linea + .previa-consola-linea { border-top: 1px dotted var(--borde); }
+.previa-consola-secuencia {
+  flex: 0 0 auto;
+  min-width: 1.4em;
+  color: var(--texto-medio);
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+.previa-consola-origen {
+  flex: 0 0 auto;
+  color: var(--sintaxis-anotacion);
+  font-variant-ligatures: none;
+}
+.previa-consola-texto {
+  min-width: 0;
+  overflow-wrap: anywhere;
+  white-space: pre-wrap;
+}
+.previa-canvas-lateral[tabindex] { cursor: crosshair; }
 
 /* ---- contenido de Inicio -------------------------------------------------- */
 

@@ -146,7 +146,7 @@ del panel, que a su vez contiene los ocho tiradores y el `<aside>`:
     <aside id="previa-lateral">
       … #previa-modo-vivo (Vista previa) | #previa-modo-render (Emulador) …
       <div id="previa-vivo">…#previa-vivo-canvas</div>
-      <div id="previa-render">…#previa-lateral-canvas … #previa-log</div>
+      <div id="previa-render">…#previa-lateral-canvas … #previa-pulsos … #previa-log … #previa-consola</div>
     </aside>
   </div>
 </div>
@@ -165,8 +165,12 @@ del panel, que a su vez contiene los ocho tiradores y el `<aside>`:
 | `#previa-modo-vivo`, `#previa-modo-render` | las dos pestañas (**Vista previa** y **Emulador**; `role="tab"`, `aria-selected`) |
 | `#previa-vivo`, `#previa-render` | los paneles (`role="tabpanel"`) |
 | `#previa-vivo-canvas`, `#previa-vivo-estado` | el canvas del layout dibujado y su línea de estado |
-| `#previa-lateral-canvas`, `#previa-render-estado` | el canvas del emulador y su línea de estado |
-| `#previa-log`, `#previa-log-cabecera`, `#previa-log-lista`, `#previa-log-vacio` | la consola del intérprete (`role="log"`) |
+| `#previa-lateral-canvas`, `#previa-render-estado` | el canvas del emulador (enfocable y pulsable) y su línea de estado |
+| `#previa-pulsos`, `#previa-oyentes`, `#previa-pulsos-cuenta` | los botones de las vistas con `OnClickListener` y la cuenta de clics |
+| `#previa-log`, `#previa-log-cabecera`, `#previa-log-lista`, `#previa-log-vacio` | el **registro del emulador** (`role="log"`) |
+| `#previa-consola`, `#previa-consola-cabecera`, `#previa-consola-lista`, `#previa-consola-vacio` | la **consola de la app** (`role="log"`): `println` y `Log.*` |
+| `#previa-modo-vivo`/`-render` y los ids `vista-*` | las dos superficies: Editor y Pantalla comparten modelo y consola |
+| `#consola-pestana` | la consola de los **comandos** de compilación; no es la de la app |
 
 `previa-panel.js` es dueño de esta pieza y no importa `pestana.js`: recibe `hospedador`, la carpeta
 del proyecto, `estadoPestana` y `EDITOR` desde `pestana.js` (`crearPreviaPanel`). Así el editor no
@@ -231,35 +235,56 @@ motivo; con un **XML a medias o inválido** se conserva el último render bueno 
 avisa con `XML inválido (línea N): se conserva el último render…` (clase `.con-aviso`), sin pintar
 nada de código en el canvas.
 
-### Emulador y consola de la ejecución
+### Emulador, clics y consola de la app
 
-La pestaña **Emulador** pinta el modelo real de `apkc preview` en `#previa-lateral-canvas` (con
-`pintarModelo`) y debajo lleva la consola de lo que hizo la app. El modelo llega por
-`apkc preview`; `vista-previa.js` publica el evento `apkc:previa-actualizada` con el modelo o con
-el motivo de no tenerlo, y el panel repinta sin volver a ejecutar nada. El mismo modelo y la misma
-consola se pintan en la vista **Pantalla**, sin una segunda ejecución: `SUPERFICIES` recorre los dos
-juegos de ids.
+La pestaña **Emulador** pinta el modelo real de `apkc preview` en `#previa-lateral-canvas` y debajo
+lleva **dos paneles separados**: el **registro del emulador** (`#previa-log`: escrituras de view,
+avisos, pasos) y la **consola de la app** (`#previa-consola`: `println` y `Log.*` con `secuencia`).
+`#consola-pestana` sigue siendo la de los comandos de compilación y no se ensucia con texto de la
+app. El mismo modelo y las dos listas se pintan en la vista **Pantalla**, sin segunda ejecución.
+
+**El emulador no pulsa solo.** `apkc preview` ejecuta `onCreate` y se detiene (`Pulsos: 0`); los
+`OnClickListener` quedan publicados en `ejecucion.oyentes`. Un clic —en el canvas o en un botón de
+`#previa-oyentes`— manda `apkc preview --pulsar <idRef>` con toda la lista de clics desde la última
+compilación, en orden: repetir la lista reproduce `Pulsos: 2` tras dos clics; un build nuevo la
+vacía. `pointerdown` usa `nodoEnPunto` (gana la vista más profunda con `oyente: true`); el canvas es
+`tabindex="0"` y Enter/espacio pulsan el primero. La medida del clic usa `canvas.__espacio` (lo que
+devolvió `pintarModelo`), no el `clientWidth` del momento, para que el punto caiga sobre los píxeles
+visibles. `#previa-render` lleva `overflow-y: auto` y el marco un mínimo de 220 px.
 
 `resumenEjecucion(modelo)` (puro) acota `ejecucion` antes de pintarlo: `capturas` (máximo 64,
-`origen`, `id`, `texto`), `avisos` (máximo 24), `pasos`, `interacciones`, `actividad`, `metodo` y
-`error`. Solo acepta cadenas donde el JSON promete cadenas y números finitos donde promete
-números. La lista va en el orden del JSON: primero las capturas (`TextView.setText id/total:
-Pulsos: 1`, `Log.d: …`, `println: …`) y después los avisos, con la clase `aviso` para
-distinguirlos; el `error`, si lo hay, va al final con la clase `peligro` y la cabecera lo marca.
-La cabecera resume `onCreate · actividad · N pasos · M interacciones`.
+`origen`, `id`, `texto`), `consola` (máximo 128, `origen`, `texto`, `secuencia`), `oyentes`,
+`pulsaciones`, `avisos` (máximo 24), `pasos`, `interacciones` (los clics entregados, que es lo que
+la cabecera cuenta como «N clics»), `actividad`, `metodo` y `error`.
+Solo acepta cadenas donde el JSON promete cadenas y números finitos donde promete números.
+
+Los dos paneles no son el mismo canal:
+
+- **Registro del emulador** (`#previa-log`, `role="log"`, `aria-label="Registro del emulador"`): la
+  lista completa en el orden de la ejecución —primero las capturas (`TextView.setText id/total:
+  Pulsos: 1`, y también `Log.d: …` y `println: …` porque ahí se ve todo—, después los avisos con la
+  clase `aviso` y al final el `error` con `peligro`. La cabecera resume
+  `onCreate · actividad · N pasos · M clics`.
+- **Consola de la app** (`#previa-consola`, `role="log"`, `aria-label="Consola de la app"`): solo la
+  salida estándar de la app —`System.out.println`/`print` y `Log.*`—, una línea por llamada, con su
+  número de `secuencia` (el orden real de emisión; el reloj no existe en el intérprete y no se
+  finge) y su origen. Su cabecera cuenta líneas y clics (`2 líneas · 1 clic`).
+
+La consola de los **comandos de compilación** es otra: `#consola-pestana`, en el panel inferior. No
+comparte ni ids ni pintor con la de la app, y un clic del emulador no escribe en ella.
 
 Todo se pinta con `textContent`: un `texto` con `<script>` sale escapado y no se convierte en
 marcado. Sin `ejecucion` (por ejemplo con `--sin-ejecutar` o sin `classes.dex`) el vacío explica
-por qué; si el preview falla, la consola se vacía con el mismo motivo y no toca `#consola-pestana`
+por qué; si el preview falla, los paneles se vacían con el mismo motivo y no tocan `#consola-pestana`
 ni `#ultimo-codigo`. Al recargar la página arranca vacía.
 
 ### Congeniar con compilar
 
 Compilar no cambia de pestaña: `previsualizarLoCompilado()` pinta el modelo y publica el evento; en
-modo Emulador el canvas se repinta en su caja y la consola se llena, en modo Vista previa se relee el layout.
-El editor no pierde foco, cursor ni scroll porque nadie escribe en `#codigo`. La compilación corre
-en el worker como siempre y el editor sigue aceptando teclas mientras dura; el fallo del preview
-se queda en el panel (`#previa-render-estado`, `#previa-log-vacio`).
+en modo Emulador el canvas se repinta en su caja, el registro y la consola de la app se llenan, y en
+modo Vista previa se relee el layout. El editor no pierde foco, cursor ni scroll porque nadie escribe
+en `#codigo`. La compilación corre en el worker como siempre; el fallo del preview se queda en el
+panel (`#previa-render-estado`, `#previa-log-vacio`, `#previa-consola-vacio`).
 
 ## Diagnóstico
 

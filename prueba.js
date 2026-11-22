@@ -518,6 +518,86 @@ if (!basura || basura.capturas.length !== 0 || basura.avisos.length !== 0 || bas
   mal("resumenEjecucion no tolera un JSON hostil: " + JSON.stringify(basura));
 }
 
+// la consola de la app es un canal aparte del registro: `consola` no se mezcla con `capturas`, cada
+// línea conserva su origen y su secuencia, y se acota igual que el resto
+const conConsola = previaPanel.resumenEjecucion({ ejecucion: {
+  ...ejecucionContador,
+  consola: [
+    { origen: "Log.d", texto: "pulso 1", secuencia: 1 },
+    { origen: "println", texto: "contador: pulso 1", secuencia: 2 },
+    { origen: "", texto: "" },
+  ],
+  oyentes: [{ id: "id/pulsar", idRef: "0x7f010000" }, { idRef: "0x7f010009" }, null],
+  pulsaciones: ["id/pulsar", ""],
+} });
+if (conConsola.consola.length !== 2 || conConsola.consola[0].origen !== "Log.d" ||
+    conConsola.consola[0].secuencia !== 1 || conConsola.consola[1].texto !== "contador: pulso 1") {
+  mal("resumenEjecucion no separa la consola de las capturas: " + JSON.stringify(conConsola.consola));
+}
+if (conConsola.capturas.length !== 3) mal("la consola se comió las capturas: " + conConsola.capturas.length);
+if (conConsola.oyentes.length !== 2 || conConsola.oyentes[0].idRef !== "0x7f010000") {
+  mal("resumenEjecucion no lee los oyentes: " + JSON.stringify(conConsola.oyentes));
+}
+if (conConsola.pulsaciones.length !== 1 || conConsola.pulsaciones[0] !== "id/pulsar") {
+  mal("resumenEjecucion no lee las pulsaciones: " + JSON.stringify(conConsola.pulsaciones));
+}
+const consolaHostil = previaPanel.resumenEjecucion({ ejecucion: { consola: "no", oyentes: 42, pulsaciones: {} } });
+if (consolaHostil.consola.length !== 0 || consolaHostil.oyentes.length !== 0 ||
+    consolaHostil.pulsaciones.length !== 0) {
+  mal("resumenEjecucion tolera mal una consola hostil: " + JSON.stringify(consolaHostil));
+}
+const consolaLarga = previaPanel.resumenEjecucion({ ejecucion: {
+  consola: Array.from({ length: 200 }, (_, i) => ({ origen: "println", texto: "l" + i, secuencia: i + 1 })),
+} });
+if (consolaLarga.consola.length !== 128) mal("resumenEjecucion no acota la consola: " + consolaLarga.consola.length);
+
+// las vistas que responden a un clic, con su etiqueta tomada del árbol, y la vista bajo un punto del
+// canvas: las dos son puras y son lo que convierte un clic en un `--pulsar`
+const modeloEmulador = {
+  layout: "res/layout/main.xml", pantalla: { x: 0, y: 0, ancho: 360, alto: 640 }, aproximado: true,
+  raiz: { tipo: "LinearLayout", rect: { x: 0, y: 0, ancho: 360, alto: 640 }, hijos: [
+    { tipo: "TextView", id: "id/total", idRef: "0x7f010001", texto: "Pulsos: 0",
+      rect: { x: 0, y: 0, ancho: 88, alto: 24 } },
+    { tipo: "Button", id: "id/pulsar", idRef: "0x7f010000", texto: "Pulsar", oyente: true,
+      rect: { x: 0, y: 24, ancho: 96, alto: 48 } },
+  ] },
+  ejecucion: { interacciones: 0, oyentes: [{ id: "id/pulsar", idRef: "0x7f010000" }], capturas: [], consola: [] },
+};
+const oyentes = previaPanel.oyentesDeModelo(modeloEmulador);
+if (oyentes.length !== 1 || oyentes[0].idRef !== "0x7f010000" || oyentes[0].tipo !== "Button" ||
+    oyentes[0].texto !== "Pulsar") {
+  mal("oyentesDeModelo no cruza el idRef con el árbol: " + JSON.stringify(oyentes));
+}
+if (previaPanel.oyentesDeModelo({ raiz: {} }).length !== 0) mal("oyentesDeModelo inventa oyentes sin ejecución");
+// el lienzo mide 270x480: la escala es 0,75 y el botón cae en y 18..54, x 0..72
+const enBoton = previaPanel.nodoEnPunto(modeloEmulador, 270, 480, 20, 30);
+if (!enBoton || enBoton.idRef !== "0x7f010000" || enBoton.oyente !== true) {
+  mal("nodoEnPunto no encuentra el botón oyente: " + JSON.stringify(enBoton));
+}
+const enTexto = previaPanel.nodoEnPunto(modeloEmulador, 270, 480, 20, 5);
+if (!enTexto || enTexto.idRef !== "0x7f010001" || enTexto.oyente !== false) {
+  mal("nodoEnPunto no distingue la vista sin listener: " + JSON.stringify(enTexto));
+}
+if (previaPanel.nodoEnPunto(modeloEmulador, 270, 480, 900, 900) !== null) {
+  mal("nodoEnPunto devuelve una vista fuera del dibujo");
+}
+if (previaPanel.nodoEnPunto(modeloEmulador, 270, 480, NaN, 0) !== null) mal("nodoEnPunto acepta NaN");
+// un toque sobre un hijo sube al contenedor que escucha; sin oyente encima, no hay clic
+const conOyenteArriba = { ...modeloEmulador, raiz: { ...modeloEmulador.raiz, hijos: [
+  { tipo: "LinearLayout", id: "id/zona", idRef: "0x7f010000", oyente: true,
+    rect: { x: 0, y: 0, ancho: 200, alto: 200 }, hijos: [
+      { tipo: "TextView", id: "id/total", idRef: "0x7f010001", texto: "Pulsos: 0",
+        rect: { x: 0, y: 0, ancho: 88, alto: 24 } },
+    ] },
+] } };
+const hijo = previaPanel.oyenteEnPunto(conOyenteArriba, 270, 480, 20, 10);
+if (!hijo || hijo.idRef !== "0x7f010000") {
+  mal("oyenteEnPunto no sube del hijo al contenedor que escucha: " + JSON.stringify(hijo));
+}
+if (previaPanel.oyenteEnPunto(modeloEmulador, 270, 480, 20, 5) !== null) {
+  mal("oyenteEnPunto devuelve una vista sin listener");
+}
+
 // la vista dividida es contrato: sin estos ids y roles, `previa-panel.js` no engancha y las
 // pruebas de chromium no tienen qué conducir
 for (const [id, donde] of [
@@ -539,6 +619,13 @@ for (const [id, donde] of [
   ["previa-vivo-canvas", "el canvas del layout en vivo"],
   ["previa-vivo-estado", "la línea de estado del layout en vivo"],
   ["previa-lateral-canvas", "el canvas del emulador"],
+  ["previa-pulsos", "los controles de clic del emulador"],
+  ["previa-oyentes", "los botones de las vistas que responden a un clic"],
+  ["previa-pulsos-cuenta", "la cuenta de clics entregados"],
+  ["previa-consola", "la consola de la app"],
+  ["previa-consola-lista", "las líneas de la consola de la app"],
+  ["previa-consola-cabecera", "el resumen de la consola de la app"],
+  ["previa-consola-vacio", "el mensaje de «sin salida»"],
   ["previa-log-lista", "la consola de la ejecución"],
   ["previa-log-cabecera", "el resumen de la ejecución"],
   ["previa-log-vacio", "el mensaje de «sin ejecución»"],
@@ -586,7 +673,21 @@ if (!/id="separador-previa"[^>]*tabindex="0"|tabindex="0"[^>]*id="separador-prev
 if (!/id="previa-modo-vivo"[^>]*role="tab"/.test(html) || !/id="previa-modo-render"[^>]*role="tab"/.test(html)) {
   mal("los dos modos de la previa no son role=tab");
 }
-if (!/id="previa-log"[^>]*role="log"/.test(html)) mal("la consola de la ejecución no es role=log");
+if (!/id="previa-log"[^>]*role="log"/.test(html)) mal("el registro del emulador no es role=log");
+if (!/id="previa-consola"[^>]*role="log"/.test(html)) mal("la consola de la app no es role=log");
+// los dos paneles son distintos y se llaman distinto: uno es el registro del emulador y el otro la
+// salida de la app. La consola de los comandos es la del panel inferior, que conserva su id
+if (!/id="previa-log"[^>]*aria-label="Registro del emulador"/.test(html)) {
+  mal("el panel de capturas no se llama «Registro del emulador»");
+}
+if (!/id="previa-consola"[^>]*aria-label="Consola de la app"/.test(html)) {
+  mal("el panel de salida no se llama «Consola de la app»");
+}
+if (!/id="consola-pestana"/.test(html)) mal("la consola de los comandos desapareció del panel inferior");
+// el canvas del render se puede pulsar: sin foco ni manejador no habría forma de tocar la app
+if (!/<canvas id="previa-lateral-canvas"[^>]*tabindex="0"/.test(html)) {
+  mal("el canvas del render no es enfocable: no se puede pulsar con el teclado");
+}
 if (!/id="previa-vivo"[^>]*role="tabpanel"/.test(html) || !/id="previa-render"[^>]*role="tabpanel"/.test(html)) {
   mal("los paneles en vivo y emulador no son role=tabpanel");
 }
