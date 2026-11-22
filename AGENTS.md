@@ -74,7 +74,7 @@ dar el editor por probado, comprueba en la salida `pestaña: N comprobaciones` y
 | `diagnostico.js` | panel de Inicio que pinta `analyze()`; solo DOM, sin reglas propias. |
 | `hospedador.js` | worker de módulo: `fs`/`path`/`process` para Go y una cola de un comando por vez. |
 | `fs-fragmento.js` | `fs` con forma de Node sobre OPFS (lo importa el worker, no la página). |
-| `servidor.js` | servidor de desarrollo ESM: estáticos + COOP/COEP + `/apkc.wasm` + `/wasm_exec.js` + `/android.jar`. |
+| `servidor.js` | servidor de desarrollo ESM: estáticos + COOP/COEP + `/apkc.wasm` + `/wasm_exec.js` + `/android.jar`. De los `platforms/` del SDK elige **android-34** antes que el más nuevo: la tabla de recursos de 35 y 36 viene en forma rala y el enlazador de Go no la lee (falla con «tabla rala»), así que servirla deja la compilación de la pestaña rota en un escritorio con SDK nuevo. |
 | `_headers` | COOP/COEP para hosts estáticos que las respetan (Netlify, Cloudflare Pages). |
 
 Todo el sitio son **ES modules** y `package.json` declara `"type": "module"`: no hay bundler ni

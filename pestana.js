@@ -2598,6 +2598,10 @@ async function compilarCon(k, tipo) {
     const campoPass = document.getElementById(KEYSTORES.compilar.pass);
     if (campoPass) campoPass.value = "";
   }
+  // el estado de la barra no se puede quedar en «compilando» para siempre: al terminar dice el
+  // resultado, que es lo que la persona mira cuando vuelve a la pestaña
+  if (!r || r.codigo !== 0) nota("la compilación falló; el motivo está en la consola");
+  else nota("apk " + tipo + " en build/app.apk, firmado; consola con el detalle");
   if (r && r.codigo === 0) {
     await descargar(PROYECTO + "/build/app.apk", "descargar-apk-compilada");
     await ofrecerDescarga(PROYECTO + "/build/app.apk.idsig", "descargar-idsig-compilada");

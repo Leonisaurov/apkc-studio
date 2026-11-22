@@ -199,7 +199,7 @@ async function conductor() {
     if (!previaVacia) await esperar(250);
   }
   if (!previaVacia) throw new Error("la vista previa no llegó al DOM en 10 s");
-  comprueba("la barra de actividad tiene tres vistas y la de vista previa se abre",
+  comprueba("la barra de actividad tiene tres vistas y la de Pantalla se abre",
     previaVacia.botones === 3 && previaVacia.activa === true && previaVacia.cuerpo === "vista",
     JSON.stringify(previaVacia));
   comprueba("sin apk la vista previa queda vacía con un mensaje y un canvas de solo lectura",
@@ -1295,9 +1295,9 @@ async function conductor() {
     comprueba("la vista previa pinta el modelo del apk compilado en el canvas",
       /3 nodos/.test(String(previa.estado)) && previa.colores > 3 && previa.pixel === true,
       JSON.stringify(previa).slice(0, 260));
-    comprueba("al entrar en Vista se repinta dentro de la caja visible y avisa de que es aproximada",
+    comprueba("al entrar en Pantalla se repinta dentro de la caja visible y avisa de que el emulador es aproximado",
       previa.cuerpo === "vista" && previa.activa === true && previa.visible > 0 &&
-      previa.ancho >= previa.visible && /aproximada/.test(String(previa.estado)),
+      previa.ancho >= previa.visible && /aproximad[oa]/.test(String(previa.estado)),
       JSON.stringify({ cuerpo: previa.cuerpo, visible: previa.visible, ancho: previa.ancho, estado: previa.estado }).slice(0, 260));
     comprueba("la vista previa no ensucia la consola ni el último código del build",
       previa.codigo === "0" && previa.enConsola === false,
@@ -2160,7 +2160,7 @@ async function conductor() {
       editorLayout.restaurado === true,
       JSON.stringify({ conSeleccion: editorLayout.conSeleccion, suelto: editorLayout.suelto,
         restaurado: editorLayout.restaurado }).slice(0, 320));
-    comprueba("cambiar a Render (eventos) apaga el modo editar y no deja la paleta abierta",
+    comprueba("cambiar a Emulador apaga el modo editar y no deja la paleta abierta",
       editorLayout.enRender.editando === false && editorLayout.enRender.pressed === "false" &&
       editorLayout.enRender.paleta === true,
       JSON.stringify(editorLayout.enRender).slice(0, 240));

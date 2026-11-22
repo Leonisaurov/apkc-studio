@@ -645,7 +645,12 @@ body.separando-previa[data-eje="suroeste"] { cursor: nesw-resize; }
   align-items: center;
 }
 .previa-paleta[hidden] { display: none; }
-.previa-paleta-titulo { font-size: 11px; color: var(--texto-medio); margin-right: 2px; }
+.previa-paleta-titulo {
+  flex-basis: 100%;
+  font-size: 11px;
+  color: var(--texto-medio);
+  margin-right: 2px;
+}
 .previa-paleta-boton {
   background: var(--boton);
   border: 1px solid var(--borde2);

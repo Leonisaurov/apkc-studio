@@ -33,13 +33,16 @@ if (!GOROOT) {
 const EJECUTA = path.join(GOROOT, "lib", "wasm", "wasm_exec.js");
 
 // El android.jar no se puede versionar (26 MB y licencia de la SDK), pero sí se puede leer del
-// SDK que ya está instalado en la máquina. Se busca en ANDROID_JAR, ANDROID_HOME,
-// ANDROID_SDK_ROOT y ~/Android, de la plataforma más nueva a la más vieja. La página lo pide a
-// su propio origen y lo guarda en OPFS: no sale ni una petición a Google desde la pestaña.
+// SDK que ya está instalado en la máquina. Se busca en ANDROID_JAR, ANDROID_HOME, ANDROID_SDK_ROOT
+// y ~/Android, **prefiriendo android-34**: es la API con la que la pestaña compila por defecto y la
+// única cuya tabla de recursos es densa (el enlazador de Go no lee las tablas ralas de 35 y 36).
+// Después, de la más nueva a la más vieja. La página lo pide a su propio origen y lo guarda en
+// OPFS: no sale ni una petición a Google desde la pestaña.
 function jarDelSdk() {
   if (process.env.ANDROID_JAR && fs.existsSync(process.env.ANDROID_JAR)) return process.env.ANDROID_JAR;
   const raices = [process.env.ANDROID_HOME, process.env.ANDROID_SDK_ROOT,
     process.env.HOME ? path.join(process.env.HOME, "Android") : ""].filter(Boolean);
+  const PREFERIDA = 34;
   for (const raiz of raices) {
     const plataformas = path.join(raiz, "platforms");
     if (!fs.existsSync(plataformas)) continue;
@@ -48,7 +51,8 @@ function jarDelSdk() {
       candidatas = fs.readdirSync(plataformas)
         .map((nombre) => ({ nombre, version: Number((/^android-(\d+)$/.exec(nombre) || [])[1]) }))
         .filter((x) => Number.isInteger(x.version))
-        .sort((a, b) => b.version - a.version);
+        .sort((a, b) => (Number(b.version === PREFERIDA) - Number(a.version === PREFERIDA)) ||
+          (b.version - a.version));
     } catch (e) { continue; }
     for (const c of candidatas) {
       const jar = path.join(plataformas, c.nombre, "android.jar");

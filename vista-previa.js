@@ -314,8 +314,10 @@ export function pintarVistaPrevia(modelo) {
   }
   const declarados = aNumero(modelo.nodos);
   const nodos = declarados !== null && declarados > 0 ? declarados : nodosAplanados(modelo).length;
-  const aproximado = modelo.aproximado === false ? "" : " (aproximada)";
-  const texto = "Vista previa" + aproximado + " de " + (modelo.layout || "el layout") + ": " +
+  // esta línea la lee la columna de Pantalla, que es del Emulador: se llama por su nombre, no
+  // «Vista previa», que es el otro modo y no ejecuta la app
+  const aproximado = modelo.aproximado === false ? "" : " aproximado";
+  const texto = "Emulador" + aproximado + " de " + (modelo.layout || "el layout") + ": " +
     nodos + " nodos en una pantalla de " +
     ((modelo.pantalla && modelo.pantalla.ancho) || PANTALLA_POR_DEFECTO.ancho) + "×" +
     ((modelo.pantalla && modelo.pantalla.alto) || PANTALLA_POR_DEFECTO.alto) + " dp.";
