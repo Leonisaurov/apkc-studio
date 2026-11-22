@@ -3169,6 +3169,31 @@ async function conductor() {
       const completoEditado = await compilarCon(k, "debug", { incremental: false });
       const eCompletoEditado = await foto();
       await hospedador.escribir(ruta, new TextEncoder().encode(antes));
+
+      // f) y un recurso NUEVO con estado previo: el caso que se colaba. Con el enlazador de Go no
+      // hay flats que compilar y el incremental solo miraba los borrados, así que una cadena nueva
+      // dejaba el apk anterior tal cual y sin la cadena en resources.arsc. Se prueba al final
+      // porque borrar el fichero después sí es un cambio que tiene que reenlazar, y ensuciaría la
+      // comprobación de que un fuente editado no relinka.
+      const valorRecurso = "CRITICO_RECURSO_7391";
+      const tibio = await compilarCon(k, "debug");
+      const eTibio = await foto();
+      await hospedador.escribir("/proyecto/res/values/critico.xml", new TextEncoder().encode(
+        "<resources>\\n    <string name=\\"critico\\">" + valorRecurso + "</string>\\n</resources>\\n"));
+      const conRecurso = await compilarCon(k, "debug");
+      const eRecurso = await foto();
+      const arsc = await hospedador.bytes("/proyecto/build/resources.arsc");
+      const buscaBytes = (bytes, aguja) => {
+        if (!bytes) return false;
+        for (let i = 0; i + aguja.length <= bytes.length; i++) {
+          let j = 0;
+          while (j < aguja.length && bytes[i + j] === aguja[j]) j++;
+          if (j === aguja.length) return true;
+        }
+        return false;
+      };
+      const arscTieneRecurso = buscaBytes(arsc, new TextEncoder().encode(valorRecurso));
+      await hospedador.limpiar("/proyecto/res/values/critico.xml");
       await correr(["clean"]);
 
       const nuevas = String(document.getElementById("consola-pestana").textContent).slice(marca)
@@ -3184,6 +3209,8 @@ async function conductor() {
         dexCambia: dex(eFrio) !== dex(eEditado),
         enlazaCompleto: enlaza(completo.consola), enlazaFrio: enlaza(frio.consola),
         enlazaCaliente: enlaza(caliente.consola), enlazaEditado: enlaza(editado.consola),
+        enlazaTibio: enlaza(tibio.consola), enlazaRecurso: enlaza(conRecurso.consola), arscTieneRecurso,
+        distintasRecurso: distintas(eTibio, eRecurso), entradasRecurso: eRecurso.length,
         codigos: [completo, frio, caliente, editado, completoEditado].map((r) => r && r.codigo),
         totalFrio: totalApkc(frio.consola), totalCaliente: totalApkc(caliente.consola),
         totalCompleto: totalApkc(completo.consola),
@@ -3193,14 +3220,14 @@ async function conductor() {
         compileCompleto: etapa(completo.consola, "compile go"),
         dexCompleto: etapa(completo.consola, "dex go"),
         compileEditado: etapa(editado.consola, "compile go"),
-        frioReloj, calienteReloj, ordenes: nuevas.slice(0, 5),
+        frioReloj, calienteReloj, ordenes: nuevas,
       };
     })()`);
 
     const conInc = incremento.ordenes.filter((o) => o.includes("--inc")).length;
     const sinInc = incremento.ordenes.filter((o) => !o.includes("--inc")).length;
     comprueba("la pestaña compila con --inc y la prueba sigue pudiendo pedir el build completo",
-      conInc === 3 && sinInc === 2 && incremento.codigos.every((c) => c === 0),
+      conInc === 5 && sinInc === 2 && incremento.codigos.every((c) => c === 0),
       JSON.stringify({ ordenes: incremento.ordenes, codigos: incremento.codigos }).slice(0, 320));
     comprueba("el apk con --inc es igual entrada por entrada al de un build completo",
       incremento.entradasFrio > 5 && incremento.entradasFrio === incremento.entradasCompleto &&
@@ -3212,6 +3239,13 @@ async function conductor() {
       incremento.distintasCaliente.length === 0,
       JSON.stringify({ enlazaFrio: incremento.enlazaFrio, enlazaCaliente: incremento.enlazaCaliente,
         distintas: incremento.distintasCaliente }).slice(0, 240));
+    comprueba("un recurso nuevo con --inc reenlaza y su cadena llega a resources.arsc",
+      incremento.enlazaRecurso && incremento.arscTieneRecurso &&
+      incremento.distintasRecurso.length > 0 &&
+      incremento.entradasRecurso === incremento.entradasFrio,
+      JSON.stringify({ enlazaTibio: incremento.enlazaTibio, enlazaRecurso: incremento.enlazaRecurso,
+        arscTiene: incremento.arscTieneRecurso,
+        entradasDistintas: incremento.distintasRecurso }).slice(0, 260));
     const porApkc = incremento.totalFrio && incremento.totalCaliente
       ? Math.round((1 - incremento.totalCaliente / incremento.totalFrio) * 100) : null;
     const porCompleto = incremento.totalCompleto && incremento.totalCaliente
