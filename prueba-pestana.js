@@ -2574,7 +2574,7 @@ async function conductor() {
     // 12a-septies-bis. el canvas no rotula los nodos: sobre el Button no se pinta `Button` ni
     // `id/pulsar`, solo su texto. Se mide la tinta del nodo con texto y sin él; el rótulo viejo
     // dejaba tinta aun sin texto. El tipo y el id siguen accesibles en `data-nodos` y en el modelo.
-    const rotulo = await evaluar(`(async () => {
+    const rotuloSegundo = await evaluar(`(async () => {
       const vp = await import("/vista-previa.js");
       const modelo = (texto) => ({ layout: "res/layout/main.xml",
         pantalla: { ancho: 360, alto: 640 }, aproximado: true,
@@ -2612,12 +2612,12 @@ async function conductor() {
       return { conTexto: medir("Press me"), sinTexto: medir("") };
     })()`);
     comprueba("sobre el Button no se pinta el rótulo «Button · id/pulsar» y sí su texto",
-      rotulo.sinTexto.tinta === 0 && rotulo.conTexto.tinta > 20 &&
-      rotulo.conTexto.alto >= 30 && rotulo.conTexto.texto === "Press me" &&
-      /Button · id\/pulsar/.test(String(rotulo.conTexto.dato)) &&
-      /Button · id\/pulsar/.test(String(rotulo.conTexto.resumen)),
-      JSON.stringify({ sinTexto: rotulo.sinTexto.tinta, conTexto: rotulo.conTexto.tinta,
-        dato: rotulo.conTexto.dato }).slice(0, 260));
+      rotuloSegundo.sinTexto.tinta === 0 && rotuloSegundo.conTexto.tinta > 20 &&
+      rotuloSegundo.conTexto.alto >= 30 && rotuloSegundo.conTexto.texto === "Press me" &&
+      /Button · id\/pulsar/.test(String(rotuloSegundo.conTexto.dato)) &&
+      /Button · id\/pulsar/.test(String(rotuloSegundo.conTexto.resumen)),
+      JSON.stringify({ sinTexto: rotuloSegundo.sinTexto.tinta, conTexto: rotuloSegundo.conTexto.tinta,
+        dato: rotuloSegundo.conTexto.dato }).slice(0, 260));
 
     // limpieza: los recursos y el fuente de la prueba no se quedan en el proyecto que compilan
     await evaluar(`(async () => {
