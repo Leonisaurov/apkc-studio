@@ -15,6 +15,16 @@ try {
         }
         return texto;
       },
+      createScriptURL(cadena) {
+        const texto = String(cadena);
+        if (!/^(hospedador\.js|\/[^/].*)$/.test(texto) && !texto.startsWith("blob:")) {
+          throw new Error("la política de Trusted Types rechazó esta URL de script");
+        }
+        return texto;
+      },
+      createURL(cadena) {
+        return String(cadena); // los blobs los crea esta página con URL.createObjectURL
+      },
     });
   }
 } catch (e) {
@@ -23,4 +33,12 @@ try {
 
 export function htmlConfiable(cadena) {
   return politica ? politica.createHTML(cadena) : String(cadena);
+}
+
+export function urlConfiable(cadena) {
+  return politica ? politica.createScriptURL(cadena) : String(cadena);
+}
+
+export function enlaceConfiable(cadena) {
+  return politica ? politica.createURL(cadena) : String(cadena);
 }

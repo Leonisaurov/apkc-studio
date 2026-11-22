@@ -1,7 +1,7 @@
 import { Historial } from "./historial.js";
 import { fusionar } from "./fusion.js";
 import { esXml, resaltar } from "./editor.js";
-import { htmlConfiable } from "./tt.js";
+import { htmlConfiable, urlConfiable, enlaceConfiable } from "./tt.js";
 import { crearBusqueda } from "./busqueda.js";
 import { crearAjustes } from "./ajustes.js";
 import { CONSOLA, pintarConsola, consolaHtml, textoHtml, enlazarSalidas,
@@ -25,7 +25,7 @@ const hospedador = (() => {
   const pendientes = new Map();
   const asegurar = () => {
     if (worker) return worker;
-    worker = new Worker("hospedador.js", { type: "module" });   // module: el hospedador importa su fs con import
+    worker = new Worker(urlConfiable("hospedador.js"), { type: "module" });   // module: el hospedador importa su fs con import
     worker.onmessage = (e) => {
       if (e.data && e.data.tipo === "salida") {
         if (alSalir) alSalir(String(e.data.texto || ""));
@@ -440,7 +440,7 @@ async function subirSeleccion(entrada) {
 function descargarBytes(nombre, bytes, tipo) {
   const enlace = document.createElement("a");
   const url = URL.createObjectURL(new Blob([bytes], { type: tipo || "application/octet-stream" }));
-  enlace.href = url;
+  enlace.href = enlaceConfiable(url);
   enlace.download = nombre;
   enlace.click();
   setTimeout(() => URL.revokeObjectURL(url), 2000);
@@ -1484,7 +1484,7 @@ async function refrescarArbol() {
     vacio.className = "vacio";
     vacio.append("El proyecto está vacío. ");
     const ir = document.createElement("a");
-    ir.href = "#crear";
+    ir.href = enlaceConfiable("#crear");
     ir.textContent = "Crea uno en Inicio";
     ir.onclick = (e) => {
       e.preventDefault();
@@ -1516,7 +1516,7 @@ async function refrescarArbol() {
       const generado = rel === "build" || rel.startsWith("build/");
       const abierta = n.dir && (filtro ? true : ARBOL.abiertos.has(n.ruta));
       const fila = document.createElement("a");
-      fila.href = "#";
+      fila.href = enlaceConfiable("#");
       fila.dataset.ruta = n.ruta;
       fila.title = rel + (generado ? " · generado por apkc; se regenera en cada compilación" : "");
       fila.style.paddingLeft = (8 + profundidad * 12) + "px";
@@ -1950,7 +1950,7 @@ async function descargarRuta(ruta) {
       const bytes = await hospedador.bytes(ruta);
       if (!bytes) { nota("no existe " + ruta); return; }
       const enlace = document.createElement("a");
-      enlace.href = URL.createObjectURL(new Blob([bytes]));
+      enlace.href = enlaceConfiable(URL.createObjectURL(new Blob([bytes])));
       enlace.download = nombre;
       enlace.click();
       setTimeout(() => URL.revokeObjectURL(enlace.href), 2000);
@@ -1968,7 +1968,7 @@ function ponerBlob(enlace, bytes, tipo) {
   if (enlace.dataset.blob) URL.revokeObjectURL(enlace.dataset.blob);
   const url = URL.createObjectURL(new Blob([bytes], { type: tipo }));
   enlace.dataset.blob = url;
-  enlace.href = url;
+  enlace.href = enlaceConfiable(url);
   return url;
 }
 
@@ -2180,7 +2180,7 @@ async function generarClaveRelease() {
     claveDescargaUrl = URL.createObjectURL(new Blob([bytes], { type: "application/octet-stream" }));
     const enlace = document.getElementById("clave-descargar");
     if (enlace) {
-      enlace.href = claveDescargaUrl;
+      enlace.href = enlaceConfiable(claveDescargaUrl);
       enlace.download = alias + ".jks";
       enlace.click();
     }

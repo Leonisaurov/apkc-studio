@@ -2,6 +2,7 @@
 // hacer. Las reglas viven en app.js (puras y probadas contra salidas reales en prueba.js); aquí
 // solo se pinta. El texto pegado no sale del navegador: los contadores quedan en localStorage.
 import { analyze, informe, registrar } from "./app.js";
+import { enlaceConfiable } from "./tt.js";
 
 (() => {
   const caja = document.getElementById("detalle-diagnostico");
@@ -25,7 +26,7 @@ import { analyze, informe, registrar } from "./app.js";
     if (!enlaceInforme) return;
     if (informeUrl) URL.revokeObjectURL(informeUrl);
     informeUrl = URL.createObjectURL(new Blob([informe()], { type: "text/markdown;charset=utf-8" }));
-    enlaceInforme.href = informeUrl;
+    enlaceInforme.href = enlaceConfiable(informeUrl);
     enlaceInforme.download = "informe-apkc.md";
     enlaceInforme.hidden = false;
   }
