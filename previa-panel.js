@@ -34,7 +34,10 @@ import {
   textoDeNodo, rectsEscalados, escalaPara,
 } from "./vista-previa.js";
 import { modeloDeLayout, decodificarEntidades, paddingDe, esLineal, atributoLocal } from "./vista-xml.js";
-import { insertarElemento, moverEnMarco, reordenarHijo, borrarElemento } from "./layout-editor.js";
+import {
+  insertarElemento, moverEnMarco, reordenarHijo, borrarElemento,
+  leerPropiedades, escribirPropiedad, tiposRaizDisponibles, cambiarTipoRaiz,
+} from "./layout-editor.js";
 
 // Persistencia de la vista dividida. Son preferencias de esta ventana, no del proyecto.
 const CLAVE_ANCHO = "apkc-studio/previa-ancho";
@@ -358,6 +361,8 @@ export function crearPreviaPanel({ hospedador, proyecto, estadoPestana, editor }
   let arbol = null;
   let strings = null;
   let stringsEn = 0;
+  let colores = null;
+  let coloresEn = 0;
   let arbolEn = 0;
   let cuadro = 0;
   let iniciado = false;
@@ -373,6 +378,9 @@ export function crearPreviaPanel({ hospedador, proyecto, estadoPestana, editor }
   let seleccion = null;
   let arrastreNodo = null;
   let notaEdicion = "";
+  // La ficha de propiedades se reconstruye solo cuando cambia el nodo; mientras se teclea se
+  // actualizan los valores de los campos que no tienen el foco.
+  let clavePropiedades = "";
 
   const conDocumento = () => typeof document !== "undefined" && !!document.getElementById;
   const el = (id) => (conDocumento() ? document.getElementById(id) : null);
@@ -1044,6 +1052,7 @@ export function crearPreviaPanel({ hospedador, proyecto, estadoPestana, editor }
     }
     actualizarPaleta();
     actualizarEstadoEdicion();
+    actualizarPropiedades();
     return primero;
   }
 
@@ -1121,6 +1130,7 @@ export function crearPreviaPanel({ hospedador, proyecto, estadoPestana, editor }
     }
     arbolEn = ahora;
     strings = null;
+    colores = null;
     return arbol;
   }
 
@@ -1141,6 +1151,26 @@ export function crearPreviaPanel({ hospedador, proyecto, estadoPestana, editor }
     }
     strings = mapa;
     stringsEn = ahora;
+    return mapa;
+  }
+
+  // Los colores de `res/values*/colors.xml`, con la misma caché que los `@string`. Sirven para que
+  // un `android:background="@color/azul"` se vea en el dibujo sin compilar.
+  async function coloresDelProyecto() {
+    const ahora = Date.now();
+    if (colores && ahora - coloresEn < 5000) return colores;
+    const nodos = await nodosDelProyecto();
+    const mapa = Object.create(null);
+    for (const ruta of nodos.filter((r) => /\/res\/values[^/]*\/colors\.xml$/.test(r))) {
+      try {
+        const texto = await hospedador.texto(ruta);
+        for (const m of String(texto).matchAll(/<color\s+name="([^"]+)"[^>]*>([^<]*)<\/color>/g)) {
+          if (!(m[1] in mapa)) mapa[m[1]] = decodificarEntidades(m[2]);
+        }
+      } catch (e) { /* un values ilegible no impide pintar los demás */ }
+    }
+    colores = mapa;
+    coloresEn = ahora;
     return mapa;
   }
 
@@ -1209,19 +1239,22 @@ export function crearPreviaPanel({ hospedador, proyecto, estadoPestana, editor }
           : MENSAJE_SIN_ABRIR, false);
         actualizarPaleta();
         actualizarEstadoEdicion();
+        actualizarPropiedades();
         return;
       }
     }
     if (turno !== turnoVivo) return;
     const stringsMap = await stringsDelProyecto();
+    const coloresMap = await coloresDelProyecto();
     if (turno !== turnoVivo) return;
-    const resultado = modeloDeLayout(texto, { layout: ruta, strings: stringsMap });
+    const resultado = modeloDeLayout(texto, { layout: ruta, strings: stringsMap, colores: coloresMap });
     if (!resultado.ok) {
       // un XML a medias no borra la pantalla que ya estaba bien: se avisa y se conserva
       ponerEstadoVivo("XML inválido" + (resultado.linea ? " (línea " + resultado.linea + ")" : "") +
         ": se conserva el último render" + (rutaViva ? " de " + relativa(rutaViva) : "") + ".", true);
       actualizarPaleta();
       actualizarEstadoEdicion();
+      actualizarPropiedades();
       return;
     }
     rutaViva = ruta;
@@ -1331,10 +1364,14 @@ export function crearPreviaPanel({ hospedador, proyecto, estadoPestana, editor }
     if (motivo) return motivo;
     const nodo = seleccion ? nodoPorRuta(modeloVivo.raiz, seleccion) : null;
     if (nodo) {
-      return "Seleccionado " + etiquetaDe(nodo) +
-        " · arrástralo para moverlo · Supr lo borra · Esc lo suelta.";
+      const raiz = !seleccion.length;
+      return "Seleccionado " + etiquetaDe(nodo) + (raiz ? " (layout raíz)" : "") +
+        " · " + (raiz
+          ? "cambia su tipo y sus propiedades en la ficha; no se borra."
+          : "arrástralo para moverlo · Supr lo borra · Esc lo suelta.");
     }
-    return "Clic en un elemento del dibujo para seleccionarlo; añade otros desde la paleta.";
+    return "Clic en un elemento del dibujo para seleccionarlo; el hueco del layout selecciona la raíz. " +
+      "Añade otros desde la paleta.";
   }
 
   function actualizarEstadoEdicion() {
@@ -1359,7 +1396,9 @@ export function crearPreviaPanel({ hospedador, proyecto, estadoPestana, editor }
 
   // Aplica el XML nuevo al buffer. `editor.cambiar` devuelve el foco al textarea: en modo editar
   // se lo devolvemos al canvas para que Supr y Esc sigan funcionando sin volver a pulsar el nodo.
-  function aplicarXml(nuevo, mensaje) {
+  // La ficha de propiedades pasa `enfocar: false`: el foco se queda en el campo que se está
+  // editando y el canvas se repinta igual.
+  function aplicarXml(nuevo, mensaje, opciones) {
     if (!editor || typeof editor.texto !== "function") return false;
     const antes = String(editor.texto());
     if (nuevo === antes) {
@@ -1368,20 +1407,23 @@ export function crearPreviaPanel({ hospedador, proyecto, estadoPestana, editor }
     }
     const d = diferencia(antes, nuevo);
     editor.cambiar(d.ini, d.fin, d.medio, [d.ini + d.medio.length, d.ini + d.medio.length]);
-    const canvas = canvasVivo();
-    if (canvas && typeof canvas.focus === "function") canvas.focus();
+    if (!opciones || opciones.enfocar !== false) {
+      const canvas = canvasVivo();
+      if (canvas && typeof canvas.focus === "function") canvas.focus();
+    }
     refrescarVivo().catch(() => {});
     if (mensaje) avisarEdicion(mensaje);
     return true;
   }
 
   function seleccionar(ruta) {
-    const limpia = Array.isArray(ruta) && ruta.length ? ruta.slice() : null;
+    // la raíz es la ruta vacía `[]`; `null` es «nada seleccionado»
+    const limpia = Array.isArray(ruta) ? ruta.slice() : null;
     const igual = JSON.stringify(limpia) === JSON.stringify(seleccion);
     seleccion = limpia;
-    if (!igual) notaEdicion = "";
+    if (!igual) { notaEdicion = ""; clavePropiedades = ""; }
     if (visible && modo === "vivo") pintarVivo();
-    else { actualizarPaleta(); actualizarEstadoEdicion(); }
+    else { actualizarPaleta(); actualizarEstadoEdicion(); actualizarPropiedades(); }
   }
 
   function anadir(tipo) {
@@ -1398,13 +1440,204 @@ export function crearPreviaPanel({ hospedador, proyecto, estadoPestana, editor }
     if (!seleccion) return false;
     const motivo = motivoNoEditable();
     if (motivo) { avisarEdicion(motivo); return false; }
+    if (!seleccion.length) {
+      avisarEdicion("La raíz no se borra: la actividad necesita una vista para setContentView.");
+      return false;
+    }
     const nodo = nodoPorRuta(modeloVivo.raiz, seleccion);
     const etiqueta = etiquetaDe(nodo);
     const r = borrarElemento(String(editor.texto()), seleccion);
     if (!r.ok) { avisarEdicion("No se pudo borrar: " + r.error); return false; }
     seleccion = null;
     notaEdicion = "";
+    clavePropiedades = "";
     return aplicarXml(r.xml, "Borrado " + etiqueta + ".");
+  }
+
+  // --- la ficha de propiedades ---------------------------------------------------------------
+  // Los campos se crean con `createElement` y se rellenan con `value`/`textContent`: el texto del
+  // layout es dato, nunca marcado. Un cambio de propiedad se aplica con `escribirPropiedad` y el
+  // mismo `aplicarXml` del resto del modo editar, así que entra en el undo tree y el canvas se
+  // repinta sin compilar y sin tocar `#ultimo-codigo`.
+  function campoDePropiedad(def, valor) {
+    const caja = document.createElement("label");
+    caja.className = "previa-propiedad" +
+      (def.tipo === "texto" || def.tipo === "gravedad" ? " previa-propiedad-ancha" : "");
+    const etiqueta = document.createElement("span");
+    etiqueta.className = "previa-propiedad-etiqueta";
+    etiqueta.textContent = def.etiqueta;
+    const campo = document.createElement("input");
+    campo.type = "text";
+    campo.className = "previa-propiedad-campo";
+    campo.value = valor == null ? "" : String(valor);
+    campo.setAttribute("data-propiedad", def.nombre);
+    campo.setAttribute("aria-label", def.etiqueta + " (" + def.nombre + ")");
+    campo.setAttribute("title", def.ayuda);
+    campo.setAttribute("placeholder", def.ayuda);
+    campo.setAttribute("autocomplete", "off");
+    campo.setAttribute("spellcheck", "false");
+    const listas = {
+      dimension: "previa-valores-dimension",
+      medida: "previa-valores-medida",
+      color: "previa-valores-color",
+      gravedad: "previa-valores-gravedad",
+      booleano: "previa-valores-booleano",
+      orientacion: "previa-valores-orientacion",
+    };
+    if (listas[def.tipo]) campo.setAttribute("list", listas[def.tipo]);
+    // `change` se dispara al salir del campo o con Enter: un cambio por pulsación llenaría el undo
+    // tree de pasos y robaría el foco en cada letra.
+    campo.addEventListener("change", () => aplicarPropiedad(def.nombre, campo.value, campo));
+    campo.addEventListener("keydown", (e) => {
+      if (e.key !== "Enter") return;
+      e.preventDefault();
+      campo.blur();
+    });
+    caja.appendChild(etiqueta);
+    caja.appendChild(campo);
+    return caja;
+  }
+
+  // El tipo del layout raíz. `RelativeLayout` se ofrece para poder rechazarlo con su nombre y su
+  // motivo, no porque `cambiarTipoRaiz` lo acepte.
+  function campoRaiz(tipoActual) {
+    const caja = document.createElement("label");
+    caja.className = "previa-propiedad previa-propiedad-ancha";
+    const etiqueta = document.createElement("span");
+    etiqueta.className = "previa-propiedad-etiqueta";
+    etiqueta.textContent = "Tipo de layout raíz";
+    const select = document.createElement("select");
+    select.className = "previa-propiedad-campo";
+    select.setAttribute("data-raiz-tipo", "1");
+    select.setAttribute("aria-label", "Tipo de layout raíz");
+    for (const opcion of tiposRaizDisponibles()) {
+      const opt = document.createElement("option");
+      opt.value = opcion.tipo;
+      opt.textContent = opcion.tipo + (opcion.disponible ? "" : " (no disponible)");
+      if (!opcion.disponible) opt.title = opcion.motivo;
+      if (opcion.tipo === tipoActual) opt.selected = true;
+      select.appendChild(opt);
+    }
+    select.addEventListener("change", () => cambiarRaiz(select.value));
+    caja.appendChild(etiqueta);
+    caja.appendChild(select);
+    return caja;
+  }
+
+  function aplicarPropiedad(nombre, valor, campo) {
+    const motivo = motivoNoEditable();
+    if (motivo) {
+      avisarEdicion(motivo);
+      actualizarPropiedades(true);
+      return false;
+    }
+    const r = escribirPropiedad(String(editor.texto()), seleccion, nombre, valor);
+    if (!r.ok) {
+      avisarEdicion("No se pudo cambiar " + nombre + ": " + r.error);
+      actualizarPropiedades(true);
+      if (campo && typeof campo.focus === "function") campo.focus();
+      return false;
+    }
+    if (!r.cambio) {
+      actualizarPropiedades(false);
+      return false;
+    }
+    const cambiado = aplicarXml(r.xml, "Cambiado " + nombre + " a «" + r.valor + "».",
+      { enfocar: false });
+    // el foco vuelve al campo (no al canvas): se sigue editando la misma ficha
+    if (campo && typeof campo.focus === "function" && document.contains(campo)) {
+      campo.focus();
+      if (campo.type === "text" && typeof campo.setSelectionRange === "function") {
+        try { campo.setSelectionRange(campo.value.length, campo.value.length); } catch (e) { /* sin foco */ }
+      }
+    }
+    if (!cambiado) actualizarPropiedades(false);
+    return cambiado;
+  }
+
+  function cambiarRaiz(tipo) {
+    const motivo = motivoNoEditable();
+    if (motivo) {
+      avisarEdicion(motivo);
+      actualizarPropiedades(true);
+      return false;
+    }
+    const r = cambiarTipoRaiz(String(editor.texto()), tipo);
+    if (!r.ok) {
+      avisarEdicion("No se cambió el tipo de layout: " + r.error);
+      actualizarPropiedades(true);
+      return false;
+    }
+    if (!r.cambio) {
+      actualizarPropiedades(false);
+      return false;
+    }
+    const cambiado = aplicarXml(r.xml, "Layout raíz cambiado a " + r.tipo + ".", { enfocar: false });
+    actualizarPropiedades(true);
+    return cambiado;
+  }
+
+  function actualizarPropiedades(force) {
+    const seccion = el("previa-propiedades");
+    if (!seccion) return;
+    seccion.hidden = !editando;
+    const campos = el("previa-propiedades-campos");
+    const titulo = el("previa-propiedades-titulo");
+    const vacio = el("previa-propiedades-vacio");
+    if (!campos) return;
+    if (!editando) {
+      campos.replaceChildren();
+      clavePropiedades = "";
+      if (vacio) vacio.hidden = false;
+      return;
+    }
+    const nodo = modeloVivo && seleccion ? nodoPorRuta(modeloVivo.raiz, seleccion) : null;
+    const raiz = !!nodo && seleccion.length === 0;
+    if (titulo) {
+      titulo.textContent = nodo
+        ? (raiz ? "Propiedades del layout raíz (" + etiquetaDe(nodo) + ")"
+          : "Propiedades de " + etiquetaDe(nodo))
+        : "Propiedades";
+    }
+    if (vacio) vacio.hidden = !!nodo;
+    if (!nodo) {
+      campos.replaceChildren();
+      clavePropiedades = "";
+      return;
+    }
+    const texto = editor && typeof editor.texto === "function" ? String(editor.texto()) : "";
+    const leido = leerPropiedades(texto, seleccion);
+    if (!leido.ok) {
+      campos.replaceChildren();
+      clavePropiedades = "";
+      return;
+    }
+    const clave = JSON.stringify([seleccion, leido.tipo, leido.raiz]);
+    if (force || clave !== clavePropiedades) {
+      clavePropiedades = clave;
+      campos.replaceChildren();
+      if (raiz) campos.appendChild(campoRaiz(leido.tipo));
+      for (const def of leido.propiedades) {
+        campos.appendChild(campoDePropiedad(def, leido.valores[def.nombre] || ""));
+      }
+      return;
+    }
+    // sin cambiar de nodo: se refrescan los valores, menos el campo que tiene el foco
+    for (const campo of campos.querySelectorAll("[data-propiedad]")) {
+      if (document.activeElement === campo) continue;
+      const v = leido.valores[campo.getAttribute("data-propiedad")];
+      if (typeof v === "string" && campo.value !== v) campo.value = v;
+    }
+    const select = campos.querySelector("[data-raiz-tipo]");
+    if (select && document.activeElement !== select) select.value = leido.tipo;
+  }
+
+  function seleccionarRaiz() {
+    if (!modeloVivo) { avisarEdicion(motivoNoEditable()); return false; }
+    seleccionar([]);
+    const canvas = canvasVivo();
+    if (canvas && typeof canvas.focus === "function") canvas.focus();
+    return true;
   }
 
   function canvasVivo() {
@@ -1429,21 +1662,27 @@ export function crearPreviaPanel({ hospedador, proyecto, estadoPestana, editor }
     return { x: (p.x - caja.x) / caja.escala, y: (p.y - caja.y) / caja.escala, caja };
   }
 
-  // El nodo más profundo cuyo `rect` contiene el punto. La raíz no entra: borrarla dejaría la
-  // actividad sin `setContentView`.
+  // El nodo más profundo cuyo `rect` contiene el punto. Si no hay ningún hijo bajo el punto pero el
+  // punto cae dentro de la raíz, se selecciona la raíz (`[]`): su tipo, orientación, padding y fondo
+  // también se editan. La raíz no se borra ni se mueve.
   function golpeEn(modelo, x, y) {
     let mejor = null;
+    const dentro = (r) => r && Number.isFinite(r.ancho) && Number.isFinite(r.alto) &&
+      x >= r.x && x <= r.x + r.ancho && y >= r.y && y <= r.y + r.alto;
     const recorrer = (nodo, ruta, profundidad) => {
       const r = nodo && nodo.rect;
-      if (profundidad > 0 && r && Number.isFinite(r.ancho) && Number.isFinite(r.alto) &&
-          x >= r.x && x <= r.x + r.ancho && y >= r.y && y <= r.y + r.alto) {
+      if (profundidad > 0 && dentro(r)) {
         if (!mejor || profundidad >= mejor.profundidad) mejor = { ruta, profundidad, nodo };
       }
       const hijos = nodo && Array.isArray(nodo.hijos) ? nodo.hijos : [];
       hijos.forEach((hijo, i) => recorrer(hijo, ruta.concat(i), profundidad + 1));
     };
     if (modelo && modelo.raiz) recorrer(modelo.raiz, [], 0);
-    return mejor;
+    if (mejor) return mejor;
+    if (modelo && modelo.raiz && dentro(modelo.raiz.rect)) {
+      return { ruta: [], profundidad: 0, nodo: modelo.raiz };
+    }
+    return null;
   }
 
   function dibujarContorno(canvas, caja, rect, guiones) {
@@ -1481,6 +1720,10 @@ export function crearPreviaPanel({ hospedador, proyecto, estadoPestana, editor }
   function moverNodo(ruta, dx, dy) {
     const motivo = motivoNoEditable();
     if (motivo) { avisarEdicion(motivo); return false; }
+    if (!Array.isArray(ruta) || !ruta.length) {
+      avisarEdicion("La raíz no se mueve: no tiene padre en el layout.");
+      return false;
+    }
     const modelo = modeloVivo;
     const nodo = nodoPorRuta(modelo.raiz, ruta);
     const rutaPadre = ruta.slice(0, -1);
@@ -1551,7 +1794,8 @@ export function crearPreviaPanel({ hospedador, proyecto, estadoPestana, editor }
       seleccionar(golpe ? golpe.ruta : null);
       if (typeof canvas.focus === "function") canvas.focus();
       e.preventDefault();
-      if (!golpe) return;
+      // la raíz se selecciona, pero no se arrastra: no tiene padre
+      if (!golpe || !golpe.ruta.length) return;
       arrastreNodo = { ruta: golpe.ruta, x0: e.clientX, y0: e.clientY, movido: false };
       try { canvas.setPointerCapture(e.pointerId); } catch (err) { /* puntero sintético */ }
     });
@@ -1600,7 +1844,7 @@ export function crearPreviaPanel({ hospedador, proyecto, estadoPestana, editor }
     if (activo && modo !== "vivo") aplicarModo("vivo", true);
     editando = activo;
     arrastreNodo = null;
-    if (!editando) { seleccion = null; notaEdicion = ""; }
+    if (!editando) { seleccion = null; notaEdicion = ""; clavePropiedades = ""; }
     const boton = document.getElementById("previa-modo-editar");
     if (boton) {
       boton.classList.toggle("activo", editando);
@@ -1610,6 +1854,7 @@ export function crearPreviaPanel({ hospedador, proyecto, estadoPestana, editor }
     if (canvas) canvas.classList.toggle("editable", editando);
     actualizarPaleta();
     actualizarEstadoEdicion();
+    actualizarPropiedades(true);
     if (visible && modo === "vivo") {
       pintarVivo();
       if (editando) programarVivo(0);
@@ -1623,6 +1868,8 @@ export function crearPreviaPanel({ hospedador, proyecto, estadoPestana, editor }
       for (const b of document.querySelectorAll("#previa-paleta button")) {
         b.addEventListener("click", () => anadir(b.dataset.tipo));
       }
+      const raiz = document.getElementById("previa-seleccionar-raiz");
+      if (raiz) raiz.addEventListener("click", seleccionarRaiz);
     }
     conectarCanvasEditable();
     conectarTecladoEditable();

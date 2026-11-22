@@ -2323,6 +2323,163 @@ async function conductor() {
         nota: estadoEditar.textContent,
         seleccion: PREVIA_PANEL.estado().seleccion,
       };
+      // la ficha de propiedades: se selecciona el TextView del layout y se le cambian texto, id y
+      // fondo. El XML, el modelo que pinta el canvas y el undo tree tienen que verlo.
+      const modeloMain = PREVIA_PANEL.modeloVivo();
+      const nodoTexto = modeloMain ? modeloMain.raiz.hijos.find((h) => h.tipo === "TextView") : null;
+      const indiceTexto = modeloMain ? modeloMain.raiz.hijos.indexOf(nodoTexto) : -1;
+      const cajaMain = vp.escalaPara(modeloMain, canvas.clientWidth, canvas.clientHeight);
+      const cajaCanvasMain = canvas.getBoundingClientRect();
+      const factorMain = cajaCanvasMain.width > 0 && canvas.clientWidth
+        ? canvas.clientWidth / cajaCanvasMain.width : 1;
+      const puntoNodo = (rect) => ({
+        x: cajaCanvasMain.left + (cajaMain.x + (rect.x + rect.ancho / 2) * cajaMain.escala) / factorMain,
+        y: cajaCanvasMain.top + (cajaMain.y + (rect.y + rect.alto / 2) * cajaMain.escala) / factorMain,
+      });
+      const pTexto = puntoNodo(nodoTexto.rect);
+      canvas.dispatchEvent(new PointerEvent("pointerdown", { bubbles: true, button: 0, pointerId: 21,
+        clientX: pTexto.x, clientY: pTexto.y }));
+      canvas.dispatchEvent(new PointerEvent("pointerup", { bubbles: true, pointerId: 21,
+        clientX: pTexto.x, clientY: pTexto.y }));
+      await new Promise((ok) => setTimeout(ok, 220));
+      const propSection = document.getElementById("previa-propiedades");
+      const campoTexto = document.querySelector('[data-propiedad="android:text"]');
+      const campoId = document.querySelector('[data-propiedad="android:id"]');
+      const campoFondo = document.querySelector('[data-propiedad="android:background"]');
+      const ficha = {
+        visible: !propSection.hidden,
+        seleccion: PREVIA_PANEL.estado().seleccion,
+        titulo: document.getElementById("previa-propiedades-titulo").textContent,
+        texto: campoTexto ? campoTexto.value : "",
+        id: campoId ? campoId.value : "",
+        fondo: campoFondo ? campoFondo.value : "",
+      };
+      const ultimoAntes = document.getElementById("ultimo-codigo").textContent;
+      campoTexto.value = "Hola & adiós";
+      campoTexto.dispatchEvent(new Event("change", { bubbles: true }));
+      await new Promise((ok) => setTimeout(ok, 750));
+      const modeloTexto = PREVIA_PANEL.modeloVivo();
+      const nodoTextoTras = modeloTexto && indiceTexto >= 0
+        ? modeloTexto.raiz.hijos[indiceTexto] : null;
+      const cambioTexto = {
+        xml: /android:text="Hola &amp; adiós"/.test(area.value),
+        modelo: nodoTextoTras ? nodoTextoTras.texto : "",
+        ultimo: document.getElementById("ultimo-codigo").textContent === ultimoAntes,
+        sucio: !document.getElementById("marca-sucio").hidden,
+        campo: (document.querySelector('[data-propiedad="android:text"]') || {}).value,
+      };
+      // el texto del layout es dato: un <script> en android:text no se convierte en marcado, el
+      // XML lo escapa y el undo tree devuelve el texto anterior
+      const campoHostil = document.querySelector('[data-propiedad="android:text"]');
+      const antesHostil = area.value;
+      campoHostil.value = "A & B <script>alert(1)</script>";
+      campoHostil.dispatchEvent(new Event("change", { bubbles: true }));
+      await new Promise((ok) => setTimeout(ok, 750));
+      const inyectados = document.querySelectorAll("#previa-propiedades script").length;
+      const xmlHostil = /A &amp; B &lt;script&gt;alert\\(1\\)&lt;\\/script&gt;/.test(area.value) &&
+        !/<script>/i.test(area.value);
+      const deshechoHostil = deshacer();
+      await new Promise((ok) => setTimeout(ok, 300));
+      const hostil = {
+        campo: !!campoHostil && campoHostil.value === "A & B <script>alert(1)</script>",
+        inyectados,
+        xml: xmlHostil,
+        deshecho: deshechoHostil,
+        vuelta: area.value === antesHostil,
+      };
+      const campoId2 = document.querySelector('[data-propiedad="android:id"]');
+      campoId2.value = "saludo";
+      campoId2.dispatchEvent(new Event("change", { bubbles: true }));
+      await new Promise((ok) => setTimeout(ok, 550));
+      const modeloId = PREVIA_PANEL.modeloVivo();
+      const cambioId = {
+        xml: /android:id="@\\+id\\/saludo"/.test(area.value),
+        id: modeloId ? (modeloId.raiz.hijos.find((h) => h.tipo === "TextView") || {}).id : "",
+        seleccion: PREVIA_PANEL.estado().seleccion,
+      };
+      const campoFondo2 = document.querySelector('[data-propiedad="android:background"]');
+      campoFondo2.value = "#ff0000";
+      campoFondo2.dispatchEvent(new Event("change", { bubbles: true }));
+      await new Promise((ok) => setTimeout(ok, 550));
+      const modeloFondo = PREVIA_PANEL.modeloVivo();
+      const nodoFondo = modeloFondo
+        ? modeloFondo.raiz.hijos.find((h) => h.id === "id/saludo") : null;
+      const rectFondo = modeloFondo
+        ? vp.rectsEscalados(modeloFondo, canvas.clientWidth, canvas.clientHeight)
+          .find((r) => r.id === "id/saludo") : null;
+      const cambioFondo = {
+        xml: /android:background="#ff0000"/.test(area.value),
+        fondo: nodoFondo ? nodoFondo.fondo : "",
+        rect: rectFondo ? rectFondo.fondo : "",
+      };
+      // el hueco del layout (fuera de los hijos) selecciona la raíz; su orientación se escribe
+      const modeloRaiz = PREVIA_PANEL.modeloVivo();
+      const cajaRaiz = vp.escalaPara(modeloRaiz, canvas.clientWidth, canvas.clientHeight);
+      const cajaCanvasRaiz = canvas.getBoundingClientRect();
+      const factorRaiz = cajaCanvasRaiz.width > 0 && canvas.clientWidth
+        ? canvas.clientWidth / cajaCanvasRaiz.width : 1;
+      const pRaiz = {
+        x: cajaCanvasRaiz.left + (cajaRaiz.x + 8 * cajaRaiz.escala) / factorRaiz,
+        y: cajaCanvasRaiz.top +
+          (cajaRaiz.y + (modeloRaiz.pantalla.alto - 8) * cajaRaiz.escala) / factorRaiz,
+      };
+      canvas.dispatchEvent(new PointerEvent("pointerdown", { bubbles: true, button: 0, pointerId: 22,
+        clientX: pRaiz.x, clientY: pRaiz.y }));
+      canvas.dispatchEvent(new PointerEvent("pointerup", { bubbles: true, pointerId: 22,
+        clientX: pRaiz.x, clientY: pRaiz.y }));
+      await new Promise((ok) => setTimeout(ok, 220));
+      const selectTipo = document.querySelector("[data-raiz-tipo]");
+      const campoOrientacion = document.querySelector('[data-propiedad="android:orientation"]');
+      const seleccionRaiz = {
+        seleccion: PREVIA_PANEL.estado().seleccion,
+        tipo: selectTipo ? selectTipo.value : "",
+        orientacion: campoOrientacion ? campoOrientacion.value : "",
+        titulo: document.getElementById("previa-propiedades-titulo").textContent,
+      };
+      campoOrientacion.value = "horizontal";
+      campoOrientacion.dispatchEvent(new Event("change", { bubbles: true }));
+      await new Promise((ok) => setTimeout(ok, 550));
+      const modeloOrientacion = PREVIA_PANEL.modeloVivo();
+      const cambioOrientacion = {
+        xml: /android:orientation="horizontal"/.test(area.value),
+        orientacion: modeloOrientacion
+          ? modeloOrientacion.raiz.atributos["android:orientation"] : "",
+      };
+      // cambiar el tipo conserva los hijos; RelativeLayout se rechaza con su nombre
+      const selectTipo2 = document.querySelector("[data-raiz-tipo]");
+      selectTipo2.value = "FrameLayout";
+      selectTipo2.dispatchEvent(new Event("change", { bubbles: true }));
+      await new Promise((ok) => setTimeout(ok, 550));
+      const modeloMarco = PREVIA_PANEL.modeloVivo();
+      const cambioTipo = {
+        xml: /<FrameLayout\\b/.test(area.value) && /<\\/FrameLayout>/.test(area.value) &&
+          !/<LinearLayout\\b/.test(area.value),
+        raiz: modeloMarco ? modeloMarco.raiz.tipo : "",
+        hijos: modeloMarco ? modeloMarco.raiz.hijos.length : 0,
+      };
+      const xmlAntesRel = area.value;
+      const selectTipo3 = document.querySelector("[data-raiz-tipo]");
+      selectTipo3.value = "RelativeLayout";
+      selectTipo3.dispatchEvent(new Event("change", { bubbles: true }));
+      await new Promise((ok) => setTimeout(ok, 320));
+      const rechazoRel = {
+        xml: area.value === xmlAntesRel,
+        nota: estadoEditar.textContent,
+        tipo: (document.querySelector("[data-raiz-tipo]") || {}).value,
+      };
+      // la paleta ampliada: un EditText entra con sus atributos y se dibuja
+      const editAntes = (area.value.match(/<EditText\\b/g) || []).length;
+      document.getElementById("previa-anadir-edittext").click();
+      await new Promise((ok) => setTimeout(ok, 750));
+      const modeloEdit = PREVIA_PANEL.modeloVivo();
+      const nodoEdit = modeloEdit
+        ? modeloEdit.raiz.hijos.find((h) => h.tipo === "EditText") : null;
+      const annadidoEdit = {
+        xml: (area.value.match(/<EditText\\b/g) || []).length === editAntes + 1 &&
+          /android:id="@\\+id\\/entrada"/.test(area.value),
+        tipo: nodoEdit ? nodoEdit.tipo : "",
+        texto: nodoEdit ? nodoEdit.texto : "",
+      };
       // un marco con dos vistas separadas: arrastrar una cambia su margen en el XML
       const marcoXml = '<?xml version="1.0" encoding="utf-8"?>\\n' +
         '<FrameLayout xmlns:android="http://schemas.android.com/apk/res/android"\\n' +
@@ -2429,8 +2586,9 @@ async function conductor() {
       EDITOR.cambiar(0, area.value.length, original, [0, 0]);
       await new Promise((ok) => setTimeout(ok, 800));
       marcarSucio(false);
-      return { apagado, encendido, annadido, antesArrastre, arrastrado, borrado, vuelta, conSeleccion,
-        suelto, enRender, restaurado: area.value === original };
+      return { apagado, encendido, annadido, ficha, cambioTexto, hostil, cambioId, cambioFondo, seleccionRaiz,
+        cambioOrientacion, cambioTipo, rechazoRel, annadidoEdit, antesArrastre, arrastrado, borrado,
+        vuelta, conSeleccion, suelto, enRender, restaurado: area.value === original };
     })()`);
     comprueba("el lápiz enciende el modo editar (paleta y estado) y apagado deja la vista de solo lectura",
       editorLayout.apagado.pressed === "false" && editorLayout.apagado.paleta === true &&
@@ -2448,6 +2606,54 @@ async function conductor() {
       editorLayout.annadido.nodos >= 3 && editorLayout.annadido.sucio === true &&
       JSON.stringify(editorLayout.annadido.seleccion) !== "null",
       JSON.stringify(editorLayout.annadido).slice(0, 400));
+    comprueba("la ficha de propiedades muestra el TextView seleccionado con su texto, id y fondo",
+      editorLayout.ficha.visible === true &&
+      JSON.stringify(editorLayout.ficha.seleccion) !== "null" &&
+      /Propiedades de/.test(editorLayout.ficha.titulo) &&
+      /^@\+id\//.test(editorLayout.ficha.id) && editorLayout.ficha.fondo === "" &&
+      editorLayout.ficha.texto !== "",
+      JSON.stringify(editorLayout.ficha).slice(0, 360));
+    comprueba("cambiar android:text escribe el XML escapado, repinta el modelo y no toca #ultimo-codigo",
+      editorLayout.cambioTexto.xml === true && editorLayout.cambioTexto.modelo === "Hola & adiós" &&
+      editorLayout.cambioTexto.ultimo === true && editorLayout.cambioTexto.sucio === true &&
+      editorLayout.cambioTexto.campo === "Hola & adiós",
+      JSON.stringify(editorLayout.cambioTexto).slice(0, 360));
+    // el texto del layout es dato: un `<script>` en android:text se escapa en el XML, no se
+    // convierte en marcado y el undo tree devuelve el texto anterior
+    comprueba("un <script> en android:text se escapa, no se inyecta y el cambio se deshace",
+      editorLayout.hostil.campo === true && editorLayout.hostil.inyectados === 0 &&
+      editorLayout.hostil.xml === true && editorLayout.hostil.deshecho === true &&
+      editorLayout.hostil.vuelta === true,
+      JSON.stringify(editorLayout.hostil).slice(0, 320));
+
+    comprueba("cambiar android:id normaliza a @+id y el modelo conserva el nodo seleccionado",
+      editorLayout.cambioId.xml === true && editorLayout.cambioId.id === "id/saludo" &&
+      JSON.stringify(editorLayout.cambioId.seleccion) !== "null",
+      JSON.stringify(editorLayout.cambioId).slice(0, 280));
+    comprueba("cambiar android:background llega al modelo y a los rectángulos que pinta el canvas",
+      editorLayout.cambioFondo.xml === true && editorLayout.cambioFondo.fondo === "#ff0000" &&
+      editorLayout.cambioFondo.rect === "#ff0000",
+      JSON.stringify(editorLayout.cambioFondo).slice(0, 280));
+    comprueba("el hueco del layout selecciona la raíz y su orientación se escribe en el XML y el modelo",
+      JSON.stringify(editorLayout.seleccionRaiz.seleccion) === "[]" &&
+      editorLayout.seleccionRaiz.tipo === "LinearLayout" &&
+      editorLayout.seleccionRaiz.orientacion === "vertical" &&
+      /layout raíz/.test(editorLayout.seleccionRaiz.titulo) &&
+      editorLayout.cambioOrientacion.xml === true &&
+      editorLayout.cambioOrientacion.orientacion === "horizontal",
+      JSON.stringify({ raiz: editorLayout.seleccionRaiz,
+        orientacion: editorLayout.cambioOrientacion }).slice(0, 400));
+    comprueba("cambiar el tipo del layout raíz conserva los hijos y rechaza RelativeLayout por su nombre",
+      editorLayout.cambioTipo.xml === true && editorLayout.cambioTipo.raiz === "FrameLayout" &&
+      editorLayout.cambioTipo.hijos >= 2 &&
+      editorLayout.rechazoRel.xml === true &&
+      /RelativeLayout/.test(editorLayout.rechazoRel.nota) &&
+      editorLayout.rechazoRel.tipo === "FrameLayout",
+      JSON.stringify({ tipo: editorLayout.cambioTipo, rechazo: editorLayout.rechazoRel }).slice(0, 400));
+    comprueba("la paleta ampliada añade un EditText con su id y su texto al XML y al dibujo",
+      editorLayout.annadidoEdit.xml === true && editorLayout.annadidoEdit.tipo === "EditText" &&
+      editorLayout.annadidoEdit.texto === "Texto",
+      JSON.stringify(editorLayout.annadidoEdit).slice(0, 240));
     comprueba("arrastrar una vista dentro de un FrameLayout escribe su margen y mueve el dibujo",
       JSON.stringify(editorLayout.arrastrado.seleccionado) !== "null" &&
       editorLayout.arrastrado.margen === true && editorLayout.arrastrado.gravedad === false &&

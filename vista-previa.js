@@ -139,6 +139,9 @@ export function rectsEscalados(modelo, ancho, alto) {
       idRef: String(nodo.idRef || ""),
       oyente: nodo.oyente === true,
       texto: textoDeNodo(nodo),
+      // colores del layout, ya normalizados por `vista-xml.js`; vacío significa «el del tema»
+      fondo: typeof nodo.fondo === "string" ? nodo.fondo : "",
+      colorTexto: typeof nodo.colorTexto === "string" ? nodo.colorTexto : "",
       profundidad,
     };
     if (![escalado.x, escalado.y, escalado.ancho, escalado.alto].every(Number.isFinite)) continue;
@@ -259,14 +262,19 @@ export function pintarModelo(canvas, modelo, medir) {
   ctx.font = "11px ui-monospace, SFMono-Regular, Menlo, Consolas, monospace";
   ctx.textBaseline = "top";
   for (const r of rects) {
-    // el nodo raíz es el contenedor de toda la pantalla: se marca con el acento, no se rellena
+    // el nodo raíz es el contenedor de toda la pantalla: se marca con el acento, no se rellena,
+    // salvo que el layout le haya dado un fondo
     if (r.profundidad === 0) {
+      if (r.fondo) {
+        ctx.fillStyle = r.fondo;
+        ctx.fillRect(r.x, r.y, r.ancho, r.alto);
+      }
       ctx.strokeStyle = acento;
       ctx.lineWidth = 2;
       ctx.strokeRect(r.x + 1, r.y + 1, Math.max(1, r.ancho - 2), Math.max(1, r.alto - 2));
       continue;
     }
-    ctx.fillStyle = marco;
+    ctx.fillStyle = r.fondo || marco;
     ctx.fillRect(r.x, r.y, r.ancho, r.alto);
     // la vista que responde a un clic se marca con el acento: es la única que el emulador atiende
     ctx.strokeStyle = r.oyente ? acento : bordeFuerte;
@@ -284,7 +292,7 @@ export function pintarModelo(canvas, modelo, medir) {
       // una sola línea, con la fuente encogida al hueco real: 8..12 px
       const tamano = Math.max(8, Math.min(12, Math.floor(r.alto - 6)));
       ctx.font = tamano + "px ui-monospace, SFMono-Regular, Menlo, Consolas, monospace";
-      ctx.fillStyle = tinta;
+      ctx.fillStyle = r.colorTexto || tinta;
       ctx.fillText(r.texto, r.x + 5, r.y + 3, Math.max(0, r.ancho - 10));
     }
     ctx.restore();

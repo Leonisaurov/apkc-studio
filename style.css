@@ -661,6 +661,8 @@ body.separando-previa[data-eje="suroeste"] { cursor: nesw-resize; }
   flex-wrap: wrap;
   gap: 4px;
   align-items: center;
+  max-height: 88px;
+  overflow-y: auto;
 }
 .previa-paleta[hidden] { display: none; }
 .previa-paleta-titulo {
@@ -687,6 +689,59 @@ body.separando-previa[data-eje="suroeste"] { cursor: nesw-resize; }
 .previa-canvas.editable:active { cursor: grabbing; }
 .previa-canvas:focus-visible { outline: 2px solid var(--foco); outline-offset: 2px; }
 .previa-editar-estado[hidden] { display: none; }
+/* la ficha del nodo seleccionado: solo en modo editar, con los campos en dos columnas */
+.previa-propiedades {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  max-height: 42%;
+  overflow-y: auto;
+  border-top: 1px solid var(--borde);
+  padding-top: 6px;
+}
+.previa-propiedades[hidden] { display: none; }
+.previa-propiedades-cab {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 6px;
+}
+.previa-propiedades-titulo {
+  font-size: 11px;
+  color: var(--texto-fuerte);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.previa-propiedades-campos {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  gap: 4px 6px;
+}
+.previa-propiedades-campos:empty { display: none; }
+.previa-propiedad {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  min-width: 0;
+}
+.previa-propiedad-etiqueta {
+  font-size: 10px;
+  color: var(--texto-medio);
+}
+.previa-propiedad-campo {
+  background: var(--fondo);
+  border: 1px solid var(--borde2);
+  border-radius: 4px;
+  color: var(--texto-fuerte);
+  font: inherit;
+  font-size: 11px;
+  min-width: 0;
+  padding: 2px 4px;
+}
+.previa-propiedad-campo:focus-visible { outline: 2px solid var(--foco); outline-offset: -2px; }
+.previa-propiedad-ancha { grid-column: 1 / -1; }
+.previa-propiedades-vacio { margin: 0; }
 .previa-vivo,
 .previa-render {
   flex: 1 1 auto;

@@ -69,8 +69,8 @@ dar el editor por probado, comprueba en la salida `pestaña: N comprobaciones` y
 | `vistas.js` | cambio de vista, reflejo nombre/package y creación del proyecto desde el formulario. |
 | `vista-previa.js` | modelo y pintura de `apkc preview`: funciones puras y canvas; publica `apkc:previa-actualizada`. |
 | `vista-xml.js` | el XML del editor convertido en modelo (`pantalla` + nodos con `rect`): parser mínimo, jerarquía, pesos, gravedad y `@string`. Puro, sin DOM. |
-| `layout-editor.js` | el camino de vuelta del modo editar: añadir, mover (margen en un marco, reordenar en un `LinearLayout`) y borrar sobre el XML. Puro, sin DOM. |
-| `previa-panel.js` | las dos superficies de la vista previa (la vista dividida del editor y la vista Pantalla): cuatro aristas y cuatro esquinas por marco, modo **Vista previa** (layout dibujado), **Emulador** (modelo de `apkc preview`), consola del intérprete y el **modo editar** del layout, pintados con el mismo modelo. Recibe `hospedador` y `EDITOR`; no importa `pestana.js`. |
+| `layout-editor.js` | el camino de vuelta del modo editar: añadir, mover (margen en un marco, reordenar en un `LinearLayout`), leer y escribir propiedades de cualquier nodo (incluida la raíz), cambiar el tipo de la raíz y borrar sobre el XML. Puro, sin DOM. |
+| `previa-panel.js` | las dos superficies de la vista previa (la vista dividida del editor y la vista Pantalla): cuatro aristas y cuatro esquinas por marco, modo **Vista previa** (layout dibujado), **Emulador** (modelo de `apkc preview`), consola del intérprete y el **modo editar** del layout (paleta de 18 tipos y ficha de propiedades del nodo y de la raíz), pintados con el mismo modelo. Recibe `hospedador` y `EDITOR`; no importa `pestana.js`. |
 | `diagnostico.js` | panel de Inicio que pinta `analyze()`; solo DOM, sin reglas propias. |
 | `hospedador.js` | worker de módulo: `fs`/`path`/`process` para Go y una cola de un comando por vez. |
 | `fs-fragmento.js` | `fs` con forma de Node sobre OPFS (lo importa el worker, no la página). |
