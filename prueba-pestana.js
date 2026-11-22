@@ -3410,6 +3410,178 @@ async function conductor() {
       debug.ks > 1000 && debug.apk > 5000 && debug.codigo === "0" &&
       /certificado Android Debug/.test(debug.consola),
       JSON.stringify({ ks: debug.ks, apk: debug.apk, codigo: debug.codigo, veredicto: debug.veredicto }).slice(0, 300));
+
+    // 12c. `--inc` en la pestaña (I1 de docs/plan-incremental-web.md): la compilación que pide la
+    // página lo lleva, la segunda pasada de la misma pestaña no vuelve a enlazar recursos y el apk
+    // sale igual entrada por entrada que un build completo del mismo árbol. Las dos compilaciones
+    // seguidas se miden con el reloj de la página y con el `total` que imprime apkc.
+    const incremento = await evaluar(`(async () => {
+      const foto = async () => {
+        const bytes = await hospedador.bytes("/proyecto/build/app.apk");
+        const entradas = await leerZip(bytes);
+        const salida = [];
+        for (const e of entradas) {
+          if (e.dir) { salida.push([e.ruta, "dir"]); continue; }
+          const d = new Uint8Array(await crypto.subtle.digest("SHA-256", e.datos));
+          salida.push([e.ruta, Array.from(d).map((b) => b.toString(16).padStart(2, "0")).join("")]);
+        }
+        return salida;
+      };
+      const distintas = (a, b) => {
+        const malas = [];
+        for (let i = 0; i < Math.max(a.length, b.length); i++) {
+          const x = a[i], y = b[i];
+          if (!x || !y || x[0] !== y[0] || x[1] !== y[1]) malas.push(x ? x[0] : (y ? y[0] : "?"));
+        }
+        return malas;
+      };
+      const totalApkc = (consola) => {
+        const m = String(consola || "").match(/\\[timing\\][^\\n]*?\\btotal\\s+([0-9.]+)(ms|s)/);
+        if (!m) return null;
+        return m[2] === "s" ? Number(m[1]) * 1000 : Number(m[1]);
+      };
+      const enlaza = (consola) => /linking resources with the Go linker/.test(String(consola || ""));
+      const etapa = (consola, nombre) => {
+        const m = String(consola || "").match(new RegExp("\\\\[timing\\\\][^\\\\n]*?" + nombre + "\\\\s+([0-9.]+)(ms|s)"));
+        if (!m) return 0;
+        return m[2] === "s" ? Number(m[1]) * 1000 : Number(m[1]);
+      };
+      const k = await asegurarDebugKeystore();
+      await hospedador.cwd("/proyecto");
+      const marca = String(document.getElementById("consola-pestana").textContent).length;
+
+      // a) el apk de referencia: build completo, sin --inc, sobre el árbol limpio
+      await correr(["clean"]);
+      const completo = await compilarCon(k, "debug", { incremental: false });
+      const eCompleto = await foto();
+
+      // b) el mismo árbol limpio, con --inc: tiene que dar las mismas entradas
+      await correr(["clean"]);
+      const reloj1 = performance.now();
+      const frio = await compilarCon(k, "debug");
+      const frioReloj = performance.now() - reloj1;
+      const eFrio = await foto();
+
+      // c) dos compilaciones seguidas en la misma pestaña: la segunda no tiene nada que enlazar
+      const reloj2 = performance.now();
+      const caliente = await compilarCon(k, "debug");
+      const calienteReloj = performance.now() - reloj2;
+      const eCaliente = await foto();
+
+      // d) con un fuente editado el enlace sigue sin correr y el dex cambia; el apk resultante se
+      //    compara con el de un build completo del mismo árbol editado
+      const arbol = await hospedador.arbol();
+      const ruta = (arbol.nodos || []).map((n) => n.ruta || "").find((r) => /^\\/proyecto\\/src\\/.+\\.java$/.test(r));
+      const antes = await hospedador.texto(ruta);
+      await hospedador.escribir(ruta, new TextEncoder().encode(antes +
+        "\\nclass IncrementalProbe { static int n() { return 41; } }\\n"));
+      const editado = await compilarCon(k, "debug");
+      const eEditado = await foto();
+      await correr(["clean"]);
+      const completoEditado = await compilarCon(k, "debug", { incremental: false });
+      const eCompletoEditado = await foto();
+      await hospedador.escribir(ruta, new TextEncoder().encode(antes));
+
+      // f) y un recurso NUEVO con estado previo: el caso que se colaba. Con el enlazador de Go no
+      // hay flats que compilar y el incremental solo miraba los borrados, así que una cadena nueva
+      // dejaba el apk anterior tal cual y sin la cadena en resources.arsc. Se prueba al final
+      // porque borrar el fichero después sí es un cambio que tiene que reenlazar, y ensuciaría la
+      // comprobación de que un fuente editado no relinka.
+      const valorRecurso = "CRITICO_RECURSO_7391";
+      const tibio = await compilarCon(k, "debug");
+      const eTibio = await foto();
+      await hospedador.escribir("/proyecto/res/values/critico.xml", new TextEncoder().encode(
+        "<resources>\\n    <string name=\\"critico\\">" + valorRecurso + "</string>\\n</resources>\\n"));
+      const conRecurso = await compilarCon(k, "debug");
+      const eRecurso = await foto();
+      const arsc = await hospedador.bytes("/proyecto/build/resources.arsc");
+      const buscaBytes = (bytes, aguja) => {
+        if (!bytes) return false;
+        for (let i = 0; i + aguja.length <= bytes.length; i++) {
+          let j = 0;
+          while (j < aguja.length && bytes[i + j] === aguja[j]) j++;
+          if (j === aguja.length) return true;
+        }
+        return false;
+      };
+      const arscTieneRecurso = buscaBytes(arsc, new TextEncoder().encode(valorRecurso));
+      await hospedador.limpiar("/proyecto/res/values/critico.xml");
+      await correr(["clean"]);
+
+      const nuevas = String(document.getElementById("consola-pestana").textContent).slice(marca)
+        .split("\\n").map((l) => l.trim()).filter((l) => l.startsWith("$ apkc build"));
+      const dex = (e) => (e.find((x) => x[0] === "classes.dex") || [])[1];
+      return {
+        ruta, entradasCompleto: eCompleto.length, entradasFrio: eFrio.length,
+        entradasCaliente: eCaliente.length, entradasEditado: eEditado.length,
+        entradasCompletoEditado: eCompletoEditado.length,
+        distintasCompleto: distintas(eCompleto, eFrio),
+        distintasCaliente: distintas(eFrio, eCaliente),
+        distintasEditado: distintas(eCompletoEditado, eEditado),
+        dexCambia: dex(eFrio) !== dex(eEditado),
+        enlazaCompleto: enlaza(completo.consola), enlazaFrio: enlaza(frio.consola),
+        enlazaCaliente: enlaza(caliente.consola), enlazaEditado: enlaza(editado.consola),
+        enlazaTibio: enlaza(tibio.consola), enlazaRecurso: enlaza(conRecurso.consola), arscTieneRecurso,
+        distintasRecurso: distintas(eTibio, eRecurso), entradasRecurso: eRecurso.length,
+        codigos: [completo, frio, caliente, editado, completoEditado].map((r) => r && r.codigo),
+        totalFrio: totalApkc(frio.consola), totalCaliente: totalApkc(caliente.consola),
+        totalCompleto: totalApkc(completo.consola),
+        compileFrio: etapa(frio.consola, "compile go"), dexFrio: etapa(frio.consola, "dex go"),
+        compileCaliente: etapa(caliente.consola, "compile go"),
+        dexCaliente: etapa(caliente.consola, "dex go"),
+        compileCompleto: etapa(completo.consola, "compile go"),
+        dexCompleto: etapa(completo.consola, "dex go"),
+        compileEditado: etapa(editado.consola, "compile go"),
+        frioReloj, calienteReloj, ordenes: nuevas,
+      };
+    })()`);
+
+    const conInc = incremento.ordenes.filter((o) => o.includes("--inc")).length;
+    const sinInc = incremento.ordenes.filter((o) => !o.includes("--inc")).length;
+    comprueba("la pestaña compila con --inc y la prueba sigue pudiendo pedir el build completo",
+      conInc === 5 && sinInc === 2 && incremento.codigos.every((c) => c === 0),
+      JSON.stringify({ ordenes: incremento.ordenes, codigos: incremento.codigos }).slice(0, 320));
+    comprueba("el apk con --inc es igual entrada por entrada al de un build completo",
+      incremento.entradasFrio > 5 && incremento.entradasFrio === incremento.entradasCompleto &&
+      incremento.distintasCompleto.length === 0,
+      JSON.stringify({ entradas: incremento.entradasFrio, distintas: incremento.distintasCompleto }).slice(0, 240));
+    comprueba("la segunda compilación en la misma pestaña no vuelve a enlazar recursos",
+      incremento.enlazaFrio && !incremento.enlazaCaliente &&
+      incremento.entradasCaliente === incremento.entradasFrio &&
+      incremento.distintasCaliente.length === 0,
+      JSON.stringify({ enlazaFrio: incremento.enlazaFrio, enlazaCaliente: incremento.enlazaCaliente,
+        distintas: incremento.distintasCaliente }).slice(0, 240));
+    comprueba("un recurso nuevo con --inc reenlaza y su cadena llega a resources.arsc",
+      incremento.enlazaRecurso && incremento.arscTieneRecurso &&
+      incremento.distintasRecurso.length > 0 &&
+      incremento.entradasRecurso === incremento.entradasFrio,
+      JSON.stringify({ enlazaTibio: incremento.enlazaTibio, enlazaRecurso: incremento.enlazaRecurso,
+        arscTiene: incremento.arscTieneRecurso,
+        entradasDistintas: incremento.distintasRecurso }).slice(0, 260));
+    const porApkc = incremento.totalFrio && incremento.totalCaliente
+      ? Math.round((1 - incremento.totalCaliente / incremento.totalFrio) * 100) : null;
+    const porCompleto = incremento.totalCompleto && incremento.totalCaliente
+      ? Math.round((1 - incremento.totalCaliente / incremento.totalCompleto) * 100) : null;
+    const porReloj = Math.round((1 - incremento.calienteReloj / incremento.frioReloj) * 100);
+    comprueba("la segunda pasada no es más lenta que la primera en la misma pestaña",
+      incremento.calienteReloj <= incremento.frioReloj * 1.1,
+      JSON.stringify({ totalApkcFrio: incremento.totalFrio, totalApkcCaliente: incremento.totalCaliente,
+        ahorroPorApkc: porApkc === null ? "sin total" : porApkc + " %",
+        totalApkcCompleto: incremento.totalCompleto,
+        ahorroFrenteAlCompleto: porCompleto === null ? "sin total" : porCompleto + " %",
+        compileGoFrio: incremento.compileFrio, compileGoCaliente: incremento.compileCaliente,
+        compileGoCompleto: incremento.compileCompleto,
+        dexGoFrio: incremento.dexFrio, dexGoCaliente: incremento.dexCaliente,
+        dexGoCompleto: incremento.dexCompleto,
+        relojFrio: Math.round(incremento.frioReloj), relojCaliente: Math.round(incremento.calienteReloj),
+        ahorroPorReloj: porReloj + " %" }).slice(0, 500));
+    comprueba("con un fuente editado el build con --inc no reenlaza y el dex cambia",
+      incremento.enlazaFrio && !incremento.enlazaEditado && incremento.dexCambia,
+      JSON.stringify({ enlazaEditado: incremento.enlazaEditado, dexCambia: incremento.dexCambia }).slice(0, 200));
+    comprueba("el apk incremental tras editar un fuente es igual entrada por entrada al completo",
+      incremento.entradasEditado === incremento.entradasCompletoEditado &&
+      incremento.distintasEditado.length === 0,
+      JSON.stringify({ entradas: incremento.entradasEditado, distintas: incremento.distintasEditado }).slice(0, 240));
   } else {
     console.log("  --- sin ANDROID_JAR en el entorno: no se prueba el build completo en la pestaña");
   }
