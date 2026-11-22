@@ -1,26 +1,26 @@
 // La vista dividida del editor: a la derecha del código, un marco de teléfono con dos lecturas del
-// mismo proyecto, sin compilar dos veces y sin tocar el documento que se está editando.
+// mismo layout, sin compilar dos veces y sin tocar el documento que se está editando.
 //
-//   - «XML en vivo»: el `res/layout/*.xml` tal como está en el editor (o en OPFS si está cerrado),
-//     con el resaltado de `editor.js`. Se refresca al teclear con un debounce corto y no lanza
-//     ningún comando de apkc. Es de solo lectura: no hay un segundo editor del XML.
-//   - «Render (eventos)»: el canvas que pinta el modelo de `apkc preview` (el mismo que la pestaña
-//     Vista) y, debajo, la consola de la ejecución: capturas, avisos, pasos, interacciones y error.
+//   - «En vivo»: el `res/layout/*.xml` tal como está en el editor, convertido a modelo con
+//     `vista-xml.js` y pintado en el canvas. Es un dibujo del layout —jerarquía, textos, tamaños,
+//     gravedad y márgenes—, nunca el código XML: no hay `<pre>` ni resaltado de etiquetas. Se
+//     refresca al teclear con un debounce corto, no lanza ningún comando de apkc y, si el XML está
+//     a medias, conserva el último render bueno y lo dice en la línea de estado.
+//   - «Render (eventos)»: el canvas del modelo real de `apkc preview` (tras compilar, con
+//     `textoDinamico`) y la consola de la ejecución: capturas, avisos, pasos y error.
 //
 // Reglas que no se relajan:
-//   - **Nada muta el modelo.** El separador cambia un ancho CSS y la consola pinta texto ya emitido;
-//     ningún `pointerdown` de esta pieza escribe en OPFS ni cambia `estadoPestana`.
-//   - **Todo el texto del intérprete es dato, no marcado.** Se pinta con `textContent`; un
-//     `texto` con `<script>` sale escapado porque nunca pasa por `innerHTML`.
-//   - **Sin red.** Los layouts se leen del OPFS del propio proyecto por el hospedador de siempre.
+//   - **Nada muta el modelo.** El separador cambia un ancho CSS y los dos canvas solo leen; ningún
+//     `pointerdown` de esta pieza escribe en OPFS ni cambia `estadoPestana`.
+//   - **Todo el texto del intérprete es dato, no marcado.** Se pinta con `textContent`.
+//   - **Sin red.** El layout y los `@string` se leen del OPFS del propio proyecto.
 //
 // Las funciones de cabecera —`anchoValido`, `esRutaDeLayout`, `candidatosDeLayout` y
-// `resumenEjecucion`— son puras y se prueban en node (`prueba.js`). La carpeta de OPFS y el
-// documento activo llegan por el objeto de dependencias: este módulo no importa `pestana.js`.
-import { esXml, resaltar } from "./editor.js";
-import { textoHtml } from "./consola.js";
-import { htmlConfiable } from "./tt.js";
+// `resumenEjecucion`— son puras y se prueban en node (`prueba.js`); el modelo en vivo se prueba en
+// `vista-xml.js`. La carpeta de OPFS y el documento activo llegan por el objeto de dependencias:
+// este módulo no importa `pestana.js`.
 import { pintarModelo, modeloActual, EVENTO_PREVIA } from "./vista-previa.js";
+import { modeloDeLayout, decodificarEntidades } from "./vista-xml.js";
 
 // Persistencia de la vista dividida. Son preferencias de esta ventana, no del proyecto.
 const CLAVE_ANCHO = "apkc-studio/previa-ancho";
@@ -45,6 +45,8 @@ const MENSAJE_SIN_EJECUCION = "El modelo no trae ejecución: el apk se leyó con
   "tiene classes.dex. Sin capturas ni avisos.";
 const MENSAJE_SIN_LAYOUT = "El proyecto no tiene ningún res/layout/*.xml. Crea un layout en el " +
   "explorador o abre uno para verlo aquí.";
+const MENSAJE_SIN_ABRIR = "Abre un res/layout/*.xml en el editor para ver aquí el layout dibujado, " +
+  "sin compilar.";
 
 // Un ancho utilizable: siempre entero, dentro de [minimo, maximo] y con un respaldo si lo guardado
 // no es un número (una preferencia corrupta no puede dejar el panel en 0 px).
@@ -68,9 +70,7 @@ function esDelProyecto(ruta, base) {
 }
 
 // Las rutas candidatas, en el orden en que se intentan: primero lo que se está editando, después lo
-// que dice el modelo de `apkc preview` y, si hay árbol, sus layouts (main.xml primero). Sin el
-// árbol, un candidato del modelo que no exista se descarta al no poder leerse; por eso el llamante
-// reintenta con el árbol antes de darse por vencido.
+// que dice el modelo de `apkc preview` y, si hay árbol, sus layouts (main.xml primero).
 export function candidatosDeLayout({ abierta, layout, nodos, proyecto } = {}) {
   const base = typeof proyecto === "string" && proyecto.trim()
     ? proyecto.trim().replace(/\/+$/, "") : "/proyecto";
@@ -86,8 +86,6 @@ export function candidatosDeLayout({ abierta, layout, nodos, proyecto } = {}) {
   };
   if (esDelProyecto(abierta, base)) lista.push(abierta);
   if (typeof layout === "string" && layout.trim()) mete(layout);
-  // el árbol puede traer ficheros de fuera del proyecto (un zip importado en otra carpeta, por
-  // ejemplo) y la copia generada de build/: un layout de otro sitio no es el layout de esta app
   const conocidos = Array.isArray(nodos) ? nodos.filter((ruta) => esDelProyecto(ruta, base)) : [];
   if (!conocidos.length) return lista;
   const orden = [...conocidos].sort((a, b) => {
@@ -150,12 +148,15 @@ export function crearPreviaPanel({ hospedador, proyecto, estadoPestana, editor }
   let ancho = ANCHO_POR_DEFECTO;
   let preferido = ANCHO_POR_DEFECTO;
   let visible = true;
-  let modo = "xml";
+  let modo = "vivo";
   let arrastrando = false;
-  let temporizadorXml = 0;
-  let turnoXml = 0;
-  let rutaMostrada = null;
+  let temporizadorVivo = 0;
+  let turnoVivo = 0;
+  let rutaViva = null;
+  let modeloVivo = null;
   let arbol = null;
+  let strings = null;
+  let stringsEn = 0;
   let arbolEn = 0;
   let cuadro = 0;
   let iniciado = false;
@@ -165,14 +166,6 @@ export function crearPreviaPanel({ hospedador, proyecto, estadoPestana, editor }
   function fila() { return conDocumento() ? document.getElementById("editor-fila") : null; }
 
   // --- separador ---------------------------------------------------------------------------
-  function anchoDesde(clientX) {
-    const caja = fila();
-    if (!caja) return ANCHO_POR_DEFECTO;
-    const rect = caja.getBoundingClientRect();
-    const tope = Math.max(ANCHO_MINIMO, rect.width - EDITOR_MINIMO);
-    return anchoValido(Math.round(rect.right - clientX), ANCHO_MINIMO, Math.min(ANCHO_MAXIMO, tope));
-  }
-
   function topeAncho() {
     // con la vista Editor oculta la fila mide cero: no se puede recortar contra un ancho que no
     // existe, así que el techo es el máximo y el recorte real llega al mostrarse la vista
@@ -180,6 +173,14 @@ export function crearPreviaPanel({ hospedador, proyecto, estadoPestana, editor }
     const disponible = caja ? caja.clientWidth : 0;
     if (!(disponible > 0)) return ANCHO_MAXIMO;
     return Math.min(ANCHO_MAXIMO, Math.max(ANCHO_MINIMO, disponible - EDITOR_MINIMO));
+  }
+
+  function anchoDesde(clientX) {
+    const caja = fila();
+    if (!caja) return ANCHO_POR_DEFECTO;
+    const rect = caja.getBoundingClientRect();
+    const tope = Math.max(ANCHO_MINIMO, rect.width - EDITOR_MINIMO);
+    return anchoValido(Math.round(rect.right - clientX), ANCHO_MINIMO, Math.min(ANCHO_MAXIMO, tope));
   }
 
   function aplicarAncho(pedido, persistir) {
@@ -256,55 +257,53 @@ export function crearPreviaPanel({ hospedador, proyecto, estadoPestana, editor }
     if (persistir) guardarClave(CLAVE_VISIBLE, visible ? "1" : "0");
     if (!visible) return;
     if (modo === "render") programarPintado();
-    else programarXml(0);
+    else { pintarVivo(); programarVivo(0); }
   }
 
-  // --- XML / Render ------------------------------------------------------------------------
+  // --- En vivo / Render ---------------------------------------------------------------------
   function aplicarModo(valor, persistir) {
-    modo = valor === "render" ? "render" : "xml";
-    const botonXml = document.getElementById("previa-modo-xml");
+    // una preferencia vieja (`xml`) era el nombre anterior del mismo panel dibujado
+    modo = valor === "render" ? "render" : "vivo";
+    const botonVivo = document.getElementById("previa-modo-vivo");
     const botonRender = document.getElementById("previa-modo-render");
-    const seccionXml = document.getElementById("previa-xml");
+    const seccionVivo = document.getElementById("previa-vivo");
     const seccionRender = document.getElementById("previa-render");
-    for (const [boton, activo] of [[botonXml, modo === "xml"], [botonRender, modo === "render"]]) {
+    for (const [boton, activo] of [[botonVivo, modo === "vivo"], [botonRender, modo === "render"]]) {
       if (!boton) continue;
       boton.classList.toggle("activo", activo);
       boton.setAttribute("aria-selected", String(activo));
       boton.tabIndex = activo ? 0 : -1;
     }
-    if (seccionXml) seccionXml.hidden = modo !== "xml";
+    if (seccionVivo) seccionVivo.hidden = modo !== "vivo";
     if (seccionRender) seccionRender.hidden = modo !== "render";
     if (persistir) guardarClave(CLAVE_MODO, modo);
     if (!visible) return;
     if (modo === "render") programarPintado();
-    else programarXml(0);
+    else { pintarVivo(); programarVivo(0); }
   }
 
   function conectarModos() {
-    const botonXml = document.getElementById("previa-modo-xml");
+    const botonVivo = document.getElementById("previa-modo-vivo");
     const botonRender = document.getElementById("previa-modo-render");
-    if (botonXml) {
-      botonXml.addEventListener("click", () => aplicarModo("xml", true));
-      botonXml.addEventListener("keydown", (e) => moverFocoModo(e, "render"));
+    if (botonVivo) {
+      botonVivo.addEventListener("click", () => aplicarModo("vivo", true));
+      botonVivo.addEventListener("keydown", (e) => moverFocoModo(e));
     }
     if (botonRender) {
       botonRender.addEventListener("click", () => aplicarModo("render", true));
-      botonRender.addEventListener("keydown", (e) => moverFocoModo(e, "xml"));
+      botonRender.addEventListener("keydown", (e) => moverFocoModo(e));
     }
   }
 
   // role="tab" sin flechas deja el teclado a medias: las dos pestañas del panel se recorren con
   // las flechas, Home y End, como en cualquier tablist.
-  function moverFocoModo(e, elOtro) {
-    const destino = e.key === "ArrowRight" || e.key === "ArrowLeft" || e.key === "Home" || e.key === "End"
-      ? (e.key === "ArrowLeft" || e.key === "Home" ? "xml" : "render")
-      : null;
-    if (!destino) return;
+  function moverFocoModo(e) {
+    if (!["ArrowRight", "ArrowLeft", "Home", "End"].includes(e.key)) return;
     e.preventDefault();
+    const destino = e.key === "ArrowLeft" || e.key === "Home" ? "vivo" : "render";
     aplicarModo(destino, true);
     const boton = document.getElementById("previa-modo-" + destino);
     if (boton) boton.focus();
-    else if (elOtro) { /* sin el otro botón no hay a dónde ir */ }
   }
 
   // --- consola de la ejecución -------------------------------------------------------------
@@ -373,13 +372,30 @@ export function crearPreviaPanel({ hospedador, proyecto, estadoPestana, editor }
     if (!hay) vacio.textContent = "La ejecución no capturó escrituras ni dejó avisos.";
   }
 
-  // --- render -------------------------------------------------------------------------------
+  // --- pintura ------------------------------------------------------------------------------
   function limpiarCanvas(canvas) {
     if (!canvas || !canvas.getContext) return;
     const ctx = canvas.getContext("2d");
     if (!ctx) return;
     ctx.setTransform(1, 0, 0, 1, 0, 0);
     ctx.clearRect(0, 0, canvas.width, canvas.height);
+  }
+
+  function pintarVivo() {
+    if (!conDocumento()) return null;
+    const canvas = document.getElementById("previa-vivo-canvas");
+    const estado = document.getElementById("previa-vivo-estado");
+    if (!canvas || !estado) return null;
+    if (!modeloVivo) {
+      limpiarCanvas(canvas);
+      estado.textContent = MENSAJE_SIN_ABRIR;
+      return null;
+    }
+    const pintado = pintarModelo(canvas, modeloVivo);
+    if (pintado && pintado.valida === false) {
+      estado.textContent = "El layout no cabe en la caja del panel; se dibuja a tamaño de respaldo.";
+    }
+    return pintado;
   }
 
   function pintarRender(motivo) {
@@ -399,8 +415,8 @@ export function crearPreviaPanel({ hospedador, proyecto, estadoPestana, editor }
     const pintado = pintarModelo(canvas, modelo);
     const layout = modelo.layout ? String(modelo.layout) : "el layout";
     estado.textContent = modelo.aproximado === false
-      ? "Render de " + layout + ", sin aproximar. Se actualiza al compilar; el XML en vivo se lee del editor."
-      : "Render aproximado de " + layout + ". Se actualiza al compilar; el XML en vivo se lee del editor.";
+      ? "Render de " + layout + " con los eventos de la app, sin aproximar. Se actualiza al compilar."
+      : "Render aproximado de " + layout + " con los eventos de la app. Se actualiza al compilar.";
     pintarLog(modelo);
     if (pintado && pintado.valida === false) {
       estado.textContent = "El modelo de vista previa no trae una pantalla medible (ancho o alto no " +
@@ -410,12 +426,19 @@ export function crearPreviaPanel({ hospedador, proyecto, estadoPestana, editor }
   }
 
   function programarPintado() {
-    if (typeof requestAnimationFrame !== "function") { pintarRender(); return; }
+    if (typeof requestAnimationFrame !== "function") {
+      if (modo === "render") pintarRender(); else pintarVivo();
+      return;
+    }
     if (cuadro) return;
-    cuadro = requestAnimationFrame(() => { cuadro = 0; pintarRender(); });
+    cuadro = requestAnimationFrame(() => {
+      cuadro = 0;
+      if (!visible) return;
+      if (modo === "render") pintarRender(); else pintarVivo();
+    });
   }
 
-  // --- XML en vivo --------------------------------------------------------------------------
+  // --- el layout en vivo --------------------------------------------------------------------
   function layoutDelModelo() {
     const modelo = modeloActual();
     return modelo && typeof modelo.layout === "string" ? modelo.layout : "";
@@ -431,11 +454,32 @@ export function crearPreviaPanel({ hospedador, proyecto, estadoPestana, editor }
       arbol = [];
     }
     arbolEn = ahora;
+    strings = null;
     return arbol;
   }
 
+  // Los `@string` del proyecto, del `values` base y sus variantes. Es una lectura de OPFS por
+  // refresco (con caché de 5 s); si un values está roto, los demás siguen valiendo.
+  async function stringsDelProyecto() {
+    const ahora = Date.now();
+    if (strings && ahora - stringsEn < 5000) return strings;
+    const nodos = await nodosDelProyecto();
+    const mapa = Object.create(null);
+    for (const ruta of nodos.filter((r) => /\/res\/values[^/]*\/strings\.xml$/.test(r))) {
+      try {
+        const texto = await hospedador.texto(ruta);
+        for (const m of String(texto).matchAll(/<string\s+name="([^"]+)"[^>]*>([^<]*)<\/string>/g)) {
+          if (!(m[1] in mapa)) mapa[m[1]] = decodificarEntidades(m[2]);
+        }
+      } catch (e) { /* un values ilegible no impide pintar los demás */ }
+    }
+    strings = mapa;
+    stringsEn = ahora;
+    return mapa;
+  }
+
   async function leerLayout(ruta) {
-    // el documento abierto manda: lo que se ve es lo que se está escribiendo, aunque no se guarde
+    // el documento abierto manda: lo que se dibuja es lo que se está escribiendo, aunque no se guarde
     if (estadoPestana && estadoPestana.ruta === ruta && editor && typeof editor.texto === "function") {
       return String(editor.texto());
     }
@@ -446,41 +490,41 @@ export function crearPreviaPanel({ hospedador, proyecto, estadoPestana, editor }
     return new TextDecoder().decode(bytes);
   }
 
-  function pintarXml(ruta, texto) {
-    const estado = document.getElementById("previa-xml-estado");
-    const pre = document.getElementById("previa-xml-codigo");
-    if (!estado || !pre) return;
-    const relativa = ruta.startsWith(carpeta + "/") ? ruta.slice(carpeta.length + 1) : ruta;
-    const xml = esXml(texto);
-    const lineas = texto === "" ? 0 : texto.split("\n").length;
-    const desplazamiento = pre.scrollTop;
-    // el texto viene de un fichero del proyecto: primero se escapa y después se colorea; nunca se
-    // inyecta el XML crudo
-    pre.innerHTML = xml
-      ? htmlConfiable(resaltar(texto, "xml") + "\n")
-      : htmlConfiable(textoHtml(texto));
-    pre.scrollTop = desplazamiento;
-    const marca = document.getElementById("marca-sucio");
-    const sucio = !!(marca && !marca.hidden && estadoPestana && estadoPestana.ruta === ruta);
-    estado.textContent = relativa + " · " + lineas + (lineas === 1 ? " línea" : " líneas") +
-      " · solo lectura" + (sucio ? " · sin guardar" : "") + (xml ? "" : " · no parece XML");
+  function relativa(ruta) {
+    return ruta.startsWith(carpeta + "/") ? ruta.slice(carpeta.length + 1) : ruta;
   }
 
-  async function refrescarXml() {
+  function estadoVivo(modelo, ruta, nota) {
+    const estado = document.getElementById("previa-vivo-estado");
+    if (!estado) return;
+    const marca = document.getElementById("marca-sucio");
+    const sucio = !!(marca && !marca.hidden && estadoPestana && estadoPestana.ruta === ruta);
+    const partes = [relativa(ruta), modelo.nodos + (modelo.nodos === 1 ? " vista" : " vistas"),
+      "en vivo (sin compilar)"];
+    if (sucio) partes.push("sin guardar");
+    if (modelo.sinStrings) partes.push(modelo.sinStrings + " @string sin resolver");
+    if (nota) partes.push(nota);
+    estado.classList.remove("con-aviso");
+    estado.textContent = partes.join(" · ");
+  }
+
+  async function refrescarVivo() {
     if (!conDocumento() || !visible) return;
-    const estado = document.getElementById("previa-xml-estado");
-    const pre = document.getElementById("previa-xml-codigo");
-    if (!estado || !pre) return;
-    const turno = ++turnoXml;
+    const estado = document.getElementById("previa-vivo-estado");
+    const canvas = document.getElementById("previa-vivo-canvas");
+    if (!estado || !canvas) return;
+    const turno = ++turnoVivo;
     const base = { abierta: estadoPestana ? estadoPestana.ruta : null, layout: layoutDelModelo(), proyecto: carpeta };
+    let ruta = null;
+    let texto = null;
     let error = "";
     const intentar = async (rutas) => {
-      for (const ruta of rutas) {
+      for (const candidata of rutas) {
         try {
-          const texto = await leerLayout(ruta);
-          if (turno !== turnoXml) return true;
-          rutaMostrada = ruta;
-          pintarXml(ruta, texto);
+          const leido = await leerLayout(candidata);
+          if (turno !== turnoVivo) return true;
+          ruta = candidata;
+          texto = leido;
           return true;
         } catch (e) {
           if (!error) error = String(e && e.message ? e.message : e);
@@ -488,24 +532,43 @@ export function crearPreviaPanel({ hospedador, proyecto, estadoPestana, editor }
       }
       return false;
     };
-    if (await intentar(candidatosDeLayout(base))) return;
-    if (turno !== turnoXml) return;
-    const nodos = await nodosDelProyecto(true);
-    if (turno !== turnoXml) return;
-    if (await intentar(candidatosDeLayout({ ...base, nodos }))) return;
-    if (turno !== turnoXml) return;
-    rutaMostrada = null;
-    pre.textContent = "";
-    estado.textContent = nodos.length || error
-      ? "No se pudo leer el layout" + (error ? ": " + error : ".") + " "
-      : MENSAJE_SIN_LAYOUT;
+    if (!(await intentar(candidatosDeLayout(base)))) {
+      if (turno !== turnoVivo) return;
+      const nodos = await nodosDelProyecto(true);
+      if (turno !== turnoVivo) return;
+      if (!(await intentar(candidatosDeLayout({ ...base, nodos })))) {
+        rutaViva = null;
+        modeloVivo = null;
+        canvas.getContext && limpiarCanvas(canvas);
+        estado.classList.remove("con-aviso");
+        estado.textContent = nodos.length || error
+          ? MENSAJE_SIN_LAYOUT + (error ? " (" + error + ")" : "")
+          : MENSAJE_SIN_ABRIR;
+        return;
+      }
+    }
+    if (turno !== turnoVivo) return;
+    const stringsMap = await stringsDelProyecto();
+    if (turno !== turnoVivo) return;
+    const resultado = modeloDeLayout(texto, { layout: ruta, strings: stringsMap });
+    if (!resultado.ok) {
+      // un XML a medias no borra la pantalla que ya estaba bien: se avisa y se conserva
+      estado.classList.add("con-aviso");
+      estado.textContent = "XML inválido" + (resultado.linea ? " (línea " + resultado.linea + ")" : "") +
+        ": se conserva el último render" + (rutaViva ? " de " + relativa(rutaViva) : "") + ".";
+      return;
+    }
+    rutaViva = ruta;
+    modeloVivo = resultado.modelo;
+    estadoVivo(modeloVivo, ruta);
+    pintarVivo();
   }
 
-  function programarXml(espera) {
-    clearTimeout(temporizadorXml);
-    temporizadorXml = setTimeout(() => {
-      temporizadorXml = 0;
-      refrescarXml().catch(() => {});
+  function programarVivo(espera) {
+    clearTimeout(temporizadorVivo);
+    temporizadorVivo = setTimeout(() => {
+      temporizadorVivo = 0;
+      refrescarVivo().catch(() => {});
     }, typeof espera === "number" ? espera : ESPERA_TECLEO);
   }
 
@@ -516,19 +579,20 @@ export function crearPreviaPanel({ hospedador, proyecto, estadoPestana, editor }
         if (!visible) return;
         // si el layout mostrado es el documento que se escribe, basta el buffer; si no, no hay nada
         // que releer por teclear en otro fichero
-        if (rutaMostrada && estadoPestana && estadoPestana.ruta === rutaMostrada) programarXml(ESPERA_TECLEO);
+        if (rutaViva && estadoPestana && estadoPestana.ruta === rutaViva) programarVivo(ESPERA_TECLEO);
+        else if (!modeloVivo) programarVivo(ESPERA_TECLEO);
       });
     }
     const titulo = document.getElementById("fichero-abierto");
     if (titulo && typeof MutationObserver === "function") {
-      new MutationObserver(() => programarXml(ESPERA_DOCUMENTO))
+      new MutationObserver(() => programarVivo(ESPERA_DOCUMENTO))
         .observe(titulo, { childList: true, characterData: true, subtree: true });
     }
     // crear, subir o borrar un layout no abre necesariamente un documento: el árbol repintado es la
     // señal de que la lista de ficheros cambió, y el layout mostrado puede ser otro (o ninguno)
     const arbolEl = document.getElementById("arbol-pestana");
     if (arbolEl && typeof MutationObserver === "function") {
-      new MutationObserver(() => programarXml(ESPERA_ARBOL))
+      new MutationObserver(() => programarVivo(ESPERA_ARBOL))
         .observe(arbolEl, { childList: true, subtree: true });
     }
     document.addEventListener(EVENTO_PREVIA, (e) => {
@@ -537,7 +601,8 @@ export function crearPreviaPanel({ hospedador, proyecto, estadoPestana, editor }
       // el modelo cambió: el canvas y la consola se pintan ya. Un rAF dejaría la consola con las
       // capturas del build anterior justo cuando el preview falla, que es cuando más importa.
       pintarRender(detalle.mensaje);
-      if (modo === "xml") programarXml(ESPERA_PREVIA);
+      // el layout del modelo puede decir cuál es el layout del proyecto si aún no hay ninguno vivo
+      if (modo === "vivo" && !modeloVivo) programarVivo(ESPERA_PREVIA);
     });
   }
 
@@ -551,7 +616,7 @@ export function crearPreviaPanel({ hospedador, proyecto, estadoPestana, editor }
     preferido = anchoValido(leerClave(CLAVE_ANCHO, ANCHO_POR_DEFECTO), ANCHO_MINIMO, ANCHO_MAXIMO);
     ancho = preferido;
     visible = leerClave(CLAVE_VISIBLE, "1") !== "0";
-    modo = leerClave(CLAVE_MODO, "xml") === "render" ? "render" : "xml";
+    modo = leerClave(CLAVE_MODO, "vivo") === "render" ? "render" : "vivo";
 
     conectarSeparador(separador);
     conectarModos();
@@ -566,7 +631,7 @@ export function crearPreviaPanel({ hospedador, proyecto, estadoPestana, editor }
       // preferencia guardada, no con lo que cupo en una sección oculta
       new ResizeObserver(() => {
         aplicarAncho(preferido, false);
-        if (!visible || modo !== "render") return;
+        if (!visible) return;
         programarPintado();
       }).observe(caja);
     }
@@ -575,7 +640,8 @@ export function crearPreviaPanel({ hospedador, proyecto, estadoPestana, editor }
     aplicarVisible(visible, false);
     aplicarModo(modo, false);
     pintarRender();
-    programarXml(0);
+    pintarVivo();
+    programarVivo(0);
     return true;
   }
 
@@ -583,8 +649,11 @@ export function crearPreviaPanel({ hospedador, proyecto, estadoPestana, editor }
     iniciar,
     aplicarModo,
     aplicarVisible,
-    refrescarXml,
+    refrescarVivo,
+    pintarVivo,
     pintarRender,
-    estado: () => ({ ancho, visible, modo, ruta: rutaMostrada }),
+    // lectura para las pruebas de chromium: el modelo dibujado en el modo en vivo (no el código)
+    modeloVivo: () => modeloVivo,
+    estado: () => ({ ancho, visible, modo, ruta: rutaViva }),
   };
 }

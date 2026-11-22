@@ -316,8 +316,8 @@
             <aside id="previa-lateral" class="previa-lateral" aria-label="Vista previa del teléfono">
               <div class="previa-lateral-cab">
                 <div class="previa-modos" role="tablist" aria-label="Contenido de la vista previa">
-                  <button id="previa-modo-xml" class="previa-modo activo" type="button" role="tab"
-                          aria-selected="true" aria-controls="previa-xml">XML en vivo</button>
+                  <button id="previa-modo-vivo" class="previa-modo activo" type="button" role="tab"
+                          aria-selected="true" aria-controls="previa-vivo">En vivo</button>
                   <button id="previa-modo-render" class="previa-modo" type="button" role="tab"
                           aria-selected="false" aria-controls="previa-render">Render (eventos)</button>
                 </div>
@@ -327,10 +327,13 @@
                 </button>
               </div>
 
-              <div id="previa-xml" class="previa-xml" role="tabpanel" aria-labelledby="previa-modo-xml">
-                <p id="previa-xml-estado" class="previa-estado" role="status" aria-live="polite">buscando el layout…</p>
-                <pre id="previa-xml-codigo" class="previa-xml-codigo" tabindex="0"
-                     aria-label="El XML del layout tal como se edita, de solo lectura"></pre>
+              <div id="previa-vivo" class="previa-vivo" role="tabpanel" aria-labelledby="previa-modo-vivo">
+                <div class="previa-marco previa-marco-lateral">
+                  <canvas id="previa-vivo-canvas" class="previa-canvas previa-canvas-lateral" width="360" height="640"
+                          role="img" aria-label="Dibujo del layout del editor, sin compilar"></canvas>
+                </div>
+                <p id="previa-vivo-estado" class="previa-estado" role="status" aria-live="polite">Abre un
+                  res/layout/*.xml en el editor para verlo dibujado aquí, sin compilar.</p>
               </div>
 
               <div id="previa-render" class="previa-render" role="tabpanel" aria-labelledby="previa-modo-render" hidden>

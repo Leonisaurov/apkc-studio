@@ -123,9 +123,9 @@ const conductor = `(async () => {
     const panel = document.getElementById("previa-lateral");
     const fila = document.getElementById("editor-fila");
     const boton = document.getElementById("previa-alternar");
-    const modoXml = document.getElementById("previa-modo-xml");
+    const modoVivo = document.getElementById("previa-modo-vivo");
     const modoRender = document.getElementById("previa-modo-render");
-    if (!separador || !panel || !fila || !boton || !modoXml || !modoRender) return null;
+    if (!separador || !panel || !fila || !boton || !modoVivo || !modoRender) return null;
     const anchoInicial = separador.getAttribute("aria-valuenow");
     separador.focus();
     separador.dispatchEvent(new KeyboardEvent("keydown", { key: "ArrowLeft", bubbles: true }));
@@ -135,22 +135,24 @@ const conductor = `(async () => {
     const guardado = localStorage.getItem("apkc-studio/previa-ancho");
     modoRender.click();
     const enRender = {
-      xml: document.getElementById("previa-xml").hidden,
+      vivo: document.getElementById("previa-vivo").hidden,
       render: document.getElementById("previa-render").hidden,
-      seleccion: [modoXml.getAttribute("aria-selected"), modoRender.getAttribute("aria-selected")],
+      seleccion: [modoVivo.getAttribute("aria-selected"), modoRender.getAttribute("aria-selected")],
       vacio: document.getElementById("previa-log-vacio").textContent,
       vacioVisible: !document.getElementById("previa-log-vacio").hidden,
       cabecera: document.getElementById("previa-log-cabecera").textContent,
       entradas: document.getElementById("previa-log-lista").children.length,
       estado: document.getElementById("previa-render-estado").textContent,
     };
-    modoXml.click();
-    const enXml = {
-      xml: document.getElementById("previa-xml").hidden,
+    modoVivo.click();
+    const enVivo = {
+      vivo: document.getElementById("previa-vivo").hidden,
       render: document.getElementById("previa-render").hidden,
-      estado: document.getElementById("previa-xml-estado").textContent,
+      estado: document.getElementById("previa-vivo-estado").textContent,
+      canvas: !!document.getElementById("previa-vivo-canvas"),
       modoGuardado: localStorage.getItem("apkc-studio/previa-modo"),
     };
+    const codigo = document.querySelector("#previa-lateral pre");
     boton.click();
     const oculto = {
       panel: panel.hidden,
@@ -167,13 +169,14 @@ const conductor = `(async () => {
       enfocable: separador.tabIndex,
       minimo: separador.getAttribute("aria-valuemin"),
       anchoInicial, trasIzquierda, trasDerecha, guardado,
-      enRender, enXml, oculto, visibleOtraVez,
+      enRender, enVivo, oculto, visibleOtraVez,
+      codigoEnPanel: !!codigo,
       editorSigue: !!document.getElementById("codigo"),
       visible: !panel.hidden,
     };
   })();
   r.previa = previa;
-  r.soloUnCanvas = document.querySelectorAll("canvas.previa-canvas").length === 2;
+  r.canvasDeLaPrevia = document.querySelectorAll("canvas.previa-canvas").length;
 
   // sin cabeceras del servidor, el SW debió aislar la página y el create tiene que funcionar
   document.getElementById("crear-proyecto").click();
@@ -294,18 +297,22 @@ function comprueba(cond, msg) { if (!cond) { fallos++; console.log("  FALLO:", m
       pv.trasDerecha === ancho0 && pv.guardado === String(ancho0),
       "el separador no se mueve con las flechas ni guarda el ancho: " + JSON.stringify({ ancho0,
         izquierda: pv.trasIzquierda, derecha: pv.trasDerecha, guardado: pv.guardado }));
-    comprueba(pv.enRender && pv.enRender.xml === true && pv.enRender.render === false &&
+    comprueba(pv.enRender && pv.enRender.vivo === true && pv.enRender.render === false &&
       pv.enRender.seleccion.join(",") === "false,true" && pv.enRender.entradas === 0 &&
       pv.enRender.vacioVisible === true && /[Cc]ompila/.test(String(pv.enRender.vacio)) &&
       pv.enRender.cabecera === "sin ejecución",
-      "el modo render no esconde el XML ni deja la consola vacía con su motivo: " + JSON.stringify(pv.enRender).slice(0, 300));
-    comprueba(pv.enXml && pv.enXml.xml === false && pv.enXml.render === true &&
-      pv.enXml.modoGuardado === "xml" && String(pv.enXml.estado).length > 0,
-      "volver a XML no restaura su sección ni guarda el modo: " + JSON.stringify(pv.enXml).slice(0, 240));
+      "el modo render no esconde el modo en vivo ni deja la consola con su motivo: " + JSON.stringify(pv.enRender).slice(0, 300));
+    comprueba(pv.enVivo && pv.enVivo.vivo === false && pv.enVivo.render === true &&
+      pv.enVivo.modoGuardado === "vivo" && pv.enVivo.canvas === true &&
+      /[Aa]bre un res\/layout/.test(String(pv.enVivo.estado)),
+      "volver a «En vivo» no restaura su canvas ni guarda el modo: " + JSON.stringify(pv.enVivo).slice(0, 240));
+    comprueba(pv.codigoEnPanel === false,
+      "el panel de la previa enseña código (un <pre>) en vez del layout dibujado");
     comprueba(pv.oculto && pv.oculto.panel === true && pv.oculto.separador === true &&
       pv.oculto.expandido === "false" && pv.oculto.guardado === "0" && pv.visibleOtraVez === true,
       "el botón Previa no oculta ni vuelve a mostrar el panel: " + JSON.stringify(pv.oculto));
-    comprueba(v.soloUnCanvas === true, "faltan el canvas de Vista y el del panel lateral (deben ser dos)");
+    comprueba(v.canvasDeLaPrevia === 3,
+      "faltan canvas: Vista, layout en vivo y render con eventos (deben ser tres): " + v.canvasDeLaPrevia);
     comprueba(v.icono, "falta el campo del icono");
     // Sin APKC_WASM esta prueba es solo de DOM: basta con que el SW haya aislado la página y el
     // create no culpe a OPFS. Con el binario presente (es lo que hace e2e.sh) tiene que crear.

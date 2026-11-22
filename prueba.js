@@ -12,6 +12,7 @@ import { leerZip, zipDelArbol, paqueteDelManifiesto, nombreDeZip, rutaSegura,
 import * as vistaPrevia from "./vista-previa.js";
 import * as previaPanel from "./previa-panel.js";
 import * as autocompletado from "./autocompletado-datos.js";
+import * as vistaXml from "./vista-xml.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const a = { buildProject, makeZip, analyze, RULES, crc32 };
@@ -344,6 +345,102 @@ if (generado.length !== 0) {
   mal("candidatosDeLayout toma el layout generado de build/: " + JSON.stringify(generado));
 }
 
+// 6e. el modo «en vivo» dibuja el layout: el XML del editor se convierte en modelo con la misma
+//     forma que el de `apkc preview` (pantalla + nodos con rect). Es puro y se prueba aquí.
+const layoutHola = `<?xml version="1.0" encoding="utf-8"?>
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:orientation="vertical" android:layout_width="match_parent"
+    android:layout_height="match_parent" android:gravity="center">
+  <TextView android:id="@+id/saludo" android:layout_width="wrap_content"
+      android:layout_height="wrap_content" android:text="@string/saludo"/>
+  <Button android:id="@+id/pulsar" android:layout_width="wrap_content"
+      android:layout_height="wrap_content" android:text="Pulsar"/>
+</LinearLayout>`;
+const enVivo = vistaXml.modeloDeLayout(layoutHola, { layout: "res/layout/main.xml", strings: { saludo: "Hello!" } });
+if (!enVivo.ok) {
+  mal("modeloDeLayout no convierte el layout de la plantilla: " + enVivo.error);
+} else {
+  const m = enVivo.modelo;
+  if (m.layout !== "res/layout/main.xml" || m.aproximado !== true || m.nodos !== 3 ||
+      m.pantalla.ancho !== 360 || m.pantalla.alto !== 640) {
+    mal("modeloDeLayout pierde la cabecera del modelo: " + JSON.stringify({ layout: m.layout, nodos: m.nodos, pantalla: m.pantalla }));
+  }
+  if (m.raiz.tipo !== "LinearLayout" || m.raiz.rect.ancho !== 360 || m.raiz.rect.alto !== 640) {
+    mal("la raíz no ocupa la pantalla: " + JSON.stringify(m.raiz.rect));
+  }
+  const [texto, boton] = m.raiz.hijos;
+  if (texto.tipo !== "TextView" || texto.id !== "id/saludo" || texto.texto !== "Hello!") {
+    mal("el TextView no resuelve @string ni @+id: " + JSON.stringify(texto));
+  }
+  if (boton.tipo !== "Button" || boton.texto !== "Pulsar" || boton.rect.alto !== 48) {
+    mal("el Button no se mide con su alto: " + JSON.stringify(boton));
+  }
+  // gravity=center del LinearLayout vertical: cada hijo centrado en horizontal y la pila centrada
+  if (texto.rect.y !== 284 || boton.rect.y !== 308 ||
+      Math.round(texto.rect.x) !== 151 || Math.round(boton.rect.x) !== 143) {
+    mal("gravity/centrado del LinearLayout no se aplica: " + JSON.stringify({ texto: texto.rect, boton: boton.rect }));
+  }
+  if (texto.rect.alto !== 24 || Math.round(texto.rect.ancho) !== 58) {
+    mal("el TextView de wrap_content no se mide por su texto: " + JSON.stringify(texto.rect));
+  }
+  for (const nodo of [texto, boton]) {
+    if (nodo.rect.x < 0 || nodo.rect.y < 0 || nodo.rect.x + nodo.rect.ancho > 361 ||
+        nodo.rect.y + nodo.rect.alto > 641) mal("un nodo se sale de la pantalla: " + JSON.stringify(nodo.rect));
+  }
+}
+
+// pesos: dos hijos 0dp con weight 1 en un LinearLayout horizontal se reparten la mitad
+const conPesos = vistaXml.modeloDeLayout(`<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+  android:orientation="horizontal" android:layout_width="match_parent" android:layout_height="match_parent">
+  <TextView android:layout_width="0dp" android:layout_height="match_parent" android:layout_weight="1" android:text="A"/>
+  <TextView android:layout_width="0dp" android:layout_height="match_parent" android:layout_weight="1" android:text="B"/>
+</LinearLayout>`);
+if (!conPesos.ok || conPesos.modelo.raiz.hijos.map((h) => Math.round(h.rect.ancho)).join(",") !== "180,180") {
+  mal("layout_weight no reparte el ancho: " + JSON.stringify(conPesos.ok ? conPesos.modelo.raiz.hijos.map((h) => h.rect) : conPesos));
+}
+
+// padding en el contenedor y margen en el hijo
+const conMargen = vistaXml.modeloDeLayout(`<FrameLayout xmlns:android="http://schemas.android.com/apk/res/android"
+  android:layout_width="match_parent" android:layout_height="match_parent" android:padding="8dp">
+  <TextView android:layout_width="match_parent" android:layout_height="wrap_content"
+    android:layout_margin="4dp" android:text="x"/>
+</FrameLayout>`);
+if (!conMargen.ok) {
+  mal("modeloDeLayout no lee padding/margen: " + conMargen.error);
+} else {
+  const hijo = conMargen.modelo.raiz.hijos[0];
+  if (Math.round(hijo.rect.x) !== 12 || Math.round(hijo.rect.ancho) !== 336) {
+    mal("padding/margen no desplazan al hijo: " + JSON.stringify(hijo.rect));
+  }
+}
+
+// @string sin resolver y entidades: el modelo no inventa texto y cuenta lo que falta
+const sinString = vistaXml.modeloDeLayout(`<TextView xmlns:android="http://schemas.android.com/apk/res/android"
+  android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="@string/nada"/>`);
+if (!sinString.ok || sinString.modelo.raiz.texto !== "" || sinString.modelo.sinStrings !== 1) {
+  mal("modeloDeLayout no cuenta los @string sin resolver: " + JSON.stringify(sinString));
+}
+const conEntidades = vistaXml.modeloDeLayout(`<TextView xmlns:android="http://schemas.android.com/apk/res/android"
+  android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="A &amp; B &lt;x&gt;"/>`);
+if (!conEntidades.ok || conEntidades.modelo.raiz.texto !== "A & B <x>") {
+  mal("modeloDeLayout no decodifica las entidades del texto: " + JSON.stringify(conEntidades.modelo && conEntidades.modelo.raiz.texto));
+}
+
+// un XML a medias no produce modelo: el panel conserva el último render bueno
+for (const [nombre, roto] of [
+  ["etiqueta sin cerrar", "<LinearLayout><TextView android:text=\"x\""],
+  ["cierre que no toca", "<LinearLayout></FrameLayout>"],
+  ["sin etiquetas", "android:text=\"x\""],
+  ["comentario abierto", "<LinearLayout><!-- hola"],
+]) {
+  const r = vistaXml.modeloDeLayout(roto);
+  if (r.ok !== false || !r.error) mal("modeloDeLayout acepta un XML roto (" + nombre + "): " + JSON.stringify(r));
+}
+const conLinea = vistaXml.modeloDeLayout("<LinearLayout>\n<TextView\nandroid:text=\"x\"");
+if (conLinea.ok !== false || !(conLinea.linea >= 1)) {
+  mal("modeloDeLayout no dice la línea del XML roto: " + JSON.stringify(conLinea));
+}
+
 // el bloque que emite el intérprete: capturas en orden, avisos aparte, cuentas y error tolerantes
 const ejecucionContador = {
   actividad: "com.hola.contador.MainActivity", metodo: "onCreate", pasos: 128, interacciones: 1,
@@ -393,15 +490,28 @@ for (const [id, donde] of [
   ["separador-previa", "el separador redimensionable"],
   ["previa-lateral", "el panel de la vista previa"],
   ["previa-alternar", "el botón que lo muestra y lo oculta"],
-  ["previa-modo-xml", "la pestaña del XML en vivo"],
-  ["previa-modo-render", "la pestaña del render"],
-  ["previa-xml-codigo", "el XML de solo lectura"],
-  ["previa-lateral-canvas", "el canvas del panel"],
+  ["previa-modo-vivo", "la pestaña del layout en vivo"],
+  ["previa-modo-render", "la pestaña del render con eventos"],
+  ["previa-vivo-canvas", "el canvas del layout en vivo"],
+  ["previa-vivo-estado", "la línea de estado del layout en vivo"],
+  ["previa-lateral-canvas", "el canvas del render con eventos"],
   ["previa-log-lista", "la consola de la ejecución"],
   ["previa-log-cabecera", "el resumen de la ejecución"],
   ["previa-log-vacio", "el mensaje de «sin ejecución»"],
 ]) {
   if (!ids.has(id)) mal(`${donde} (${id}) no está en index.html`);
+}
+// el modo «en vivo» dibuja el layout: no puede quedar ni un visor de código XML en el panel
+for (const idViejo of ["previa-xml", "previa-xml-codigo", "previa-xml-estado", "previa-modo-xml"]) {
+  if (ids.has(idViejo)) mal(`el visor de código XML (${idViejo}) sigue en index.html`);
+}
+const panelPrevia = /<aside id="previa-lateral"[^]*?<\/aside>/.exec(html);
+if (!panelPrevia) {
+  mal("no se encuentra el panel de la vista previa en index.html");
+} else {
+  if (/<pre\b/.test(panelPrevia[0])) mal("el panel de la previa enseña un <pre>: eso es código, no un layout");
+  if (/previa-xml/.test(panelPrevia[0])) mal("el panel de la previa conserva el visor de XML");
+  if (!/<canvas id="previa-vivo-canvas"/.test(panelPrevia[0])) mal("el modo en vivo no tiene canvas propio");
 }
 if (!/<div[^>]*id="separador-previa"[^>]*role="separator"/.test(html) &&
     !/<div[^>]*role="separator"[^>]*id="separador-previa"/.test(html)) {
@@ -410,12 +520,12 @@ if (!/<div[^>]*id="separador-previa"[^>]*role="separator"/.test(html) &&
 if (!/id="separador-previa"[^>]*tabindex="0"|tabindex="0"[^>]*id="separador-previa"/.test(html)) {
   mal("el separador no es enfocable por teclado");
 }
-if (!/id="previa-modo-xml"[^>]*role="tab"/.test(html) || !/id="previa-modo-render"[^>]*role="tab"/.test(html)) {
+if (!/id="previa-modo-vivo"[^>]*role="tab"/.test(html) || !/id="previa-modo-render"[^>]*role="tab"/.test(html)) {
   mal("los dos modos de la previa no son role=tab");
 }
 if (!/id="previa-log"[^>]*role="log"/.test(html)) mal("la consola de la ejecución no es role=log");
-if (!/id="previa-xml"[^>]*role="tabpanel"/.test(html) || !/id="previa-render"[^>]*role="tabpanel"/.test(html)) {
-  mal("los paneles de XML y render no son role=tabpanel");
+if (!/id="previa-vivo"[^>]*role="tabpanel"/.test(html) || !/id="previa-render"[^>]*role="tabpanel"/.test(html)) {
+  mal("los paneles en vivo y render no son role=tabpanel");
 }
 
 // 7. el resaltador del editor es puro y se puede probar sin DOM; si se rompe, el código se
