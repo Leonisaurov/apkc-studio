@@ -2195,7 +2195,8 @@ async function conductor() {
       marcarSucio(false);
       await abrir("/proyecto/res/layout/xmlauto.xml");
       const areaXml = document.getElementById("codigo");
-      EDITOR.poner("<LinearLayout>\\n  int x = R.");
+      // R.layout. dentro de un valor de atributo: la rama XML tiene que seguir siendo la suya
+      EDITOR.poner('<LinearLayout android:text="R.layout.');
       areaXml.focus();
       areaXml.setSelectionRange(areaXml.value.length, areaXml.value.length);
       areaXml.dispatchEvent(new Event("input", { bubbles: true }));
@@ -2209,13 +2210,13 @@ async function conductor() {
     })()`);
     // `TextView` es también una clase del android.jar: en un .java la lista sale por el jar
     // (`clases del android.jar`), no por el catálogo de etiquetas, y su estado no dice `xml`.
-    // En el .xml, `R.` no abre nada: ni recursos ni clases.
+    // En el .xml, `R.layout.` dentro de un valor sigue en la rama XML: ni `R.` ni clases.
     comprueba("el contexto no se cruza: ni etiquetas XML en .java ni R. en .xml",
       javaSinXml.enJava.visible === true && /^clases del android\.jar/.test(String(javaSinXml.enJava.estado)) &&
       !/^xml/.test(String(javaSinXml.enJava.estado)) &&
-      javaSinXml.enXml.visible === false &&
-      !javaSinXml.enXml.opciones.some((o) => /^R\./.test(String(o))) &&
-      !/^xml ·/.test(String(javaSinXml.enXml.estado)),
+      javaSinXml.enXml.visible === true && /^xml ·/.test(String(javaSinXml.enXml.estado)) &&
+      !/android\.jar/.test(String(javaSinXml.enXml.estado)) &&
+      !javaSinXml.enXml.opciones.some((o) => /^R\./.test(String(o))),
       JSON.stringify({ java: javaSinXml.enJava, xml: javaSinXml.enXml }).slice(0, 300));
 
     // linter en vivo: `@string/noexiste` con línea y columna, subrayado propio y sin `apkc check`.
@@ -2289,6 +2290,28 @@ async function conductor() {
     // volver al .java devuelve el diagnóstico de Java y retira las filas del XML
     const antesJava = await evaluar(`document.getElementById("diagnostico-vivo-estado").textContent.trim()`);
     await evaluar(`(async () => { marcarSucio(false); await abrir("/proyecto/xmlundo.java"); return true; })()`);
+    // …y las filas del XML se van en cuanto corre el diagnóstico del `.java`, sin esperar al check
+    // (~1,6 s): se mira el primer instante en que el estado deja de decir XML (hallazgo H2).
+    const enVuelo = await evaluar(`(async () => {
+      const t0 = Date.now();
+      const leer = () => ({
+        estado: document.getElementById("diagnostico-vivo-estado").textContent.trim(),
+        xml: document.querySelectorAll('#diagnostico-vivo-lista .origen-error[data-origen="XML"]').length,
+        marcas: document.querySelectorAll('#diagnostico-marcas .marca-error').length
+      });
+      let visto = null;
+      while (Date.now() - t0 < 15000) {
+        const ahora = leer();
+        if (!/XML/.test(ahora.estado)) return Object.assign(ahora, { ms: Date.now() - t0 });
+        visto = ahora;
+        await new Promise((ok) => setTimeout(ok, 30));
+      }
+      return Object.assign(visto || leer(), { ms: Date.now() - t0, sinCambio: true });
+    })()`);
+    comprueba("al cambiar a .java las filas XML desaparecen sin esperar al check",
+      enVuelo.xml === 0 && enVuelo.marcas === 0 && !/XML/.test(String(enVuelo.estado)) &&
+      enVuelo.ms < 2000,
+      JSON.stringify(enVuelo).slice(0, 260));
     const estadoJava = await esperarResumen(30000, antesJava);
     const trasJava = await evaluar(`({
       estado: document.getElementById("diagnostico-vivo-estado").textContent,

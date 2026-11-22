@@ -234,8 +234,17 @@ function estadoEn(fuente, cursor) {
       i++;
       continue;
     }
+    if (tipo === "cdata") {
+      // `<![CDATA[ … ]]>` puede llevar `<`, `>` y `&` sin escapar: no es marcado y no se mira
+      const fin = fuente.indexOf("]]>", i);
+      if (fin === -1 || fin + 3 > cursor) return { tipo, inicio };
+      i = fin + 3;
+      tipo = "texto";
+      continue;
+    }
     // texto plano
     if (c === "<") {
+      if (fuente.startsWith("<![CDATA[", i)) { tipo = "cdata"; inicio = i; i += 9; continue; }
       if (fuente.startsWith("<!--", i)) { tipo = "comentario"; inicio = i; i += 4; continue; }
       if (fuente.startsWith("<?", i)) { tipo = "cabecera"; inicio = i; i += 2; continue; }
       if (fuente.startsWith("<!", i)) { tipo = "declaracion"; inicio = i; i += 2; continue; }
@@ -489,6 +498,13 @@ function leerEtiquetas(fuente) {
     errores.push({ linea: p.linea, columna: p.columna, mensaje, origen: "XML" });
   };
   while (i < fuente.length) {
+    if (fuente.startsWith("<![CDATA[", i)) {
+      // el contenido de un CDATA es texto, no marcado: `<b>text & stuff</b>` es un literal
+      const fin = fuente.indexOf("]]>", i + 9);
+      if (fin === -1) { error(i, "sección CDATA sin cerrar"); break; }
+      i = fin + 3;
+      continue;
+    }
     if (fuente.startsWith("<!--", i)) {
       const fin = fuente.indexOf("-->", i + 4);
       if (fin === -1) { error(i, "comentario sin cerrar"); break; }
@@ -502,9 +518,22 @@ function leerEtiquetas(fuente) {
       continue;
     }
     if (fuente.startsWith("<!", i)) {
-      const fin = fuente.indexOf(">", i + 2);
-      if (fin === -1) { error(i, "declaración sin cerrar"); break; }
-      i = fin + 1;
+      // declaración o DOCTYPE: se salta hasta el `>` de fuera de comillas y de un subconjunto
+      // interno `[ … ]` (`<!DOCTYPE x [ <!ELEMENT y (#PCDATA)> ]>`)
+      let j = i + 2;
+      let corchetes = 0;
+      let comilla = null;
+      while (j < fuente.length) {
+        const c = fuente[j];
+        if (comilla) { if (c === comilla) comilla = null; }
+        else if (c === '"' || c === "'") comilla = c;
+        else if (c === "[") corchetes++;
+        else if (c === "]") corchetes = Math.max(0, corchetes - 1);
+        else if (c === ">" && corchetes === 0) break;
+        j++;
+      }
+      if (j >= fuente.length) { error(i, "declaración sin cerrar"); break; }
+      i = j + 1;
       continue;
     }
     if (fuente[i] !== "<") { i++; continue; }

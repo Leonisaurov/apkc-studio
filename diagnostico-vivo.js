@@ -188,6 +188,8 @@ import { diagnosticarXml } from "./xml-editor.js";
   function verificarXml(ruta) {
     const mio = ++serie;
     enCurso = true;
+    errores = [];
+    pintar();
     estado.textContent = "comprobando…";
     const texto = area.value;
     const nombre = ruta.split("/").pop() || "AndroidManifest.xml";
@@ -217,6 +219,11 @@ import { diagnosticarXml } from "./xml-editor.js";
       // una pasada vieja no puede pintar su resultado encima de la nueva: se invalida su serie
       serie++;
       pendiente = true;
+      // mientras corre la pasada nueva no se dejan las filas de la anterior: si el fichero acaba
+      // de cambiar pueden ser del otro lenguaje (una fila XML sobre un .java, y al revés)
+      errores = [];
+      pintar();
+      estado.textContent = "comprobando…";
       return;
     }
     const ruta = rutaActiva();
@@ -238,6 +245,9 @@ import { diagnosticarXml } from "./xml-editor.js";
     const texto = area.value;
     const mio = ++serie;
     enCurso = true;
+    // las filas del fichero anterior (posiblemente XML) no esperan al check: se vacían ya
+    errores = [];
+    pintar();
     estado.textContent = "comprobando…";
     try {
       const escrito = await hospedador.escribir(TEMPORAL, new TextEncoder().encode(texto));

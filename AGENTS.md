@@ -154,8 +154,10 @@ los imports y no debe depender de ese puente.
   lo comprueba en las dos direcciones.
 - **El linter de XML es local y etiqueta su origen.** `diagnosticarXml` no lanza `apkc check`, no
   escribe `.apkc-check.java` y no toca la consola; sus filas llevan `origen: "XML"` (y las de
-  `apkc`, `Java`), y cambiar de fichero reemplaza la lista entera. La columna va en runes y desde
-  1, como la de `apkc`. Si el barrido de `res/` no leyó nada, no se acusan referencias.
+  `apkc`, `Java`), y cambiar de fichero vacía lista y marcas al arrancar la pasada nueva (no al
+  recibir el resultado). La columna va en runes y desde 1, como la de `apkc`. Si el barrido de
+  `res/` no leyó nada, no se acusan referencias. `<![CDATA[…]]>`, comentarios y declaraciones
+  (incluido un `<!DOCTYPE … [ … ]>`) no se tokenizan: no son marcado.
 - **El canvas no rotula los nodos.** `pintarModelo` dibuja solo el texto del nodo; el tipo y el id
   van en el modelo, en `rectsEscalados`, en el `resumen` devuelto y en `data-nodos` del canvas.
   No vuelvas a pintar `Button · id/pulsar` encima: la prueba cuenta tinta y exige cero sin texto.

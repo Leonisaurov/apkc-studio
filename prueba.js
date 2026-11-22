@@ -927,6 +927,34 @@ public final class R {
     if (astral.length !== 1 || astral[0].columna !== columnaEsperada) {
       mal(`la columna del linter no cuenta runes: ${JSON.stringify(astral)} (esperado ${columnaEsperada})`);
     }
+    // CDATA, comentarios y DOCTYPE no son marcado: lo que va dentro no se tokeniza. Sin esto, el
+    // `<b>` de un `<![CDATA[<b>…</b>]]>` se leía como etiqueta y el fichero salía con dos errores
+    // falsos (hallazgo H1 del crítico).
+    const casosCdata = [
+      ['<string name="a"><![CDATA[<b>text & stuff</b>]]></string>', "el CDATA exacto del hallazgo"],
+      ['<string name="b"><![CDATA[a &amp; <b>c</b> &lt;d&gt;]]></string>', "entidades y etiquetas dentro de CDATA"],
+      ['<resources>\n  <string name="c"><![CDATA[<i>\n no rompe\n</i>]]></string>\n</resources>',
+        "un CDATA de varias líneas"],
+      ['<!-- <b> -->\n<string name="d">x</string>', "un comentario con etiquetas dentro"],
+      ['<!DOCTYPE resources [ <!ELEMENT resources (string)> ]>\n' +
+        '<resources><string name="e">x</string></resources>', "un DOCTYPE con subconjunto interno"],
+    ];
+    for (const [texto, que] of casosCdata) {
+      const salida = xmlEditor.diagnosticarXml(texto, { archivo: "/proyecto/res/values/strings.xml" });
+      if (salida.length) mal(`el linter inventa errores en ${que}: ${JSON.stringify(salida)}`);
+    }
+    const dentroCdata = "<string><![CDATA[<b>";
+    if (xmlEditor.contextoXml(dentroCdata, dentroCdata.length)) {
+      mal("contextoXml sugiere etiquetas dentro de un CDATA");
+    }
+    // el CDATA no tapa los errores de verdad: lo que va después se sigue comprobando
+    const fueraCdata = xmlEditor.diagnosticarXml(
+      '<LinearLayout>\n  <![CDATA[<b>x</b> & stuff]]>\n' +
+      '  <TextView android:text="@string/noexiste"/>\n</LinearLayout>',
+      { archivo: "/proyecto/res/layout/m.xml", recursos: { string: new Set(["f"]) } });
+    if (fueraCdata.length !== 1 || !/@string\/noexiste/.test(fueraCdata[0].mensaje)) {
+      mal(`el CDATA silencia errores de fuera: ${JSON.stringify(fueraCdata)}`);
+    }
   }
 
   console.log(fallos ? `PRUEBA FALLA: ${fallos} problemas` : "prueba: todo en orden");

@@ -299,9 +299,16 @@ comando y no toca la consola; el debounce son los mismos **350 ms**. Qué compru
   (`android:layout_widht` → `layout_width`). Un atributo desconocido sin parecido no se marca: la
   lista de atributos del módulo no es el framework entero y no se inventan errores.
 
+`<![CDATA[ … ]]>`, los comentarios `<!-- … -->`, la cabecera `<?xml …?>` y las declaraciones
+—también un `<!DOCTYPE … [ … ]>` con subconjunto interno— **no son marcado y no se tokenizan**: un
+`<![CDATA[<b>text & stuff</b>]]>` es texto literal, no un `<b>` que abre y cierra. Lo que va fuera
+del CDATA se sigue comprobando. `prueba.js` fija ese caso exacto.
+
 Cada fila lleva delante su origen, `Java` o `XML` (`.origen-error[data-origen]`), y las marcas de
 `#diagnostico-marcas` lo llevan en `data-origen`. **Los dos lenguajes no se mezclan**: cambiar de
-fichero reemplaza la lista entera, y una pasada vieja de `apkc check` no puede pintar su resultado
+fichero reemplaza la lista entera **en cuanto arranca la pasada nueva** (la lista y las marcas se
+vacían al pasar a `comprobando…`, no cuando llega el resultado, así que una fila XML no se queda
+sobre un `.java` durante el check), y una pasada vieja de `apkc check` no puede pintar su resultado
 encima de la nueva (se invalida su serie). El estado acaba en `· Java` o `· XML`, y conserva el
 formato `archivo:línea:columna` del §200: la columna del linter también va en **runes** y desde 1,
 y el editor la traduce a UTF-16 y a píxeles como la de `apkc`.
@@ -787,7 +794,7 @@ En `@media (max-width: 760px)`:
 | `node studio/prueba-navegador.js` | `http` sin COOP/COEP: DOM, tres vistas, tres botones de actividad, reflejo del nombre/package, aviso de que no hay OPFS, localStorage, el diagnóstico, los temas y la paleta ANSI, y el contrato de la vista dividida (separador con teclado, alternancia En vivo/Render, que no haya `<pre>` con el XML y consola vacía con su motivo) |
 | `APKC_WASM=... node studio/prueba-crear.js` | por http con OPFS: crear, escribir el proyecto, abrir el manifiesto, comprobar `data-ruta` del arbol, API 34, el árbol cerrado, subir/mover ficheros, exportar/importar el `.zip`, ajustes, pestañas, undo tree, dos ventanas y fusión/conflicto |
 | `APKC_WASM=... APK_EJEMPLO=... KS_EJEMPLO=... ANDROID_JAR=... node studio/prueba-pestana.js` | la pestaña completa: editar, guardar, recargar, jar del SDK, compilar debug/release, firmar, verificar, recargar sin red, cero peticiones fuera del origen, el autocompletado (recursos, jar por trozos, Tab/Esc/flechas y undo), el autocompletado de XML (etiquetas con estado `xml`, Tab sin tocar el undo del Java, y que los dos contextos no se crucen), el linter de XML (`@string` inexistente con `archivo:línea:columna`, origen `XML`, sin `apkc check` ni temporal, y el ida y vuelta XML↔Java), el enlace `ruta:línea`, Detener, y la vista dividida: separador por puntero y teclado, compilar→pintar sin mover el cursor, el layout **dibujado** en vivo que cambia al editar `android:text` sin compilar, XML inválido que conserva el render, alternancia En vivo/Render con estado, la consola de la ejecución con el JSON del Contador, el `<script>` escapado y el límite de 64/24, y que el nodo pinta su texto sin el rótulo `Button · id/pulsar` |
-| `APKC=... APKC_WASM=... sh studio/e2e.sh` | todo lo anterior más los apk/aab nativos y la plantilla Contador; en la pestaña, 145 comprobaciones |
+| `APKC=... APKC_WASM=... sh studio/e2e.sh` | todo lo anterior más los apk/aab nativos y la plantilla Contador; en la pestaña, 146 comprobaciones |
 
 El gate completo de la pagina es `e2e.sh`; `prueba-pestana.js` solo no basta para decir que la
 pagina funciona. Los comandos de entorno estan en `tools/entorno.sh` (`test`, `wasm`, `gate`).
