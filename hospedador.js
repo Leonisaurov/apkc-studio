@@ -17,6 +17,7 @@ const magicoWasm = (b) => b && b.length > 7 && b[0] === 0 && b[1] === 0x61 && b[
 let sistema = null;            // { fs, montar, extraer, lista, ... } — se asigna AL FINAL del init
 let arranque = null;           // la promesa del init en curso: ver iniciar()
 let bytesModule = null;        // los bytes del wasm, una sola bajada; la instancia no se reutiliza
+let recuperadoPorTrozos = false; // avisa a la página si la copia cacheada estaba incompleta
 let errorWasmExec = null;      // el motivo por el que no se pudo cargar wasm_exec.js
 let ocupado = false;
 let cola = [];
@@ -213,10 +214,13 @@ async function ejecutar(argv, env) {
           const h = await huella(bytes);
           if (h && h !== manifest.gzSha256) return false;
         }
-        return pruebaGz(bytes);
+        const bien = await pruebaGz(bytes);
+        if (bien) recuperadoPorTrozos = true;
+        return bien;
       }
       if (!(await íntegro(bytes))) return false;
       bytesModule = bytes;
+      recuperadoPorTrozos = true;
       return true;
     };
 
@@ -228,6 +232,9 @@ async function ejecutar(argv, env) {
           }
         }
       }
+    }
+    if (recuperadoPorTrozos) {
+      postMessage({ tipo: "aviso", texto: "apkc.wasm se reconstruyó por trozos: la copia guardada estaba incompleta." });
     }
   }
   // la instancia se crea CADA VEZ: un binario de Go en wasm no puede volver a correrse sobre la

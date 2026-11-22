@@ -31,6 +31,10 @@ const hospedador = (() => {
         if (alSalir) alSalir(String(e.data.texto || ""));
         return;
       }
+      if (e.data && e.data.tipo === "aviso") {
+        CONSOLA.escribir(String(e.data.texto || "") + "\n");
+        return;
+      }
       const resolver = pendientes.get(e.data.id);
       if (resolver) { pendientes.delete(e.data.id); resolver(e.data); }
     };

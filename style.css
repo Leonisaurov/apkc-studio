@@ -7,7 +7,7 @@
    en vez de una interfaz que aún no puede abrir OPFS. index.html quita la clase al aislarse. */
 html.apkc-aislando body { visibility: hidden; }
 html.apkc-aislando::after {
-  content: "Preparando el navegador…";
+  content: var(--texto-preparacion, "Preparando el navegador…");
   position: fixed; inset: 0; z-index: 9999;
   display: grid; place-items: center;
   background: var(--fondo, #1e1e1e); color: var(--tenue, #a3a3a3);
@@ -1005,8 +1005,7 @@ pre {
   left: 12px;
   right: 12px;
   height: 2px;
-  background: repeating-linear-gradient(135deg,
-    var(--peligro) 0 3px, transparent 3px 6px);
+  background: var(--peligro);
   opacity: .9;
 }
 

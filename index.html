@@ -31,6 +31,25 @@
     // La primera carga se recarga sola. Ocultar el cuerpo mientras tanto evita el destello de una
     // interfaz que todavía no puede usar OPFS; el velo vive en html, que ya existe aquí.
     document.documentElement.classList.add("apkc-aislando");
+    // El SW informa de cuántos ficheros del shell lleva guardados; el velo lo refleja para que
+    // una primera carga lenta no parezca colgada.
+    // Mientras se llena la caché se cuenta cuántos ficheros lleva guardados. No depende de que
+    // el SW pueda mandar mensajes a una página que todavía no controla.
+    var contador = setInterval(function () {
+      caches.keys().then(function (claves) {
+        return Promise.all(claves.map(function (k) {
+          return caches.open(k).then(function (c) { return c.keys(); });
+        }));
+      }).then(function (listas) {
+        var n = 0;
+        for (var i = 0; i < listas.length; i++) n = Math.max(n, listas[i].length);
+        if (n > 0) {
+          document.documentElement.style.setProperty("--texto-preparacion",
+            '"Guardando el navegador (' + n + ' ficheros)…"');
+        }
+      }).catch(function () { /* sin caché todavía */ });
+    }, 200);
+    setTimeout(function () { clearInterval(contador); }, 30000);
     var CLAVE = "apkc-coi-reintento";
     var yaRecargo = false;
     try { yaRecargo = sessionStorage.getItem(CLAVE) === "1"; } catch (e) { /* */ }

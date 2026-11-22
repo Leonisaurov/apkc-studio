@@ -47,19 +47,29 @@ const SOLO_RED = [
 ];
 
 self.addEventListener("install", (evento) => {
-  evento.waitUntil(
-    caches.open(CACHE)
-      .then((cache) => Promise.all(SHELL.map((ruta) =>
-        cache.add(ruta).catch(() => { /* un estático que falte no rompe la instalación */ }))))
-      .then(() => self.skipWaiting())
-  );
+  evento.waitUntil((async () => {
+    // Secuencial: además de no precipitar la caché, deja que la página vea cómo crece el número
+    // de entradas mientras espera el aislamiento (el velo lo refleja).
+    const cache = await caches.open(CACHE);
+    for (const ruta of SHELL) {
+      await cache.add(ruta).catch(() => { /* un estático que falte no rompe la instalación */ });
+    }
+    await self.skipWaiting();
+  })());
 });
 
 self.addEventListener("activate", (evento) => {
   evento.waitUntil(
-    caches.keys()
-      .then((claves) => Promise.all(claves.filter((k) => k !== CACHE).map((k) => caches.delete(k))))
-      .then(() => self.clients.claim())
+    caches.keys().then((claves) => {
+      // `caches.match` busca en TODAS las cachés, así que conservar la versión anterior da un
+      // respaldo real si la instalación nueva se queda a medias o no hay red. Solo se guardan dos.
+      const versiones = claves
+        .filter((k) => k.indexOf("apkc-studio-") === 0)
+        .sort();
+      const conservar = new Set([CACHE]);
+      if (versiones.length > 1) conservar.add(versiones[versiones.length - 2]);
+      return Promise.all(claves.filter((k) => !conservar.has(k)).map((k) => caches.delete(k)));
+    }).then(() => self.clients.claim())
   );
 });
 

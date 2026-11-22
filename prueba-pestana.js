@@ -511,6 +511,45 @@ async function conductor() {
     /MainActivity\.java$/.test(String(saltar.activo)),
     JSON.stringify(saltar).slice(0, 240));
 
+  // 4b. diagnóstico en vivo y paleta, con la misma instancia de wasm de estas pruebas.
+  const vivo = await evaluar(`(async () => {
+    await hospedador.escribir("/proyecto/vivo.java",
+      new TextEncoder().encode("package p;\\npublic class Vivo { void x() {} }\\n"));
+    await abrir("/proyecto/vivo.java");
+    const area = document.getElementById("codigo");
+    area.value = "package p;\\n\\npublic class Vivo {\\n  void x() { int y = ; }\\n}\\n";
+    area.dispatchEvent(new Event("input", { bubbles: true }));
+    return true;
+  })()`);
+  await esperar(3500);
+  const vida = await evaluar(`({
+    estado: document.getElementById("diagnostico-vivo-estado").textContent,
+    lista: document.getElementById("diagnostico-vivo-lista").textContent,
+    marcas: document.getElementById("diagnostico-marcas").children.length
+  })`);
+  comprueba("el diagnóstico en vivo marca el error y lo muestra",
+    /error/i.test(String(vida.estado)) && /linea 4|linea 5/.test(String(vida.lista)) && vida.marcas >= 1,
+    JSON.stringify(vida).slice(0, 200));
+
+  await evaluar(`document.dispatchEvent(new KeyboardEvent("keydown",
+    { key: "P", code: "KeyP", ctrlKey: true, shiftKey: true, bubbles: true }))`);
+  await esperar(200);
+  const paletaAbierta = await evaluar(`!document.getElementById("paleta").hidden`);
+  await evaluar(`(() => { const e = document.getElementById("paleta-buscar");
+    e.value = "guardar"; e.dispatchEvent(new Event("input", { bubbles: true })); return true; })()`);
+  const filtro = await evaluar(`document.getElementById("paleta-lista").textContent`);
+  await evaluar(`document.getElementById("paleta-buscar").dispatchEvent(
+    new KeyboardEvent("keydown", { key: "Enter", bubbles: true }))`);
+  await esperar(600);
+  const paletaCerrada = await evaluar(`document.getElementById("paleta").hidden`);
+  comprueba("la paleta Ctrl+Mayús+P abre, filtra y ejecuta",
+    paletaAbierta === true && /Guardar fichero/.test(String(filtro)) && paletaCerrada === true,
+    JSON.stringify({ paletaAbierta, filtro: String(filtro).slice(0, 60), paletaCerrada }));
+
+  // se deja un fuente válido: las compilaciones posteriores de esta misma prueba recorren /proyecto
+  await evaluar(`hospedador.escribir("/proyecto/vivo.java",
+    new TextEncoder().encode("package p;\\npublic class Vivo {}\\n"))`);
+
   // buscar y reemplazar dentro del editor, con el undo tree detrás; se hace en un fichero
   // aparte para no tocar el fuente que luego se compila
   const buscar = await evaluar(`(async () => {
