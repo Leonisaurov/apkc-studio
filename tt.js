@@ -22,9 +22,7 @@ try {
         }
         return texto;
       },
-      createURL(cadena) {
-        return String(cadena); // los blobs los crea esta página con URL.createObjectURL
-      },
+      // createURL no existe en todos los motores: enlaceConfiable comprueba su presencia.
     });
   }
 } catch (e) {
@@ -40,5 +38,7 @@ export function urlConfiable(cadena) {
 }
 
 export function enlaceConfiable(cadena) {
-  return politica ? politica.createURL(cadena) : String(cadena);
+  return politica && typeof politica.createURL === "function"
+    ? politica.createURL(cadena)
+    : String(cadena); // Chromium aún no expone TrustedURL; estos href son literales o blobs de aquí
 }
