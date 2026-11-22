@@ -1,6 +1,9 @@
 // El panel de diagnóstico de Inicio: pega la salida de apkc y la convierte en qué pasó y qué
 // hacer. Las reglas viven en app.js (puras y probadas contra salidas reales en prueba.js); aquí
 // solo se pinta. El texto pegado no sale del navegador: los contadores quedan en localStorage.
+// main.js no se toca: los dos módulos nuevos cuelgan de aquí, que ya se importa al arrancar.
+import "./diagnostico-vivo.js";
+import "./paleta.js";
 import { analyze, informe, registrar } from "./app.js";
 import { enlaceConfiable } from "./tt.js";
 

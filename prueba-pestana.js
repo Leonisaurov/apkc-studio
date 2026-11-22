@@ -379,7 +379,11 @@ async function conductor() {
       return { bytes: b, idsig: bi, pass: document.getElementById("storepass-firmar").value,
         estado: document.getElementById("estado-keystore-firmar").textContent,
         nota: document.getElementById("estado-pestana").textContent,
-        consola: String(document.getElementById("consola-pestana").textContent).slice(-700) };
+        consola: String(document.getElementById("consola-pestana").textContent).slice(-700),
+        // M1: el buffer de la consola conserva lo escrito aunque el campo se limpie. Se mira el
+        // texto completo, no el recorte que se enseña en el mensaje de fallo.
+        sinPass: !String(document.getElementById("consola-pestana").textContent).includes("saludo"),
+        conRedaccion: String(document.getElementById("consola-pestana").textContent).includes("***") };
     })()`);
     const apkRelease = Buffer.from(release.bytes, "base64");
     const idsigRelease = Buffer.from(release.idsig, "base64");
@@ -391,6 +395,10 @@ async function conductor() {
     comprueba("la pestaña verifica la v4 de lo que firma", /v4 \(APK Signature Scheme v4\): ok/.test(String(release.consola)),
       String(release.consola).slice(-160));
     comprueba("la contraseña no se queda en el campo", release.pass === "", JSON.stringify(release.pass));
+    comprueba("la contraseña de firma no aparece en la consola", release.sinPass === true,
+      release.sinPass ? "" : String(release.consola).slice(-200));
+    comprueba("la consola redacta la opción de contraseña con ***", release.conRedaccion === true,
+      String(release.consola).slice(-200));
   }
 
   // 5c. un .aab entra por la misma sección: firma JAR v1, sin bloque v2/v3, y la pestaña lo verifica.

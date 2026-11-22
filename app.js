@@ -128,6 +128,83 @@ public class MainActivity extends Activity {
         android:text="Pulsar"/>
 </LinearLayout>
 `,
+  // «Ciclo»: el mismo onCreate de la plantilla base con un segundo método del ciclo de vida.
+  // Solo usa llamadas a super, setContentView y Toast, ya medidas contra javap.
+  activityCiclo: `package {{pkgname}};
+
+import android.app.*;
+import android.os.*;
+import android.widget.*;
+
+public class MainActivity extends Activity {
+    @Override
+    public void onCreate(Bundle savedInstanceState) {
+        super.onCreate(savedInstanceState);
+        setContentView(R.layout.main);
+        Toast.makeText(this, "Ciclo: onCreate", Toast.LENGTH_SHORT).show();
+    }
+
+    @Override
+    public void onStart() {
+        super.onStart();
+        setTitle("Ciclo: onStart");
+    }
+}
+`,
+  // «Menú»: onCreateOptionsMenu con la anónima que ya genera la plantilla base cuando lleva botón.
+  activityMenu: `package {{pkgname}};
+
+import android.app.*;
+import android.os.*;
+import android.view.*;
+import android.widget.*;
+
+public class MainActivity extends Activity {
+    @Override
+    public void onCreate(Bundle savedInstanceState) {
+        super.onCreate(savedInstanceState);
+        setContentView(R.layout.main);
+    }
+
+    @Override
+    public boolean onCreateOptionsMenu(Menu menu) {
+        menu.add("Opciones").setOnMenuItemClickListener(new MenuItem.OnMenuItemClickListener() {
+            public boolean onMenuItemClick(MenuItem item) {
+                Toast.makeText(MainActivity.this, "Menu pulsado", Toast.LENGTH_SHORT).show();
+                return true;
+            }
+        });
+        return true;
+    }
+}
+`,
+  // «Traducido»: dos strings con el mismo nombre en values y values-es y una referencia desde el
+  // layout. El enlazador en Go ya mide values-es byte a byte contra aapt2 (§94).
+  layoutTraducido: `<?xml version="1.0" encoding="utf-8"?>
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:orientation="vertical"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:gravity="center">
+
+    <TextView
+        android:id="@+id/saludo"
+        style="@android:style/TextAppearance.Large"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:text="@string/saludo"/>
+</LinearLayout>
+`,
+  stringsBase: `<resources>
+    <string name="app_name">{{appname}}</string>
+    <string name="saludo">Hello!</string>
+</resources>
+`,
+  stringsEs: `<resources>
+    <string name="app_name">{{appname}}</string>
+    <string name="saludo">Hola!</string>
+</resources>
+`,
   kotlinActivity: `package {{pkgname}}
 
 import android.app.Activity
@@ -204,6 +281,25 @@ function buildProject(state) {
     files["res/layout/main.xml"] = TEMPLATES.layoutContador;
     files["src/" + pkg.split(".").join("/") + "/MainActivity.java"] =
       TEMPLATES.activityContador.replace(/\{\{pkgname\}\}/g, pkg);
+  }
+  // Las tres plantillas nuevas son variantes del mismo esqueleto: cambian la actividad, el
+  // layout o los valores, pero ninguna introduce una forma de Java que el emisor no mida.
+  if (!state.kotlin && state.template === "ciclo") {
+    files["src/" + pkg.split(".").join("/") + "/MainActivity.java"] =
+      TEMPLATES.activityCiclo.replace(/\{\{pkgname\}\}/g, pkg);
+  }
+  if (!state.kotlin && state.template === "menu") {
+    files["src/" + pkg.split(".").join("/") + "/MainActivity.java"] =
+      TEMPLATES.activityMenu.replace(/\{\{pkgname\}\}/g, pkg);
+  }
+  if (!state.kotlin && state.template === "traducido") {
+    dirs.push("res/values-es");
+    files["res/layout/main.xml"] = TEMPLATES.layoutTraducido;
+    const nombre = texto(state.name, "Mi app");
+    files["res/values/strings.xml"] = TEMPLATES.stringsBase.replace(/\{\{appname\}\}/g, nombre);
+    files["res/values-es/strings.xml"] = TEMPLATES.stringsEs.replace(/\{\{appname\}\}/g, nombre);
+    files["AndroidManifest.xml"] = files["AndroidManifest.xml"]
+      .replace(/android:label="[^"]*"/g, 'android:label="@string/app_name"');
   }
   // un LEEME dentro de jar/, assets/ o lib/<abi>/ no es inocente: apkc mete lo que hay en
   // assets/ y en lib/ en el apk, y un .txt en lib/arm64-v8a/ viaja como si fuera una .so. La

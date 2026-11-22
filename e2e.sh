@@ -136,6 +136,45 @@ if [ -f "$CONTADOR/build/app.apk" ] && [ -n "$BUILD_TOOLS" ]; then
   avisa "plantilla Contador: apk de $(wc -c <"$CONTADOR/build/app.apk" | tr -d ' ') bytes, firmada y alineada"
 fi
 
+# 0b. las plantillas nuevas (ciclo, menú y textos traducidos) no se dan por buenas porque el
+# generador escriba texto: se compilan con --linker go --compiler go y se pasan por los oráculos.
+for plantilla in ciclo menu traducido; do
+  case "$plantilla" in
+    ciclo) paquete=com.hola.ciclo ;;
+    menu) paquete=com.hola.menu ;;
+    traducido) paquete=com.hola.traducido ;;
+  esac
+  destino="$TMP/studio-e2e-$plantilla/$paquete"
+  if [ ! -f "$destino/build/app.apk" ]; then
+    sembrar_proyecto "$destino" "$paquete" "$plantilla"
+    compilar_fixture "$destino"
+  fi
+  if [ -f "$destino/build/app.apk" ]; then
+    if [ -n "$BUILD_TOOLS" ]; then
+      "$BUILD_TOOLS/apksigner" verify --verbose --min-sdk-version 21 "$destino/build/app.apk" \
+        >"$TMP/studio-$plantilla-verify.log" 2>&1 ||
+        falla "la apk de la plantilla $plantilla no verifica"
+      "$BUILD_TOOLS/zipalign" -c -p 4 "$destino/build/app.apk" ||
+        falla "zipalign rechaza la apk de la plantilla $plantilla"
+      "$BUILD_TOOLS/aapt2" dump badging "$destino/build/app.apk" \
+        >"$TMP/studio-$plantilla-badging.log" 2>&1 ||
+        falla "aapt2 no entiende la apk de la plantilla $plantilla"
+      grep -q "$paquete" "$TMP/studio-$plantilla-badging.log" ||
+        falla "la apk de la plantilla $plantilla no declara $paquete"
+      if [ "$plantilla" = traducido ]; then
+        "$BUILD_TOOLS/aapt2" dump resources "$destino/build/app.apk" \
+          >"$TMP/studio-traducido-recursos.log" 2>&1 ||
+          falla "aapt2 no lee los recursos de la plantilla traducida"
+        grep -q 'string/saludo' "$TMP/studio-traducido-recursos.log" ||
+          falla "la plantilla traducida no declara string/saludo"
+        grep -q '(es) "Hola!"' "$TMP/studio-traducido-recursos.log" ||
+          falla "la plantilla traducida no trae el saludo en values-es"
+      fi
+    fi
+    avisa "plantilla $plantilla: apk de $(wc -c <"$destino/build/app.apk" | tr -d ' ') bytes, firmada y alineada"
+  fi
+done
+
 # 1. el test propio de la página
 if ! node "$AQUI/prueba.js" >"$TMP/studio-prueba.log" 2>&1; then
   falla "prueba.js"; cat "$TMP/studio-prueba.log"

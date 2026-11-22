@@ -80,6 +80,40 @@ if (!/@\+id\/total/.test(layContador) || !/@\+id\/pulsar/.test(layContador)) {
 }
 if (/Hello World!/.test(layContador)) mal("la plantilla Contador conserva el texto de Hola mundo");
 
+// 2c. las tres plantillas nuevas se comprueban igual: mismo rigor de ascii y placeholders que el
+// proyecto base, y contenido propio en los ficheros que las distinguen. e2e.sh las compila.
+const plantillasNuevas = {
+  ciclo: { java: [/public void onCreate\(Bundle savedInstanceState\)/, /public void onStart\(\)/,
+    /super\.onStart\(\)/] },
+  menu: { java: [/public boolean onCreateOptionsMenu\(Menu menu\)/, /menu\.add\("Opciones"\)/,
+    /new MenuItem\.OnMenuItemClickListener\(\)/] },
+  traducido: {
+    java: [/public void onCreate\(Bundle savedInstanceState\)/],
+    "res/layout/main.xml": [/android:text="@string\/saludo"/],
+    "res/values/strings.xml": [/<string name="saludo">Hello!<\/string>/],
+    "res/values-es/strings.xml": [/<string name="saludo">Hola!<\/string>/],
+  },
+};
+const rutaJava = "src/" + estado.package.split(".").join("/") + "/MainActivity.java";
+for (const [nombre, esperado] of Object.entries(plantillasNuevas)) {
+  const pr = a.buildProject({ ...estado, template: nombre, kotlin: false, libs: false,
+    native: false, assets: false, device: false });
+  for (const [ruta, texto] of Object.entries(pr.files)) {
+    const raros = [...new Set([...texto].filter((c) => c.charCodeAt(0) > 127))];
+    if (raros.length) mal(`plantilla ${nombre}: ${ruta} lleva ${raros.join(" ")}`);
+    for (const mala of texto.match(/\{\{\w+\}\}/g) || []) mal(`plantilla ${nombre}: ${ruta} conserva ${mala}`);
+    for (const re of esperado[ruta] || (ruta === rutaJava ? esperado.java : []) || []) {
+      if (!re.test(texto)) mal(`plantilla ${nombre}: ${ruta} no contiene ${re}`);
+    }
+  }
+  if (nombre === "traducido") {
+    if (!pr.dirs.includes("res/values-es")) mal("la plantilla traducida no crea res/values-es");
+    if (!/android:label="@string\/app_name"/.test(pr.files["AndroidManifest.xml"])) {
+      mal("la plantilla traducida no etiqueta la app desde @string/app_name");
+    }
+  }
+}
+
 // 3. el EOCD y los modos: un lector estricto (zipcheck.py) es el que ve lo que zipfile tolera
 const eocd = buf.readUInt16LE(buf.lastIndexOf(Buffer.from("PK\x05\x06", "latin1")) + 8);
 if (eocd !== entradas.length) mal(`el EOCD anuncia ${eocd} entradas y hay ${entradas.length}`);
@@ -280,6 +314,20 @@ if (fusionar(baseFusion, "uno\nDOS\ntres\n", baseFusion).estado !== "nuestro") m
   try { conAjustes(manifiesto, { minSdk: 21, targetSdk: 34, versionCode: 1, versionName: "1<2" }); }
   catch (e) { rechazoNombre = e.message; }
   if (!/versionName/.test(rechazoNombre)) mal("conAjustes acepta un versionName con <");
+
+  // 12. la consola redacta contraseñas, pero el comando que se ejecuta no se toca (M1).
+  const argv = ["sign", "--keystore", "/ks.p12", "--storepass", "saludo", "--keyalias", "k",
+    "--old-storepass=anterior", "--out", "/salida.apk"];
+  const redactado = pestanaMod.redactarArgv(argv);
+  if (redactado.join(" ").includes("saludo") || redactado.join(" ").includes("anterior")) {
+    mal("redactarArgv deja una contraseña en la copia que se pinta");
+  }
+  if (!redactado.includes("***") || !redactado.includes("--old-storepass=***")) {
+    mal("redactarArgv no pone *** en las opciones con pass");
+  }
+  if (argv[4] !== "saludo" || argv[7] !== "--old-storepass=anterior") {
+    mal("redactarArgv cambia el argv real que se ejecuta");
+  }
 
   console.log(fallos ? `PRUEBA FALLA: ${fallos} problemas` : "prueba: todo en orden");
   process.exit(fallos ? 1 : 0);

@@ -103,7 +103,8 @@ import {
       package: paquete,
       minsdk: "21",
       targetsdk: apiElegida && apiElegida.value ? apiElegida.value : "34",
-      template: plantilla && plantilla.value === "contador" ? "contador" : "hola",
+      template: plantilla && ["contador", "ciclo", "menu", "traducido"].includes(plantilla.value)
+        ? plantilla.value : "hola",
       hello: "Hello World!",
       button: false,
       buttonLabel: "Press me",

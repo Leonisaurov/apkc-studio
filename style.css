@@ -991,6 +991,25 @@ pre {
 .resalto .etiqueta { color: var(--sintaxis-etiqueta); }
 .resalto .atributo { color: var(--sintaxis-atributo); }
 
+/* El subrayado de `apkc check` va en su propia capa: el textarea es transparente y el <pre>
+   resaltado se repinta en cada pulsación, así que pintar sobre él borraría las marcas. */
+.diagnostico-marcas {
+  position: absolute;
+  inset: 0;
+  z-index: 3;
+  pointer-events: none;
+  overflow: hidden;
+}
+.marca-error {
+  position: absolute;
+  left: 12px;
+  right: 12px;
+  height: 2px;
+  background: repeating-linear-gradient(135deg,
+    var(--peligro) 0 3px, transparent 3px 6px);
+  opacity: .9;
+}
+
 /* ---- panel inferior ------------------------------------------------------- */
 
 .panel-inferior {
@@ -1059,6 +1078,25 @@ pre {
 .panel-form > label input:not([type=checkbox]):not([type=file]) { width: 100%; max-width: 24rem; }
 .panel-form .acciones, .panel-form .nota { grid-column: 1 / -1; margin: 2px 0; }
 .panel-vista > .acciones { margin: 10px 0; }
+.diagnostico-vivo-cab { margin: 0 0 8px; }
+.diagnostico-vivo-lista { list-style: none; margin: 0 0 10px; padding: 0; }
+.diagnostico-vivo-lista li { margin: 0 0 4px; }
+.diagnostico-vivo-lista button {
+  appearance: none;
+  border: 0;
+  border-left: 3px solid var(--peligro);
+  background: var(--superficie2, var(--superficie));
+  color: var(--texto);
+  font: inherit;
+  font-size: 12px;
+  text-align: left;
+  width: 100%;
+  padding: 5px 8px;
+  cursor: pointer;
+}
+.diagnostico-vivo-lista button:hover { background: var(--boton-hover); }
+.diagnostico-vivo-lista code { color: var(--peligro); margin-right: 8px; }
+.diagnostico-vivo-lista .sin-errores { color: var(--acento); padding: 4px 0; }
 
 .consola {
   margin: 0;
@@ -1547,3 +1585,55 @@ pre {
 .historial-nodo .historial-hora { color: var(--texto-tenue); font-family: var(--mono); font-size: 11px; }
 .historial-nodo .historial-autor { color: var(--acento-claro); font-size: 11px; }
 .historial-nodo .historial-resumen { overflow: hidden; text-overflow: ellipsis; }
+
+/* ---- paleta de comandos --------------------------------------------------- */
+.paleta {
+  position: fixed;
+  inset: 0;
+  z-index: 60;
+  display: flex;
+  align-items: flex-start;
+  justify-content: center;
+  padding-top: 12vh;
+  background: rgba(0, 0, 0, .55);
+}
+.paleta[hidden] { display: none; }
+.paleta-caja {
+  width: min(34rem, calc(100vw - 24px));
+  max-height: 70vh;
+  display: flex;
+  flex-direction: column;
+  padding: 8px;
+  border: 1px solid var(--borde);
+  border-radius: 6px;
+  background: var(--superficie);
+  box-shadow: 0 12px 32px rgba(0, 0, 0, .45);
+}
+.paleta-caja > input {
+  width: 100%;
+  padding: 8px 10px;
+  border: 1px solid var(--borde);
+  border-radius: 3px;
+  background: var(--entrada);
+  color: var(--texto-fuerte);
+  font: inherit;
+}
+.paleta-caja > .nota { margin: 6px 4px 0; }
+.paleta-lista { list-style: none; margin: 6px 0 0; padding: 0; overflow: auto; min-height: 0; }
+.paleta-lista li { margin: 0; }
+.paleta-opcion {
+  appearance: none;
+  border: 0;
+  border-radius: 3px;
+  background: transparent;
+  color: var(--texto);
+  font: inherit;
+  font-size: 13px;
+  text-align: left;
+  width: 100%;
+  padding: 7px 10px;
+  cursor: pointer;
+}
+.paleta-opcion:hover, .paleta-opcion.activa { background: var(--activo); color: var(--texto-fuerte); }
+.paleta-opcion small { display: block; color: var(--texto-tenue); font-size: 11px; }
+.paleta-vacia { padding: 8px 10px; color: var(--texto-tenue); font-size: 12px; }

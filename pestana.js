@@ -1834,13 +1834,28 @@ const ULTIMO = { argv: ["create", PROYECTO] };
 
 async function ejecutarUltimo() { await correr(ULTIMO.argv); }
 
+// La línea que se pinta en la consola no puede repetir una contraseña: el buffer de CONSOLA
+// guarda muchos caracteres y limpiar el campo del formulario no borra lo ya escrito. Se redacta
+// solo la copia que se muestra; `argv` sigue intacto para hospedador.ejecutar. Cubre tanto
+// `--storepass saludo` como `--storepass=saludo` y nombres como `--old-storepass`.
+function redactarArgv(argv) {
+  return argv.map((arg, i) => {
+    const s = String(arg);
+    const igual = s.indexOf("=");
+    if (igual > 0 && /pass/i.test(s.slice(0, igual))) return s.slice(0, igual + 1) + "***";
+    const anterior = String(argv[i - 1] || "");
+    if (anterior.startsWith("-") && /pass/i.test(anterior) && !s.startsWith("-")) return "***";
+    return s;
+  });
+}
+
 async function correr(argv) {
   ULTIMO.argv = argv;
   // la salida vive en el panel del editor: un atajo lanzado desde Inicio no puede dejarla oculta
   const vistaEditor = document.querySelector('[data-vista="pestana"]');
   if (vistaEditor && document.body.dataset.vista !== "pestana") vistaEditor.click();
   mostrarPanel("salida");
-  CONSOLA.escribir("$ apkc " + argv.join(" ") + "\n");
+  CONSOLA.escribir("$ apkc " + redactarArgv(argv).join(" ") + "\n");
   const ocupado = document.getElementById("ocupado");
   const botonDetener = document.getElementById("detener-comando");
   if (ocupado) { ocupado.hidden = false; ocupado.textContent = "apkc trabajando…"; }
@@ -2995,7 +3010,7 @@ export {
   renombrarRuta, borrarRuta, abrirMenuArchivo, decirEstadoJar,
   consultarJarDelSdk, traerJarDelSdk, asegurarJarDelProyecto,
   conBloqueo, publicar, recibirRemoto, decirEstadoClave,
-  actualizarEstadoClave, abrirDialogoClave, generarClaveRelease,
+  actualizarEstadoClave, abrirDialogoClave, generarClaveRelease, redactarArgv,
   exportarProyecto, importarProyecto, descargarBytes,
   leerAjustes, guardarAjustes, irALinea, saltarALinea, detener, enlazarSalidas,
   decirEstadoDepuracion, abrirBusqueda, cerrarBusqueda, buscarSiguiente,
