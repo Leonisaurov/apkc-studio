@@ -305,6 +305,40 @@ if (ancho(NaN, 240, 900) !== 340 || ancho("basura", 240, 900) !== 340) mal("anch
 if (ancho(500, 600, 400) !== 600) mal("anchoValido no corrige un máximo menor que el mínimo");
 if (ancho(300, 240, 900) !== 300) mal("anchoValido redondea mal");
 
+// 6d-bis. el reparto de una esquina o una arista: la arista que se mueve sigue al puntero y la de
+//        enfrente se queda; el alto no deja hueco fuera del marco. Puro, probado aquí.
+const repartir = previaPanel.cajaRedimensionada;
+const desde = { ancho: 400, alto: 500, arriba: 0 };
+const limites = { anchoMin: 240, anchoMax: 900, altoMin: 320, altoMax: 700 };
+const oeste = repartir(desde, "oeste", -40, 0, limites);
+if (oeste.ancho !== 440 || oeste.alto !== 500 || oeste.arriba !== 0) {
+  mal("cajaRedimensionada no agranda desde la arista oeste: " + JSON.stringify(oeste));
+}
+const este = repartir(desde, "este", -40, 0, limites);
+if (este.ancho !== 360) mal("cajaRedimensionada no encoge desde la arista este: " + JSON.stringify(este));
+const norte = repartir(desde, "norte", 0, 60, limites);
+if (norte.alto !== 440 || norte.arriba !== 60 || norte.alto + norte.arriba !== 500) {
+  mal("cajaRedimensionada no mueve la arista norte dejando la de abajo quieta: " + JSON.stringify(norte));
+}
+const sureste = repartir(desde, "sureste", 30, 40, limites);
+if (sureste.ancho !== 430 || sureste.alto !== 540 || sureste.arriba !== 0) {
+  mal("cajaRedimensionada no combina las dos aristas en una esquina: " + JSON.stringify(sureste));
+}
+const topado = repartir({ ancho: 400, alto: 500, arriba: 300 }, "norte", 0, -200, limites);
+if (topado.arriba !== 100 || topado.alto !== 600) {
+  mal("cajaRedimensionada no detiene la arista norte al llegar al tope: " + JSON.stringify(topado));
+}
+const minimo = repartir({ ancho: 400, alto: 340, arriba: 0 }, "norte", 0, 200, limites);
+if (minimo.alto !== 320) mal("cajaRedimensionada deja un alto por debajo del mínimo: " + JSON.stringify(minimo));
+const anchoMinimo = repartir(desde, "este", -400, 0, limites);
+if (anchoMinimo.ancho !== 240) mal("cajaRedimensionada deja un ancho por debajo del mínimo");
+if (previaPanel.numeroOpcional("", 320, 900) !== null || previaPanel.numeroOpcional("basura", 320, 900) !== null) {
+  mal("numeroOpcional no distingue «sin alto» de una preferencia rota");
+}
+if (previaPanel.numeroOpcional("600", 320, 900) !== 600 || previaPanel.numeroOpcional(10, 320, 900) !== 320) {
+  mal("numeroOpcional no acepta una cadena ni recorta al mínimo");
+}
+
 const esLayout = previaPanel.esRutaDeLayout;
 if (!esLayout("/proyecto/res/layout/main.xml")) mal("esRutaDeLayout no reconoce res/layout");
 if (!esLayout("/proyecto/res/layout-land/girado.xml")) mal("esRutaDeLayout no reconoce layout-land");
@@ -488,17 +522,45 @@ if (!basura || basura.capturas.length !== 0 || basura.avisos.length !== 0 || bas
 // pruebas de chromium no tienen qué conducir
 for (const [id, donde] of [
   ["editor-fila", "la fila que divide editor y previa"],
-  ["separador-previa", "el separador redimensionable"],
+  ["marco-previa", "el marco que reparte el panel de la vista previa"],
+  ["separador-previa", "la arista izquierda de la vista previa"],
+  ["tirador-previa-este", "la arista derecha de la vista previa"],
+  ["tirador-previa-norte", "la arista superior de la vista previa"],
+  ["tirador-previa-sur", "la arista inferior de la vista previa"],
+  ["tirador-previa-noroeste", "la esquina superior izquierda de la vista previa"],
+  ["tirador-previa-noreste", "la esquina superior derecha de la vista previa"],
+  ["tirador-previa-suroeste", "la esquina inferior izquierda de la vista previa"],
+  ["tirador-previa-sureste", "la esquina inferior derecha de la vista previa"],
+  ["previa-aviso-estrecho", "el aviso de que en pantalla estrecha no se redimensiona"],
   ["previa-lateral", "el panel de la vista previa"],
   ["previa-alternar", "el botón que lo muestra y lo oculta"],
-  ["previa-modo-vivo", "la pestaña del layout en vivo"],
-  ["previa-modo-render", "la pestaña del render con eventos"],
+  ["previa-modo-vivo", "la pestaña Vista previa"],
+  ["previa-modo-render", "la pestaña Emulador"],
   ["previa-vivo-canvas", "el canvas del layout en vivo"],
   ["previa-vivo-estado", "la línea de estado del layout en vivo"],
-  ["previa-lateral-canvas", "el canvas del render con eventos"],
+  ["previa-lateral-canvas", "el canvas del emulador"],
   ["previa-log-lista", "la consola de la ejecución"],
   ["previa-log-cabecera", "el resumen de la ejecución"],
   ["previa-log-vacio", "el mensaje de «sin ejecución»"],
+  ["vista-modo-previa", "la pestaña Vista previa de la vista Pantalla"],
+  ["vista-modo-emulador", "la pestaña Emulador de la vista Pantalla"],
+  ["vista-layout", "el panel de Vista previa de la vista Pantalla"],
+  ["vista-layout-canvas", "el canvas de Vista previa de la vista Pantalla"],
+  ["vista-layout-estado", "la línea de estado de Vista previa en la vista Pantalla"],
+  ["vista-emulador", "el panel del Emulador de la vista Pantalla"],
+  ["vista-log-lista", "la consola de la ejecución en la vista Pantalla"],
+  ["vista-log-cabecera", "el resumen de la ejecución en la vista Pantalla"],
+  ["vista-log-vacio", "el mensaje de «sin ejecución» en la vista Pantalla"],
+  ["marco-vista-lado", "el marco redimensionable de la vista Pantalla"],
+  ["vista-tirador-oeste", "la arista izquierda del panel de la vista Pantalla"],
+  ["vista-tirador-este", "la arista derecha del panel de la vista Pantalla"],
+  ["vista-tirador-norte", "la arista superior del panel de la vista Pantalla"],
+  ["vista-tirador-sur", "la arista inferior del panel de la vista Pantalla"],
+  ["vista-tirador-noroeste", "la esquina superior izquierda del panel de la vista Pantalla"],
+  ["vista-tirador-noreste", "la esquina superior derecha del panel de la vista Pantalla"],
+  ["vista-tirador-suroeste", "la esquina inferior izquierda del panel de la vista Pantalla"],
+  ["vista-tirador-sureste", "la esquina inferior derecha del panel de la vista Pantalla"],
+  ["vista-lado", "la columna de estado y consola de la vista Pantalla"],
 ]) {
   if (!ids.has(id)) mal(`${donde} (${id}) no está en index.html`);
 }
@@ -526,7 +588,39 @@ if (!/id="previa-modo-vivo"[^>]*role="tab"/.test(html) || !/id="previa-modo-rend
 }
 if (!/id="previa-log"[^>]*role="log"/.test(html)) mal("la consola de la ejecución no es role=log");
 if (!/id="previa-vivo"[^>]*role="tabpanel"/.test(html) || !/id="previa-render"[^>]*role="tabpanel"/.test(html)) {
-  mal("los paneles en vivo y render no son role=tabpanel");
+  mal("los paneles en vivo y emulador no son role=tabpanel");
+}
+// los modos se llaman por lo que hacen: «Vista previa» dibuja el XML y «Emulador» ejecuta los
+// eventos de la app. Los nombres viejos no pueden volver a la interfaz.
+if (/Render \(eventos\)|En vivo<|>En vivo/.test(html)) {
+  mal("index.html conserva un nombre viejo de modo (Render (eventos) o En vivo)");
+}
+if (!/>Vista previa<\/button>/.test(html) || !/>Emulador<\/button>/.test(html)) {
+  mal("las pestañas de modo no se llaman Vista previa y Emulador");
+}
+if (!/id="previa-modo-vivo"[^>]*>Vista previa</.test(html) || !/id="previa-modo-render"[^>]*>Emulador</.test(html)) {
+  mal("los ids de modo no llevan el nombre nuevo en su texto");
+}
+// los ocho tiradores de cada marco: role=separator, el eje en data-eje y el cursor que toca
+for (const tirador of html.matchAll(/<div id="([^"]*tirador[^"]*|[^"]*separador-previa)"[^>]*>/g)) {
+  const etiqueta = tirador[0];
+  if (!/role="separator"/.test(etiqueta)) mal("el tirador " + tirador[1] + " no es role=separator");
+  if (!/data-eje="(oeste|este|norte|sur|noroeste|noreste|suroeste|sureste)"/.test(etiqueta)) {
+    mal("el tirador " + tirador[1] + " no declara su eje");
+  }
+  if (!/aria-controls="(previa-lateral|vista-lado)"/.test(etiqueta)) {
+    mal("el tirador " + tirador[1] + " no dice qué panel redimensiona");
+  }
+}
+const tiradoresPanel = [...html.matchAll(/id="(tirador-previa-[a-z]+|separador-previa)"/g)].length;
+if (tiradoresPanel !== 8) mal("la vista previa no tiene sus ocho tiradores: " + tiradoresPanel);
+const tiradoresVista = [...html.matchAll(/id="vista-tirador-[a-z]+"/g)].length;
+if (tiradoresVista !== 8) mal("la vista Pantalla no tiene sus ocho tiradores: " + tiradoresVista);
+// el rótulo de tipo/id sobre un nodo lo pinta el pintor compartido; este módulo no añade el suyo,
+// porque el panel y el emulador deben enseñar lo mismo sin duplicar el dibujo
+const fuentePrevia = fs.readFileSync(path.join(__dirname, "previa-panel.js"), "utf8");
+if (/\bfillText\s*\(/.test(fuentePrevia)) {
+  mal("previa-panel.js pinta texto en el canvas: el rótulo del nodo es del pintor compartido");
 }
 
 // 7. el resaltador del editor es puro y se puede probar sin DOM; si se rompe, el código se
