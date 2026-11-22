@@ -79,6 +79,8 @@ const MENSAJE_SIN_LAYOUT = "El proyecto no tiene ningún res/layout/*.xml. Crea 
   "explorador o abre uno para verlo aquí.";
 const MENSAJE_SIN_ABRIR = "Abre un res/layout/*.xml en el editor para ver aquí el layout dibujado, " +
   "sin compilar.";
+const MENSAJE_SIN_PULSOS = "Compila el proyecto (Editor → Compilar → Compilar debug) para ver las " +
+  "vistas que responden a un clic.";
 
 // Una medida utilizable: siempre entera, dentro de [minimo, maximo] y con un respaldo si lo pedido
 // no es un número (una preferencia corrupta no puede dejar el panel en 0 px).
@@ -306,6 +308,8 @@ const SUPERFICIES = [
     canvasVivo: "previa-vivo-canvas", estadoVivo: "previa-vivo-estado",
     canvasRender: "previa-lateral-canvas", estadoRender: "previa-render-estado",
     log: { lista: "previa-log-lista", cabecera: "previa-log-cabecera", vacio: "previa-log-vacio" },
+    consola: { lista: "previa-consola-lista", cabecera: "previa-consola-cabecera", vacio: "previa-consola-vacio" },
+    pulsos: { caja: "previa-oyentes", cuenta: "previa-pulsos-cuenta", nota: "previa-pulsos-nota" },
   },
   {
     id: "vista",
@@ -313,8 +317,27 @@ const SUPERFICIES = [
     // el estado del emulador de Pantalla lo escribe vista-previa.js con el modelo de apkc
     canvasRender: "vista-previa", estadoRender: null,
     log: { lista: "vista-log-lista", cabecera: "vista-log-cabecera", vacio: "vista-log-vacio" },
+    consola: { lista: "vista-consola-lista", cabecera: "vista-consola-cabecera", vacio: "vista-consola-vacio" },
+    pulsos: { caja: "vista-oyentes", cuenta: "vista-pulsos-cuenta", nota: "vista-pulsos-nota" },
   },
 ];
+
+// Las dos tiras de secciones del emulador: la del panel de la vista dividida y la de la vista
+// Pantalla. Cada una tiene sus pestañas, sus paneles y su preferencia; el patrón es el mismo que el
+// del panel inferior de compilación (Consola | Diagnóstico | Historial | Compilar | Firmar).
+const SECCIONES = [
+  {
+    clave: "apkc-studio/previa-seccion",
+    botones: { pulsos: "previa-seccion-pulsos", registro: "previa-seccion-registro", consola: "previa-seccion-consola" },
+    paneles: { pulsos: "previa-pulsos", registro: "previa-log", consola: "previa-consola" },
+  },
+  {
+    clave: "apkc-studio/vista-seccion",
+    botones: { pulsos: "vista-seccion-pulsos", registro: "vista-seccion-registro", consola: "vista-seccion-consola" },
+    paneles: { pulsos: "vista-pulsos", registro: "vista-log", consola: "vista-consola" },
+  },
+];
+const SECCION_POR_DEFECTO = "pulsos";
 
 // La pieza de interfaz. Se construye sin tocar el DOM y solo se engancha en `iniciar()`, para que
 // importar este módulo desde la prueba de node no necesite navegador.
@@ -735,56 +758,60 @@ export function crearPreviaPanel({ hospedador, proyecto, estadoPestana, editor }
   }
 
   // La consola de la app: solo `print`/`println`/`Log.*`. Se pinta con `textContent` y el número de
-  // secuencia que trae el intérprete, que es el orden real de emisión.
+  // secuencia que trae el intérprete, que es el orden real de emisión. Las dos superficies (panel y
+  // Pantalla) tienen su propia lista: el modelo es uno y la consola no puede quedarse atrás.
   function limpiarConsola(texto) {
-    const lista = document.getElementById("previa-consola-lista");
-    const cabecera = document.getElementById("previa-consola-cabecera");
-    const vacio = document.getElementById("previa-consola-vacio");
-    if (lista) lista.textContent = "";
-    if (cabecera) cabecera.textContent = "sin salida";
-    if (vacio) {
-      vacio.hidden = false;
-      if (texto) vacio.textContent = texto;
+    for (const superficie of SUPERFICIES) {
+      const lista = el(superficie.consola.lista);
+      const cabecera = el(superficie.consola.cabecera);
+      const vacio = el(superficie.consola.vacio);
+      if (lista) lista.textContent = "";
+      if (cabecera) cabecera.textContent = "sin salida";
+      if (vacio) {
+        vacio.hidden = false;
+        if (texto) vacio.textContent = texto;
+      }
     }
   }
 
   function pintarConsola(modelo) {
-    const lista = document.getElementById("previa-consola-lista");
-    const cabecera = document.getElementById("previa-consola-cabecera");
-    const vacio = document.getElementById("previa-consola-vacio");
-    if (!lista || !cabecera || !vacio) return;
     const resumen = resumenEjecucion(modelo);
-    lista.textContent = "";
-    if (!resumen) {
-      cabecera.textContent = "sin salida";
-      vacio.hidden = false;
-      vacio.textContent = "Compila el proyecto para ver lo que la app imprime.";
-      return;
+    for (const superficie of SUPERFICIES) {
+      const lista = el(superficie.consola.lista);
+      const cabecera = el(superficie.consola.cabecera);
+      const vacio = el(superficie.consola.vacio);
+      if (!lista || !cabecera || !vacio) continue;
+      lista.textContent = "";
+      if (!resumen) {
+        cabecera.textContent = "sin salida";
+        vacio.hidden = false;
+        vacio.textContent = "Compila el proyecto para ver lo que la app imprime.";
+        continue;
+      }
+      for (const linea of resumen.consola) {
+        const li = document.createElement("li");
+        li.className = "previa-consola-linea";
+        const secuencia = document.createElement("span");
+        secuencia.className = "previa-consola-secuencia";
+        secuencia.textContent = String(linea.secuencia || lista.children.length + 1);
+        const origen = document.createElement("span");
+        origen.className = "previa-consola-origen";
+        origen.textContent = linea.origen || "salida";
+        const cuerpo = document.createElement("span");
+        cuerpo.className = "previa-consola-texto";
+        cuerpo.textContent = linea.texto;
+        li.appendChild(secuencia);
+        li.appendChild(origen);
+        li.appendChild(cuerpo);
+        lista.appendChild(li);
+      }
+      const clics = resumen.pulsaciones.length;
+      cabecera.textContent = (resumen.consola.length === 1 ? "1 línea" : resumen.consola.length + " líneas") +
+        " · " + clics + (clics === 1 ? " clic" : " clics");
+      const hay = lista.children.length > 0;
+      vacio.hidden = hay;
+      if (!hay) vacio.textContent = "La app no imprimió nada en esta ejecución.";
     }
-    for (const linea of resumen.consola) {
-      const li = document.createElement("li");
-      li.className = "previa-consola-linea";
-      const secuencia = document.createElement("span");
-      secuencia.className = "previa-consola-secuencia";
-      secuencia.textContent = String(linea.secuencia || lista.children.length + 1);
-      const origen = document.createElement("span");
-      origen.className = "previa-consola-origen";
-      origen.textContent = linea.origen || "salida";
-      const cuerpo = document.createElement("span");
-      cuerpo.className = "previa-consola-texto";
-      cuerpo.textContent = linea.texto;
-      li.appendChild(secuencia);
-      li.appendChild(origen);
-      li.appendChild(cuerpo);
-      lista.appendChild(li);
-    }
-    cabecera.textContent = resumen.consola.length === 1
-      ? "1 línea · " + resumen.pulsaciones.length + (resumen.pulsaciones.length === 1 ? " clic" : " clics")
-      : resumen.consola.length + " líneas · " + resumen.pulsaciones.length +
-        (resumen.pulsaciones.length === 1 ? " clic" : " clics");
-    const hay = lista.children.length > 0;
-    vacio.hidden = hay;
-    if (!hay) vacio.textContent = "La app no imprimió nada en esta ejecución.";
   }
 
   function lineaLog(clase, origen, texto) {
@@ -843,47 +870,56 @@ export function crearPreviaPanel({ hospedador, proyecto, estadoPestana, editor }
 
   // --- clics del emulador -------------------------------------------------------------------
   function limpiarOyentes(texto) {
-    const caja = document.getElementById("previa-oyentes");
-    const cuenta = document.getElementById("previa-pulsos-cuenta");
-    const nota = document.getElementById("previa-pulsos-nota");
-    if (caja) caja.textContent = "";
-    if (cuenta) cuenta.textContent = "sin clics";
-    if (nota) {
-      nota.hidden = false;
-      if (texto) nota.textContent = texto;
+    for (const superficie of SUPERFICIES) {
+      const caja = el(superficie.pulsos.caja);
+      const cuenta = el(superficie.pulsos.cuenta);
+      const nota = el(superficie.pulsos.nota);
+      if (caja) caja.textContent = "";
+      if (cuenta) cuenta.textContent = "sin clics";
+      if (nota) {
+        nota.hidden = false;
+        if (texto) nota.textContent = texto;
+      }
     }
   }
 
+  // Las vistas que responden a un clic, en las dos superficies. El botón de cada una pide el mismo
+  // `--pulsar` que un toque sobre el canvas. Cuando no hay ejecución no se puede decir que la app
+  // «no registró ningún OnClickListener»: eso solo se sabe después de ejecutar `onCreate`, así que
+  // el aviso distingue los dos casos.
   function pintarOyentes(modelo) {
-    const caja = document.getElementById("previa-oyentes");
-    const cuenta = document.getElementById("previa-pulsos-cuenta");
-    const nota = document.getElementById("previa-pulsos-nota");
-    if (!caja || !cuenta || !nota) return;
     const oyentes = oyentesDeModelo(modelo);
     const resumen = resumenEjecucion(modelo);
     // los clics que la pantalla declara haber ejecutado: el modelo los trae (`pulsaciones`) y, si
     // esta instancia acaba de pedir uno, la lista local ya los incluye; manda el mayor de los dos
     const entregados = Math.max(pulsos.length, resumen ? resumen.pulsaciones.length : 0);
-    caja.textContent = "";
-    cuenta.textContent = entregados === 0 ? "sin clics"
-      : entregados + (entregados === 1 ? " clic" : " clics");
-    for (const o of oyentes) {
-      const boton = document.createElement("button");
-      boton.type = "button";
-      boton.className = "previa-oyente";
-      boton.dataset.idref = o.idRef;
-      const etiqueta = o.texto ? o.id + " · " + o.texto : o.id;
-      boton.textContent = etiqueta;
-      boton.title = "Ejecutar el OnClickListener de " + o.id;
-      boton.addEventListener("click", (e) => {
-        e.preventDefault();
-        pulsar(o.idRef);
-      });
-      caja.appendChild(boton);
-    }
-    nota.hidden = oyentes.length > 0;
-    if (!oyentes.length) {
-      nota.textContent = "Esta ejecución no registró ningún OnClickListener sobre una vista con id.";
+    for (const superficie of SUPERFICIES) {
+      const caja = el(superficie.pulsos.caja);
+      const cuenta = el(superficie.pulsos.cuenta);
+      const nota = el(superficie.pulsos.nota);
+      if (!caja || !cuenta || !nota) continue;
+      caja.textContent = "";
+      cuenta.textContent = entregados === 0 ? "sin clics"
+        : entregados + (entregados === 1 ? " clic" : " clics");
+      for (const o of oyentes) {
+        const boton = document.createElement("button");
+        boton.type = "button";
+        boton.className = "previa-oyente";
+        boton.dataset.idref = o.idRef;
+        const etiqueta = o.texto ? o.id + " · " + o.texto : o.id;
+        boton.textContent = etiqueta;
+        boton.title = "Ejecutar el OnClickListener de " + o.id;
+        boton.addEventListener("click", (e) => {
+          e.preventDefault();
+          pulsar(o.idRef);
+        });
+        caja.appendChild(boton);
+      }
+      nota.hidden = oyentes.length > 0;
+      if (oyentes.length) continue;
+      if (!resumen) nota.textContent = MENSAJE_SIN_PULSOS;
+      else if (resumen.error) nota.textContent = "La ejecución se detuvo antes de registrar oyentes: " + resumen.error;
+      else nota.textContent = "Esta ejecución no registró ningún OnClickListener sobre una vista con id.";
     }
   }
 
@@ -896,8 +932,7 @@ export function crearPreviaPanel({ hospedador, proyecto, estadoPestana, editor }
     const antes = pulsos.length;
     pulsos.push(idRef);
     pulsando = true;
-    const estado = document.getElementById("previa-render-estado");
-    if (estado) estado.textContent = "Ejecutando el clic " + pulsos.length + "…";
+    mensajeVistaPreviaRender("Ejecutando el clic " + pulsos.length + "…");
     try {
       await hospedador.cwd(carpeta);
       const argv = ["preview"];
@@ -924,14 +959,17 @@ export function crearPreviaPanel({ hospedador, proyecto, estadoPestana, editor }
   }
 
   function mensajeVistaPreviaRender(texto) {
-    const estado = document.getElementById("previa-render-estado");
-    if (estado) estado.textContent = texto;
+    for (const superficie of SUPERFICIES) {
+      const estado = superficie.estadoRender ? el(superficie.estadoRender) : null;
+      if (estado) estado.textContent = texto;
+    }
   }
 
   // Un clic en el canvas se traduce a la vista que hay debajo, en las coordenadas lógicas del
-  // panel. Si esa vista no tiene listener, el clic no hace nada (y no se inventa un aviso).
-  function conectarCanvas() {
-    const canvas = document.getElementById("previa-lateral-canvas");
+  // panel. Si esa vista no tiene listener, el clic no hace nada (y no se inventa un aviso). Los dos
+  // canvas —el del panel de la vista dividida y el de Pantalla— se conectan igual.
+  function conectarCanvas(idCanvas) {
+    const canvas = document.getElementById(idCanvas || "previa-lateral-canvas");
     if (!canvas) return;
     const alPulsar = (e) => {
       // el espacio de la pintura manda: con él se midió el modelo y con él se pinta
@@ -1591,6 +1629,57 @@ export function crearPreviaPanel({ hospedador, proyecto, estadoPestana, editor }
   }
 
   // --- arranque -----------------------------------------------------------------------------
+  // --- secciones del emulador ---------------------------------------------------------------
+  // Registro, consola de la app y controles de pulsar son tres pestañas en cada superficie, como
+  // las del panel inferior de compilación. Alternar solo cambia `hidden`: el contenido y el scroll
+  // de cada panel se conservan.
+  const seccion = { panel: SECCION_POR_DEFECTO, vista: SECCION_POR_DEFECTO };
+
+  function aplicarSeccion(indice, valor, persistir) {
+    const grupo = SECCIONES[indice];
+    if (!grupo) return;
+    const elegida = Object.prototype.hasOwnProperty.call(grupo.paneles, valor) ? valor : SECCION_POR_DEFECTO;
+    for (const [clave, idBoton] of Object.entries(grupo.botones)) {
+      const boton = el(idBoton);
+      if (!boton) continue;
+      const activo = clave === elegida;
+      boton.classList.toggle("activo", activo);
+      boton.setAttribute("aria-selected", activo ? "true" : "false");
+      boton.tabIndex = activo ? 0 : -1;
+    }
+    for (const [clave, idPanel] of Object.entries(grupo.paneles)) {
+      const panel = el(idPanel);
+      if (panel) panel.hidden = clave !== elegida;
+    }
+    if (indice === 0) seccion.panel = elegida; else seccion.vista = elegida;
+    if (persistir) guardarClave(grupo.clave, elegida);
+  }
+
+  function conectarSecciones() {
+    SECCIONES.forEach((grupo, indice) => {
+      const claves = Object.keys(grupo.botones);
+      for (const clave of claves) {
+        const boton = el(grupo.botones[clave]);
+        if (!boton) continue;
+        boton.addEventListener("click", () => aplicarSeccion(indice, clave, true));
+        // role="tab" obliga a recorrer las pestañas con las flechas, Home y End
+        boton.addEventListener("keydown", (e) => {
+          if (!["ArrowRight", "ArrowLeft", "Home", "End"].includes(e.key)) return;
+          e.preventDefault();
+          const actual = claves.indexOf(clave);
+          const destino = e.key === "Home" ? 0
+            : e.key === "End" ? claves.length - 1
+              : e.key === "ArrowRight" ? (actual + 1) % claves.length
+                : (actual - 1 + claves.length) % claves.length;
+          aplicarSeccion(indice, claves[destino], true);
+          const siguiente = el(grupo.botones[claves[destino]]);
+          if (siguiente) siguiente.focus();
+        });
+      }
+      aplicarSeccion(indice, leerClave(grupo.clave, SECCION_POR_DEFECTO), false);
+    });
+  }
+
   function iniciar() {
     if (iniciado || !conDocumento()) return false;
     const marco = marcoPanel();
@@ -1639,8 +1728,10 @@ export function crearPreviaPanel({ hospedador, proyecto, estadoPestana, editor }
     document.addEventListener("pointercancel", soltar);
 
     conectarModos();
+    conectarSecciones();
     conectarEntrada();
-    conectarCanvas();
+    conectarCanvas("previa-lateral-canvas");
+    conectarCanvas("vista-previa");
     conectarEditable();
     const alternar = el("previa-alternar");
     if (alternar) alternar.addEventListener("click", () => aplicarVisible(!visible, true));
@@ -1701,6 +1792,7 @@ export function crearPreviaPanel({ hospedador, proyecto, estadoPestana, editor }
       ancho: caja.ancho, alto: caja.alto, arriba: caja.arriba,
       lado: cajaLado.ancho, ladoAlto: cajaLado.alto,
       visible, modo, ruta: rutaViva, pulsos: [...pulsos], editando,
+      seccionPanel: seccion.panel, seccionVista: seccion.vista,
       seleccion: seleccion ? seleccion.slice() : null,
     }),
   };

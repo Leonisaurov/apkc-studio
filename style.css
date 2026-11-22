@@ -502,6 +502,24 @@ kbd {
 .vista-lado .nota { margin: 0; }
 .vista-lado .previa-log { flex: 1 1 auto; }
 
+/* ---- secciones del emulador ---------------------------------------------
+   El registro, la consola de la app y los controles de pulsar no son tres bloques apilados: son
+   tres pestañas, como las del panel inferior de compilación. Cada panel sigue en el DOM y solo se
+   oculta con [hidden], así que alternar conserva su contenido y su scroll. */
+.previa-secciones {
+  display: flex;
+  gap: 2px;
+  flex: 0 0 auto;
+  min-width: 0;
+  flex-wrap: wrap;
+  padding-bottom: 2px;
+  border-bottom: 1px solid var(--borde);
+}
+.previa-seccion { min-height: 0; }
+.previa-seccion[hidden] { display: none; }
+.previa-seccion.previa-pulsos,
+.previa-seccion.previa-log { flex: 1 1 auto; }
+
 /* ---- vista dividida: editor + previa del teléfono ------------------------
    La fila sustituye al editor suelto como hijo flexible de #pestana: el editor conserva su
    scroll propio y el panel lateral administra el ancho con --previa-ancho, que fija el

@@ -66,20 +66,22 @@ se abre, el editor se encoge y conserva su propio scroll.
 ## Pantalla
 
 La tercera vista (`#vista`, clases `vista vista-previa`) es la misma pareja de lecturas que la vista
-dividida, a página completa: el teléfono a la izquierda y, a la derecha, el estado y la consola, en
-una columna redimensionable. Lleva los **dos modos** de la vista dividida (pestañas propias,
-`#vista-modo-previa` y `#vista-modo-emulador`), el canvas de cada uno y la **consola de la
-ejecución** con los mismos ids y el mismo contenido que la del panel: `previa-panel.js` pinta las
-dos superficies con el mismo modelo (`SUPERFICIES`), así que la vista no puede quedarse atrás.
+dividida, a página completa: el teléfono a la izquierda y, a la derecha, el estado y las **tres
+secciones del emulador** (Pulsar, Registro y Consola) en una columna redimensionable. Lleva los
+**dos modos** de la vista dividida (pestañas propias, `#vista-modo-previa` y `#vista-modo-emulador`),
+el canvas de cada uno y las mismas secciones con ids propios: `previa-panel.js` pinta las dos
+superficies con el mismo modelo (`SUPERFICIES`), así que la vista no puede quedarse atrás. El canvas
+`#vista-previa` también entrega el clic: pulsar el teléfono grande ejecuta el mismo `--pulsar` que
+el del panel.
 
 | Id | Qué es |
 | --- | --- |
 | `#vista` | la sección; `data-vista="vista"` en el `<body>` cuando está delante |
 | `#vista-modo-previa`, `#vista-modo-emulador` | las dos pestañas (`role="tab"`, `aria-selected`) |
 | `#vista-layout`, `#vista-layout-canvas`, `#vista-layout-estado` | el modo Vista previa: el layout del editor dibujado, sin compilar |
-| `#vista-emulador`, `#vista-previa` | el modo Emulador: el canvas del modelo de `apkc preview` |
+| `#vista-emulador`, `#vista-previa` | el modo Emulador: el canvas del modelo de `apkc preview` (pulsable, `tabindex="0"`) |
 | `#vista-previa-estado` | la línea de estado del emulador; la escribe `vista-previa.js` con el modelo |
-| `#vista-log`, `#vista-log-cabecera`, `#vista-log-lista`, `#vista-log-vacio` | la consola de la ejecución, espejo de la del panel |
+| `#vista-seccion-*`, `#vista-pulsos`, `#vista-log`, `#vista-consola` | las tres secciones del emulador en Pantalla, con los mismos ids que la del panel al revés (`vista-` en vez de `previa-`) |
 | `#marco-vista-lado` y sus ocho `#vista-tirador-*` | la columna de estado y consola, redimensionable |
 | `#vista-lado` | la columna; su ancho y su alto viven en `--previa-ancho`/`--previa-alto` |
 
@@ -170,9 +172,13 @@ del panel, que a su vez contiene los ocho tiradores y el `<aside>`:
 | `#previa-anadir-textview`, `#previa-anadir-button`, `#previa-anadir-imageview`, `#previa-anadir-linearlayout`, `#previa-anadir-framelayout` | los cinco botones de la paleta; cada uno con `data-tipo` |
 | `#previa-editar-estado` | el estado del modo editar: qué está seleccionado, el último cambio o el motivo por el que no se puede editar (`role="status"`) |
 | `#previa-lateral-canvas`, `#previa-render-estado` | el canvas del emulador (enfocable y pulsable) y su línea de estado |
-| `#previa-pulsos`, `#previa-oyentes`, `#previa-pulsos-cuenta` | los botones de las vistas con `OnClickListener` y la cuenta de clics |
-| `#previa-log`, `#previa-log-cabecera`, `#previa-log-lista`, `#previa-log-vacio` | el **registro del emulador** (`role="log"`) |
-| `#previa-consola`, `#previa-consola-cabecera`, `#previa-consola-lista`, `#previa-consola-vacio` | la **consola de la app** (`role="log"`): `println` y `Log.*` |
+| `#previa-seccion-pulsos`, `#previa-seccion-registro`, `#previa-seccion-consola` | las tres secciones del emulador en el panel (`role="tab"`, `aria-selected`, `aria-controls`); Pulsar es la de por defecto |
+| `#previa-pulsos`, `#previa-oyentes`, `#previa-pulsos-cuenta`, `#previa-pulsos-nota` | la sección de pulsar: los botones de las vistas con `OnClickListener`, la cuenta de clics y la nota cuando no hay a quién pulsar |
+| `#previa-log`, `#previa-log-cabecera`, `#previa-log-lista`, `#previa-log-vacio` | la sección **registro del emulador** (`role="log"`) |
+| `#previa-consola`, `#previa-consola-cabecera`, `#previa-consola-lista`, `#previa-consola-vacio` | la sección **consola de la app** (`role="log"`): `println` y `Log.*` |
+| `#vista-seccion-pulsos`, `#vista-seccion-registro`, `#vista-seccion-consola` | las mismas tres secciones en la vista Pantalla |
+| `#vista-pulsos`, `#vista-oyentes`, `#vista-pulsos-cuenta`, `#vista-pulsos-nota` | la sección de pulsar de Pantalla |
+| `#vista-consola`, `#vista-consola-cabecera`, `#vista-consola-lista`, `#vista-consola-vacio` | la consola de la app de Pantalla |
 | `#previa-modo-vivo`/`-render` y los ids `vista-*` | las dos superficies: Editor y Pantalla comparten modelo y consola |
 | `#consola-pestana` | la consola de los **comandos** de compilación; no es la de la app |
 
@@ -281,19 +287,37 @@ ni edición de `@string`, y un layout lineal no admite posición libre: ahí mov
 ### Emulador, clics y consola de la ejecución
 
 La pestaña **Emulador** pinta el modelo real de `apkc preview` en `#previa-lateral-canvas` y debajo
-lleva **dos paneles separados**: el **registro del emulador** (`#previa-log`: escrituras de view,
-avisos, pasos) y la **consola de la app** (`#previa-consola`: `println` y `Log.*` con `secuencia`).
+lleva **tres secciones con pestañas**, igual que el panel inferior de compilación (Consola,
+Diagnóstico, Historial, Compilar, Firmar): **Pulsar**, **Registro** y **Consola**. No son tres
+bloques apilados: una sección visible cada vez, y las otras dos siguen en el DOM con su contenido y
+su scroll, así que alternar no vuelve a ejecutar nada ni pierde líneas. La sección activa se guarda
+en `apkc-studio/previa-seccion` (y `apkc-studio/vista-seccion` en Pantalla); las pestañas se
+recorren con `←`/`→`, `Home` y `End`, con `role="tab"`, `aria-selected` y `aria-controls`.
 `#consola-pestana` sigue siendo la de los comandos de compilación y no se ensucia con texto de la
-app. El mismo modelo y las dos listas se pintan en la vista **Pantalla**, sin segunda ejecución.
+app. El mismo modelo y las tres secciones se pintan en la vista **Pantalla**, sin segunda ejecución.
 
 **El emulador no pulsa solo.** `apkc preview` ejecuta `onCreate` y se detiene (`Pulsos: 0`); los
 `OnClickListener` quedan publicados en `ejecucion.oyentes`. Un clic —en el canvas o en un botón de
 `#previa-oyentes`— manda `apkc preview --pulsar <idRef>` con toda la lista de clics desde la última
 compilación, en orden: repetir la lista reproduce `Pulsos: 2` tras dos clics; un build nuevo la
 vacía. `pointerdown` usa `nodoEnPunto` (gana la vista más profunda con `oyente: true`); el canvas es
-`tabindex="0"` y Enter/espacio pulsan el primero. La medida del clic usa `canvas.__espacio` (lo que
-devolvió `pintarModelo`), no el `clientWidth` del momento, para que el punto caiga sobre los píxeles
-visibles. `#previa-render` lleva `overflow-y: auto` y el marco un mínimo de 220 px.
+`tabindex="0"` y Enter/espacio pulsan el primero. **Los dos canvas entregan el clic**: el del panel
+(`#previa-lateral-canvas`) y el de Pantalla (`#vista-previa`), con la misma geometría. La medida del
+clic usa `canvas.__espacio` (lo que dejó `pintarModelo`), no el `clientWidth` del momento, para que
+el punto caiga sobre los píxeles visibles. `#previa-render` lleva `overflow-y: auto` y el marco un
+mínimo de 220 px.
+
+**`android:onClick` del layout se ejecuta.** Una app que declara el clic en el XML
+(`android:onClick="sumar"` y `public void sumar(View v)` en la actividad, el patrón de los
+contadores de tutorial) no llama a `setOnClickListener` en `onCreate`. `apkc preview` enlaza esos
+oyentes al leer el layout —como el inflado del framework— y los publica con su id real, así que el
+nodo queda `oyente: true` y `--pulsar` lo ejecuta. Si el método no existe o la vista no tiene
+`android:id`, no se inventa el oyente y el registro del emulador lo dice en un aviso.
+
+**La nota de «Pulsar» no miente.** Sin modelo (antes de compilar o con el preview fallido) dice que
+compiles; con la ejecución detenida, el error; y solo cuando `onCreate` corrió de verdad y no
+registró ningún listener con id dice «Esta ejecución no registró ningún OnClickListener sobre una
+vista con id».
 
 `resumenEjecucion(modelo)` (puro) acota `ejecucion` antes de pintarlo: `capturas` (máximo 64,
 `origen`, `id`, `texto`), `consola` (máximo 128, `origen`, `texto`, `secuencia`), `oyentes`,
@@ -301,8 +325,10 @@ visibles. `#previa-render` lleva `overflow-y: auto` y el marco un mínimo de 220
 la cabecera cuenta como «N clics»), `actividad`, `metodo` y `error`.
 Solo acepta cadenas donde el JSON promete cadenas y números finitos donde promete números.
 
-Los dos paneles no son el mismo canal:
+Los tres paneles no son el mismo canal:
 
+- **Pulsar** (`#previa-pulsos`): un botón por vista con `OnClickListener`, con su `id/texto`, y la
+  cuenta de clics entregados. Es la sección de por defecto.
 - **Registro del emulador** (`#previa-log`, `role="log"`, `aria-label="Registro del emulador"`): la
   lista completa en el orden de la ejecución —primero las capturas (`TextView.setText id/total:
   Pulsos: 1`, y también `Log.d: …` y `println: …` porque ahí se ve todo—, después los avisos con la
@@ -315,6 +341,15 @@ Los dos paneles no son el mismo canal:
 
 La consola de los **comandos de compilación** es otra: `#consola-pestana`, en el panel inferior. No
 comparte ni ids ni pintor con la de la app, y un clic del emulador no escribe en ella.
+
+**Fronteras del `android:onClick`.** (a) Se enlaza **solo** el layout de la actividad lanzadora: no se
+siguen `include`, ni `menu`, ni el contexto de un Fragment o un servicio. (b) La firma tiene que ser
+`(Landroid/view/View;)V`; si el método no existe o la vista no lleva `android:id`, no se inventa el
+oyente y el registro del emulador lo dice en un aviso. (c) Las **lambdas Java siguen fuera del
+subconjunto** del compilador propio: `v -> {…}` se rechaza al compilar (`">" no es una expresion que
+este parser reconozca`); el patrón anónimo, `this`, la clase interna y `android:onClick` sí se
+ejecutan. Y el sitio publicado (`https://apkc-studio.surge.sh/`) sigue con la **build anterior**:
+estos cambios no se han empaquetado ni publicado.
 
 Todo se pinta con `textContent`: un `texto` con `<script>` sale escapado y no se convierte en
 marcado. Sin `ejecucion` (por ejemplo con `--sin-ejecutar` o sin `classes.dex`) el vacío explica
