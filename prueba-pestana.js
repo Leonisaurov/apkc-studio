@@ -1366,6 +1366,142 @@ async function conductor() {
       JSON.stringify({ lista: previaRota.logLista, vacio: previaRota.logVacio,
         texto: String(previaRota.logTexto).slice(0, 160) }));
 
+    // 12a-quater. Dos compilaciones seguidas con el layout cambiado en medio: el Emulador tiene
+    // que recargar la última APK, no quedarse con la anterior. Se fijan las tres señales que
+    // pueden mentir por separado — los bytes de /proyecto/build/app.apk, el modelo que publica
+    // `previsualizarLoCompilado` y el evento que escucha el panel —, más que el preview suelto
+    // sigue trayendo un solo JSON.
+    const recarga = await evaluar(`(async () => {
+      const sha = async (b) => {
+        const d = await crypto.subtle.digest("SHA-256", b);
+        return Array.from(new Uint8Array(d)).map((x) => x.toString(16).padStart(2, "0")).join("");
+      };
+      const vp = await import("/vista-previa.js");
+      // el modelo aplanado en el orden del XML: tipo, id, texto del layout y los texto* de la
+      // ejecución (textoDinamico, etc.), que es lo que cambia cuando la app pinta algo
+      const firma = (m) => {
+        const out = [];
+        const pila = m && m.raiz ? [[m.raiz, 0]] : [];
+        while (pila.length) {
+          const [n, d] = pila.pop();
+          out.push(d + ":" + n.tipo + ":" + (n.id || "") + ":" + JSON.stringify(n.texto || ""));
+          for (const k of Object.keys(n)) {
+            if (/^texto[A-Z_]/.test(k)) out.push(d + ":" + k + "=" + n[k]);
+          }
+          if (Array.isArray(n.hijos)) for (let i = n.hijos.length - 1; i >= 0; i--) pila.push([n.hijos[i], d + 1]);
+        }
+        return out.join(" | ");
+      };
+      const foto = async () => {
+        const b = await hospedador.bytes("/proyecto/build/app.apk");
+        return { sha: b ? await sha(b) : "", bytes: b ? b.length : 0, firma: firma(vp.modeloActual()) };
+      };
+      const eventos = [];
+      const alPrevia = (e) => eventos.push(String(e.detail && e.detail.texto || ""));
+      document.addEventListener("apkc:previa-actualizada", alPrevia);
+      const layout = await hospedador.texto("/proyecto/res/layout/main.xml");
+      try {
+        // calentamiento: la primera compilación tras otra de release enlaza en frío y no sirve
+        // de referencia para comparar los bytes del apk entre dos pasadas
+        await compilarDebug();
+        const quietoR = await compilarDebug();
+        const quieto = await foto();
+        const eventosUno = eventos.length;
+        await hospedador.escribir("/proyecto/res/layout/main.xml",
+          new TextEncoder().encode(layout.replace(/android:text="([^"]*)"/g, 'android:text="$1 RECARGA"')));
+        const editadoR = await compilarDebug();
+        const editado = await foto();
+        const eventosEditado = eventos.length;
+        // un preview suelto: cada comando trae su JSON y solo el suyo (el buffer no se acumula)
+        const suelto = await hospedador.ejecutar(["preview", "build/app.apk"]);
+        const jsones = String((suelto && suelto.consola) || "").split("\\n")
+          .filter((l) => l.trim().startsWith("{")).length;
+        return { codigos: [quietoR && quietoR.codigo, editadoR && editadoR.codigo],
+          quieto, editado, eventosUno, eventosEditado, jsones,
+          textoNuevo: /RECARGA/.test(editado.firma), textoViejoFuera: !/RECARGA/.test(quieto.firma) };
+      } finally {
+        document.removeEventListener("apkc:previa-actualizada", alPrevia);
+        // el árbol y el editor vuelven al layout de la plantilla, que es lo que esperan las
+        // secciones siguientes
+        await hospedador.escribir("/proyecto/res/layout/main.xml", new TextEncoder().encode(layout));
+        if (estadoPestana.ruta === "/proyecto/res/layout/main.xml") {
+          EDITOR.poner(layout);
+          marcarSucio(false);
+        }
+      }
+    })()`);
+    comprueba("recompilar tras editar el layout cambia los bytes del apk (SHA-256 distinto)",
+      recarga.codigos.every((c) => c === 0) && recarga.quieto.sha !== "" &&
+      recarga.quieto.sha !== recarga.editado.sha && recarga.editado.bytes > 5000,
+      JSON.stringify({ codigos: recarga.codigos,
+        bytes: [recarga.quieto.bytes, recarga.editado.bytes],
+        sha: [recarga.quieto.sha.slice(0, 12), recarga.editado.sha.slice(0, 12)] }).slice(0, 260));
+    comprueba("el Emulador se recarga con el modelo nuevo, no con el de la compilación anterior",
+      recarga.textoViejoFuera === true && recarga.textoNuevo === true &&
+      recarga.quieto.firma !== recarga.editado.firma &&
+      recarga.eventosEditado > recarga.eventosUno,
+      JSON.stringify({ eventos: [recarga.eventosUno, recarga.eventosEditado], nuevo: recarga.textoNuevo,
+        antes: recarga.quieto.firma.slice(0, 140), despues: recarga.editado.firma.slice(0, 140) }).slice(0, 380));
+    comprueba("cada preview trae su JSON y solo el suyo (el buffer de consola no se acumula)",
+      recarga.jsones === 1, "jsones " + recarga.jsones);
+
+    // 12a-quinquies. Compilar guarda antes lo sucio. El build lee OPFS, no el textarea: sin esto
+    // el comando salía 0 y el Emulador seguía con el texto anterior aunque el editor enseñara el
+    // nuevo. Es la causa medida del síntoma «compilo y el Emulador no recarga la última APK».
+    const sucio = await evaluar(`(async () => {
+      const vp = await import("/vista-previa.js");
+      const textos = (m) => {
+        const out = [];
+        const pila = m && m.raiz ? [m.raiz] : [];
+        while (pila.length) {
+          const n = pila.pop();
+          if (n && typeof n.texto === "string") out.push(n.texto);
+          if (n && Array.isArray(n.hijos)) pila.push(...n.hijos);
+        }
+        return out.join(" | ");
+      };
+      const original = await hospedador.texto("/proyecto/res/layout/main.xml");
+      const segundo = "/proyecto/prueba-sucio.txt";
+      await hospedador.escribir(segundo, new TextEncoder().encode("uno\\n"));
+      await abrir("/proyecto/res/layout/main.xml");
+      const area = document.getElementById("codigo");
+      area.value = area.value.replace(/android:text="[^"]*"/, 'android:text="Sin guardar 5"');
+      area.dispatchEvent(new Event("input", { bubbles: true }));
+      // un segundo documento sucio e inactivo: el layout queda en doc.texto al cambiar de
+      // pestaña, y los dos caminos de guardarParaCompilar tienen que guardar. El .txt no entra
+      // al build, así que solo prueba el guardado (y que el aviso cuente dos).
+      await abrir(segundo);
+      area.value = "dos\\n";
+      area.dispatchEvent(new Event("input", { bubbles: true }));
+      const antes = {
+        layoutSucio: !!(documentoDe("/proyecto/res/layout/main.xml") || {}).sucio,
+        layoutDisco: /Sin guardar 5/.test(await hospedador.texto("/proyecto/res/layout/main.xml")),
+        segundoDisco: (await hospedador.texto(segundo)) === "dos\\n",
+      };
+      const r = await compilarDebug();
+      const salida = { codigo: r && r.codigo, antes,
+        despues: {
+          sucios: DOCUMENTOS.lista.filter((d) => d.sucio).length,
+          layoutDisco: /Sin guardar 5/.test(await hospedador.texto("/proyecto/res/layout/main.xml")),
+          segundoDisco: (await hospedador.texto(segundo)) === "dos\\n",
+          modelo: /Sin guardar 5/.test(textos(vp.modeloActual())) },
+        aviso: /guardados 2 fichero\\(s\\) con cambios antes de compilar/
+          .test(document.getElementById("consola-pestana").textContent) };
+      await abrir("/proyecto/res/layout/main.xml");
+      EDITOR.poner(original);
+      await guardar();
+      await hospedador.limpiar(segundo);
+      return salida;
+    })()`);
+    comprueba("compilar guarda antes el documento sucio y el Emulador enseña ese texto",
+      sucio.codigo === 0 && sucio.antes.layoutSucio === true &&
+      sucio.antes.layoutDisco === false && sucio.antes.segundoDisco === false &&
+      sucio.despues.sucios === 0 && sucio.despues.layoutDisco === true &&
+      sucio.despues.segundoDisco === true && sucio.despues.modelo === true,
+      JSON.stringify(sucio).slice(0, 360));
+    comprueba("la consola dice cuántos ficheros guardó antes de compilar",
+      sucio.aviso === true, "aviso " + sucio.aviso);
+
     // 12a-ter-bis. el registro del emulador y la consola de la app con el JSON del Contador: la
     // captura de `setText`, los `Log.d`/`println` que van a las dos partes, los avisos aparte, las
     // cuentas y el botón de pulsar. Se inyecta por `pintarVistaPrevia`, que es la misma entrada que
