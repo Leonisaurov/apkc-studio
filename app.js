@@ -81,11 +81,14 @@ public class MainActivity extends Activity {
     }
 `,
   // Plantilla «Contador»: el campo y el listener son el mismo patrón que se midió contra ART
-  // (campo privado, anónima que toca un campo del exterior y concatenación de cadenas).
+  // (campo privado, anónima que toca un campo del exterior y concatenación de cadenas). El clic
+  // escribe en la vista y también en la salida de la app (`Log.d` y `System.out.println`), que es
+  // lo que el emulador pinta en su panel de consola.
   activityContador: `package {{pkgname}};
 
 import android.app.*;
 import android.os.*;
+import android.util.Log;
 import android.view.*;
 import android.widget.*;
 
@@ -102,6 +105,8 @@ public class MainActivity extends Activity {
             public void onClick(View v) {
                 pulsos = pulsos + 1;
                 total.setText("Pulsos: " + pulsos);
+                Log.d("Contador", "pulso " + pulsos);
+                System.out.println("contador: pulso " + pulsos);
             }
         });
     }

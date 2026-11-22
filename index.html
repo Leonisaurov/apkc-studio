@@ -339,18 +339,38 @@
               <div id="previa-render" class="previa-render" role="tabpanel" aria-labelledby="previa-modo-render" hidden>
                 <div class="previa-marco previa-marco-lateral">
                   <canvas id="previa-lateral-canvas" class="previa-canvas previa-canvas-lateral" width="360" height="640"
-                          role="img" aria-label="Vista previa aproximada de la primera pantalla del apk"></canvas>
+                          tabindex="0" role="img" aria-label="Vista previa aproximada de la primera pantalla del apk; se puede pulsar sobre las vistas que tienen OnClickListener"
+                          aria-describedby="previa-render-estado"></canvas>
                 </div>
                 <p id="previa-render-estado" class="previa-estado" role="status" aria-live="polite">Compila el
                   proyecto para ver aquí la pantalla del apk.</p>
-                <section id="previa-log" class="previa-log" role="log" aria-label="Consola del intérprete">
+                <section id="previa-pulsos" class="previa-pulsos" aria-label="Controles del emulador">
                   <div class="previa-log-cab">
-                    <span class="previa-log-titulo">Consola de la ejecución</span>
+                    <span class="previa-log-titulo">Pulsar en la app</span>
+                    <span id="previa-pulsos-cuenta" class="nota">sin clics</span>
+                  </div>
+                  <div id="previa-oyentes" class="previa-oyentes"></div>
+                  <p id="previa-pulsos-nota" class="nota">Compila el proyecto para ver las vistas que
+                    responden a un clic. También puedes pulsar directamente sobre el dibujo.</p>
+                </section>
+                <section id="previa-log" class="previa-log" role="log" aria-label="Registro del emulador">
+                  <div class="previa-log-cab">
+                    <span class="previa-log-titulo">Registro del emulador</span>
                     <span id="previa-log-cabecera" class="nota">sin ejecución</span>
                   </div>
                   <ol id="previa-log-lista" class="previa-log-lista"></ol>
                   <p id="previa-log-vacio" class="nota">Compila el proyecto para ver las capturas y los avisos
                     del intérprete.</p>
+                </section>
+                <section id="previa-consola" class="previa-log previa-consola" role="log" aria-label="Consola de la app">
+                  <div class="previa-log-cab">
+                    <span class="previa-log-titulo">Consola de la app</span>
+                    <span id="previa-consola-cabecera" class="nota">sin salida</span>
+                  </div>
+                  <ol id="previa-consola-lista" class="previa-log-lista previa-consola-lista"></ol>
+                  <p id="previa-consola-vacio" class="nota">Aquí sale lo que la app imprime:
+                    <code>System.out.println</code> y <code>Log.*</code>. La consola de los comandos de
+                    compilación es la del panel inferior.</p>
                 </section>
               </div>
             </aside>

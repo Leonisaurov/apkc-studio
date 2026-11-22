@@ -1337,19 +1337,21 @@ async function conductor() {
       JSON.stringify({ lista: previaRota.logLista, vacio: previaRota.logVacio,
         texto: String(previaRota.logTexto).slice(0, 160) }));
 
-    // 12a-ter-bis. la consola del intérprete con el JSON del Contador: la captura de `setText` con
-    // `Pulsos: 1`, los `Log.d`/`println`, los avisos aparte y las cuentas. Se inyecta por
-    // `pintarVistaPrevia`, que es la misma entrada que usa un build correcto, así la prueba no
-    // depende de lo que capture el fuente de este proyecto.
+    // 12a-ter-bis. el registro del emulador y la consola de la app con el JSON del Contador: la
+    // captura de `setText`, los `Log.d`/`println` que van a las dos partes, los avisos aparte, las
+    // cuentas y el botón de pulsar. Se inyecta por `pintarVistaPrevia`, que es la misma entrada que
+    // usa un build correcto, así la prueba no depende de lo que capture el fuente de este proyecto.
     const logContador = await evaluar(`(async () => {
       const vp = await import("/vista-previa.js");
       const modelo = {
         paquete: "com.hola.contador", version: "0.1", actividad: ".MainActivity",
         layout: "res/layout/main.xml",
-        pantalla: { x: 0, y: 0, ancho: 360, alto: 640 }, aproximado: true, nodos: 2,
+        pantalla: { x: 0, y: 0, ancho: 360, alto: 640 }, aproximado: true, nodos: 3,
         raiz: { tipo: "LinearLayout", rect: { x: 0, y: 0, ancho: 360, alto: 640 }, hijos: [
           { tipo: "TextView", id: "id/total", texto: "Pulsos: 0", textoDinamico: "Pulsos: 1",
             rect: { x: 0, y: 0, ancho: 176, alto: 48 } },
+          { tipo: "Button", id: "id/pulsar", idRef: "0x7f010000", texto: "Pulsar", oyente: true,
+            rect: { x: 0, y: 48, ancho: 96, alto: 48 } },
         ] },
         ejecucion: { actividad: "com.hola.contador.MainActivity", metodo: "onCreate", pasos: 137,
           interacciones: 1,
@@ -1358,10 +1360,17 @@ async function conductor() {
             { origen: "Log.d", texto: "onClick" },
             { origen: "println", texto: "hola" },
           ],
+          consola: [
+            { origen: "Log.d", texto: "onClick", secuencia: 1 },
+            { origen: "println", texto: "hola", secuencia: 2 },
+          ],
+          oyentes: [{ id: "id/pulsar", idRef: "0x7f010000" }],
+          pulsaciones: ["id/pulsar"],
           avisos: ["stub sin resolver: android.widget.Toast"] },
       };
       vp.pintarVistaPrevia(modelo);
       const lista = document.getElementById("previa-log-lista");
+      const consola = document.getElementById("previa-consola-lista");
       const canvas = document.getElementById("previa-lateral-canvas");
       const ctx = canvas.getContext("2d");
       const pixeles = ctx.getImageData(0, 0, canvas.width, canvas.height).data;
@@ -1371,14 +1380,21 @@ async function conductor() {
         cabecera: document.getElementById("previa-log-cabecera").textContent,
         vacio: document.getElementById("previa-log-vacio").hidden,
         lineas: [...lista.children].map((li) => ({ clase: li.className, texto: li.textContent })),
+        consola: [...consola.children].map((li) => li.textContent),
+        consolaCabecera: document.getElementById("previa-consola-cabecera").textContent,
+        consolaVacio: document.getElementById("previa-consola-vacio").hidden,
+        botones: [...document.querySelectorAll("#previa-oyentes .previa-oyente")]
+          .map((b) => ({ texto: b.textContent, idref: b.dataset.idref })),
+        cuentaPulsos: document.getElementById("previa-pulsos-cuenta").textContent,
+        estatusConsolaCompilacion: document.getElementById("consola-pestana").textContent.slice(-120),
         colores: colores.size,
         render: document.getElementById("previa-render-estado").textContent,
       };
     })()`);
     const lineasLog = logContador.lineas || [];
-    comprueba("la consola de la ejecución pinta las capturas del Contador con su origen y su id",
+    comprueba("el registro del emulador pinta las capturas del Contador con su origen y su id",
       /onCreate/.test(String(logContador.cabecera)) && /137 pasos/.test(String(logContador.cabecera)) &&
-      /1 interacción/.test(String(logContador.cabecera)) &&
+      /1 clic/.test(String(logContador.cabecera)) &&
       lineasLog.length === 4 &&
       /TextView\.setText id\/total:.*Pulsos: 1/.test(String(lineasLog[0] && lineasLog[0].texto)) &&
       /Log\.d:.*onClick/.test(String(lineasLog[1] && lineasLog[1].texto)) &&
@@ -1388,6 +1404,19 @@ async function conductor() {
       /aviso/.test(String(lineasLog[3] && lineasLog[3].clase)) &&
       /Toast/.test(String(lineasLog[3] && lineasLog[3].texto)) && logContador.vacio === true,
       JSON.stringify({ clase: lineasLog[3] && lineasLog[3].clase, texto: lineasLog[3] && lineasLog[3].texto }));
+    comprueba("la consola de la app pinta la salida de Log y println, separada del registro",
+      (logContador.consola || []).length === 2 &&
+      /^1\s*Log\.d.*onClick$/.test(String(logContador.consola[0])) &&
+      /^2\s*println.*hola$/.test(String(logContador.consola[1])) &&
+      /2 líneas/.test(String(logContador.consolaCabecera)) && logContador.consolaVacio === true &&
+      !/hola/.test(String(lineasLog[3] && lineasLog[3].texto)),
+      JSON.stringify({ consola: logContador.consola, cabecera: logContador.consolaCabecera }).slice(0, 320));
+    comprueba("el emulador ofrece el botón de la vista que responde a un clic y cuenta los clics",
+      (logContador.botones || []).length === 1 &&
+      String(logContador.botones[0].texto) === "id/pulsar · Pulsar" &&
+      String(logContador.botones[0].idref) === "0x7f010000" &&
+      String(logContador.cuentaPulsos) === "1 clic",
+      JSON.stringify(logContador.botones) + " / " + logContador.cuentaPulsos);
     comprueba("el render del Contador pinta el texto dinámico y no solo la etiqueta",
       logContador.colores > 3 && /Render/.test(String(logContador.render)),
       JSON.stringify({ colores: logContador.colores, estado: logContador.render }).slice(0, 240));
@@ -1446,6 +1475,198 @@ async function conductor() {
       tinta.dinamico.tinta > 20 && tinta.sinDinamico.tinta === 0 &&
       tinta.dinamico.texto === "Pulsos: 1",
       JSON.stringify(tinta.dinamico) + " / " + JSON.stringify(tinta.sinDinamico));
+
+    // 12a-ter-septies. el clic del emulador medido con un puntero de verdad: se escribe el Contador
+    // de la plantilla (el `setText` vive en el `onClick`, más un `Log.d` y un `println`), se compila y
+    // se pulsa con `Input.dispatchMouseEvent` sobre el rectángulo del botón. La pantalla arranca en
+    // «Pulsos: 0» sin ninguna pulsación simulada, el primer clic la deja en «Pulsos: 1» y el segundo
+    // en «Pulsos: 2», porque la lista de clics se repite entera en cada `apkc preview --pulsar`.
+    const layoutClic = [
+      '<?xml version="1.0" encoding="utf-8"?>',
+      '<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"',
+      '    android:orientation="vertical"',
+      '    android:layout_width="match_parent"',
+      '    android:layout_height="match_parent"',
+      '    android:gravity="center">',
+      '    <TextView',
+      '        android:id="@+id/total"',
+      '        android:layout_width="wrap_content"',
+      '        android:layout_height="wrap_content"',
+      '        android:text="Pulsos: 0"/>',
+      '    <Button',
+      '        android:id="@+id/pulsar"',
+      '        android:layout_width="wrap_content"',
+      '        android:layout_height="wrap_content"',
+      '        android:text="Pulsar"/>',
+      '</LinearLayout>',
+      "",
+    ].join("\n");
+    const fuenteClic = [
+      "package com.myapp;",
+      "",
+      "import android.app.*;",
+      "import android.os.*;",
+      "import android.util.Log;",
+      "import android.view.*;",
+      "import android.widget.*;",
+      "",
+      "public class MainActivity extends Activity {",
+      "    int pulsos = 0;",
+      "    TextView total;",
+      "",
+      "    @Override",
+      "    public void onCreate(Bundle savedInstanceState) {",
+      "        super.onCreate(savedInstanceState);",
+      "        setContentView(R.layout.main);",
+      "        total = (TextView) findViewById(R.id.total);",
+      "        findViewById(R.id.pulsar).setOnClickListener(new View.OnClickListener() {",
+      "            public void onClick(View v) {",
+      "                pulsos = pulsos + 1;",
+      "                total.setText(\"Pulsos: \" + pulsos);",
+      "                Log.d(\"Contador\", \"pulso \" + pulsos);",
+      "                System.out.println(\"contador: pulso \" + pulsos);",
+      "            }",
+      "        });",
+      "    }",
+      "}",
+      "",
+    ].join("\n");
+    const emulador = await evaluar(`(async () => {
+      await hospedador.escribir("/proyecto/res/layout/main.xml", new TextEncoder().encode(${JSON.stringify(layoutClic)}));
+      await hospedador.escribir("/proyecto/src/com/myapp/MainActivity.java", new TextEncoder().encode(${JSON.stringify(fuenteClic)}));
+      await hospedador.limpiar("/proyecto/build");
+      document.getElementById("storepass-compilar").value = "android";
+      document.getElementById("previa-modo-render").click();
+      await compilarDelTodo();
+      const vp = await import("/vista-previa.js");
+      const modelo = vp.modeloActual();
+      const total = modelo && modelo.raiz ? (modelo.raiz.hijos || []).find((h) => h.id === "id/total") : null;
+      const canvas = document.getElementById("previa-lateral-canvas");
+      // el mismo espacio que usa el manejador del clic: el de la última pintura
+      const espacio = canvas.__espacio || { ancho: canvas.clientWidth, alto: canvas.clientHeight };
+      const ancho = espacio.ancho, alto = espacio.alto;
+      const caja = canvas.getBoundingClientRect();
+      const rect = modelo ? vp.rectsEscalados(modelo, ancho, alto).find((r) => r.id === "id/pulsar") : null;
+      // qué elemento hay de verdad en ese punto de la ventana: si no es el canvas, el clic sintético
+      // no llegará al manejador por mucho que la geometría sea correcta
+      let encima = null;
+      if (rect) {
+        const px = caja.left + (rect.x + rect.ancho / 2) * (caja.width / ancho);
+        const py = caja.top + (rect.y + rect.alto / 2) * (caja.height / alto);
+        const el = typeof document.elementFromPoint === "function" ? document.elementFromPoint(px, py) : null;
+        encima = el ? (el.id || String(el.className || el.tagName)) : null;
+      }
+      return {
+        modelo: !!modelo,
+        reposo: total ? (total.textoDinamico || "") : null,
+        textoDeclarado: total ? (total.texto || "") : null,
+        interacciones: modelo && modelo.ejecucion ? (modelo.ejecucion.interacciones || 0) : -1,
+        oyentes: modelo && modelo.ejecucion ? (modelo.ejecucion.oyentes || []).map((o) => o.id) : [],
+        rect: rect ? { x: rect.x, y: rect.y, ancho: rect.ancho, alto: rect.alto, oyente: rect.oyente } : null,
+        encima,
+        ancho, alto,
+        cliente: { ancho: canvas.clientWidth, alto: canvas.clientHeight },
+        caja: { left: caja.left, top: caja.top, width: caja.width, height: caja.height },
+        caja: { left: caja.left, top: caja.top, width: caja.width, height: caja.height },
+        registroEntradas: document.getElementById("previa-log-lista").children.length,
+        consolaEntradas: document.getElementById("previa-consola-lista").children.length,
+        botones: [...document.querySelectorAll("#previa-oyentes .previa-oyente")].map((b) => b.dataset.idref),
+        estado: document.getElementById("previa-render-estado").textContent,
+      };
+    })()`);
+    comprueba("el emulador arranca en el estado de onCreate, sin pulsar nada",
+      emulador.modelo === true && emulador.reposo === "" && emulador.textoDeclarado === "Pulsos: 0" &&
+      emulador.interacciones === 0 && (emulador.oyentes || []).includes("id/pulsar") &&
+      emulador.rect && emulador.rect.oyente === true && /Pulsa/i.test(String(emulador.estado)),
+      JSON.stringify({ reposo: emulador.reposo, interacciones: emulador.interacciones,
+        oyentes: emulador.oyentes, rect: emulador.rect }).slice(0, 320));
+    const puntoClic = (emulador.rect && emulador.caja && emulador.ancho > 0 && emulador.alto > 0)
+      ? {
+        x: emulador.caja.left + (emulador.rect.x + emulador.rect.ancho / 2) * (emulador.caja.width / emulador.ancho),
+        y: emulador.caja.top + (emulador.rect.y + emulador.rect.alto / 2) * (emulador.caja.height / emulador.alto),
+      } : null;
+    // un puntero de verdad sobre el canvas: el mismo evento que produce un dedo o un ratón
+    const pulsarCanvas = async (esperado) => {
+      // sonda: cuenta los `pointerdown` que llegan al canvas, para distinguir «el clic no llegó»
+      // de «llegó y el manejador no encontró vista que escuche»
+      await evaluar(`(() => {
+        const canvas = document.getElementById("previa-lateral-canvas");
+        if (!canvas) return -1;
+        canvas.__sonda = canvas.__sonda || 0;
+        if (!canvas.__conectada) {
+          canvas.__conectada = true;
+          canvas.addEventListener("pointerdown", () => { canvas.__sonda++; });
+        }
+        return canvas.__sonda;
+      })()`);
+      await exec("Input.dispatchMouseEvent",
+        { type: "mousePressed", x: puntoClic.x, y: puntoClic.y, button: "left", clickCount: 1 });
+      await exec("Input.dispatchMouseEvent",
+        { type: "mouseReleased", x: puntoClic.x, y: puntoClic.y, button: "left", clickCount: 1 });
+      return evaluar(`(async () => {
+        const vp = await import("/vista-previa.js");
+        const leer = () => {
+          const m = vp.modeloActual();
+          const t = m && m.raiz ? (m.raiz.hijos || []).find((h) => h.id === "id/total") : null;
+          return { texto: t ? (t.textoDinamico || "") : null, modelo: m };
+        };
+        let visto = leer();
+        for (let i = 0; i < 150 && visto.texto !== ${JSON.stringify(esperado)}; i++) {
+          await new Promise((ok) => setTimeout(ok, 100));
+          visto = leer();
+        }
+        const m = visto.modelo;
+        const canvas = document.getElementById("previa-lateral-canvas");
+        return {
+          texto: visto.texto,
+          sonda: canvas ? (canvas.__sonda || 0) : -1,
+          interacciones: m && m.ejecucion ? (m.ejecucion.interacciones || 0) : -1,
+          pulsaciones: m && m.ejecucion ? (m.ejecucion.pulsaciones || []) : [],
+          registro: [...document.getElementById("previa-log-lista").children].map((li) => li.textContent),
+          consola: [...document.getElementById("previa-consola-lista").children].map((li) => li.textContent),
+          consolaCabecera: document.getElementById("previa-consola-cabecera").textContent,
+          cuentaPulsos: document.getElementById("previa-pulsos-cuenta").textContent,
+          estado: document.getElementById("previa-render-estado").textContent,
+          consolaCompilacion: document.getElementById("consola-pestana").textContent.slice(-400),
+        };
+      })()`);
+    };
+    if (!puntoClic) {
+      comprueba("el canvas del render tiene un rectángulo pulsable para id/pulsar", false,
+        JSON.stringify({ rect: emulador.rect, ancho: emulador.ancho, alto: emulador.alto }));
+    } else {
+      comprueba("el punto del clic cae sobre el canvas del render y no sobre otra capa",
+        emulador.encima === "previa-lateral-canvas", String(emulador.encima));
+      const primerClic = await pulsarCanvas("Pulsos: 1");
+      comprueba("un clic real en el canvas sobre id/pulsar ejecuta su onClick: «Pulsos: 1»",
+        primerClic.sonda === 1 && primerClic.texto === "Pulsos: 1" && primerClic.interacciones === 1 &&
+        (primerClic.pulsaciones || []).length === 1 && /1 clic/.test(String(primerClic.cuentaPulsos)),
+        JSON.stringify({ texto: primerClic.texto, interacciones: primerClic.interacciones,
+          pulsaciones: primerClic.pulsaciones, cuenta: primerClic.cuentaPulsos, sonda: primerClic.sonda,
+          encima: emulador.encima, espacio: { ancho: emulador.ancho, alto: emulador.alto },
+          cliente: emulador.cliente, caja: emulador.caja, rect: emulador.rect,
+          estado: primerClic.estado }).slice(0, 600));
+      comprueba("el clic escribe en el registro del emulador: setText, Log.d y println",
+        (primerClic.registro || []).some((l) => /TextView\.setText id\/total:.*Pulsos: 1/.test(l)) &&
+        (primerClic.registro || []).some((l) => /Log\.d:.*pulso 1/.test(l)) &&
+        (primerClic.registro || []).some((l) => /println:.*contador: pulso 1/.test(l)),
+        JSON.stringify(primerClic.registro).slice(0, 400) + " | " + String(primerClic.estado).slice(0, 120));
+      comprueba("el clic imprime en la consola de la app, separada de la del build",
+        (primerClic.consola || []).length === 2 &&
+        /Log\.d/.test(String(primerClic.consola[0])) &&
+        /contador: pulso 1/.test(String(primerClic.consola[1])) &&
+        /2 líneas · 1 clic/.test(String(primerClic.consolaCabecera)) &&
+        !/Pulsos|pulso 1/.test(String(primerClic.consolaCompilacion)),
+        JSON.stringify({ consola: primerClic.consola, cabecera: primerClic.consolaCabecera,
+          build: String(primerClic.consolaCompilacion).slice(-80) }).slice(0, 400));
+      const segundoClic = await pulsarCanvas("Pulsos: 2");
+      comprueba("un segundo clic reproduce el estado con «Pulsos: 2» y dos líneas más de consola",
+        segundoClic.texto === "Pulsos: 2" && segundoClic.interacciones === 2 &&
+        (segundoClic.pulsaciones || []).length === 2 && (segundoClic.consola || []).length === 4 &&
+        /pulso 2/.test(String(segundoClic.consola[3])) && /2 clics/.test(String(segundoClic.cuentaPulsos)),
+        JSON.stringify({ texto: segundoClic.texto, interacciones: segundoClic.interacciones,
+          consola: segundoClic.consola, cuenta: segundoClic.cuentaPulsos }).slice(0, 400));
+    }
 
     // 12a-ter-sexies. el texto del intérprete es dato: un `<script>` en un `texto` sale escapado y
     // nunca se convierte en marcado. Y el fallo del preview limpia la consola, sin tocar la de apkc.
@@ -1619,13 +1840,19 @@ async function conductor() {
         alto: objetivo ? Math.round(objetivo.rect.alto) : 0,
         texto: objetivo ? objetivo.texto : "",
       };
-      // alternar no pierde el estado de ninguno de los dos
+      // alternar no pierde el estado de ninguno de los dos: el registro es el que era (con el
+      // Contador en reposo puede estar vacío, porque ya no se pulsa solo) y la consola también
+      const logAntes = document.getElementById("previa-log-lista").children.length;
+      const consolaAppAntes = document.getElementById("previa-consola-lista").children.length;
       document.getElementById("previa-modo-render").click();
       await new Promise((ok) => setTimeout(ok, 300));
       const enRender = {
         vivo: document.getElementById("previa-vivo").hidden,
         render: document.getElementById("previa-render").hidden,
         log: document.getElementById("previa-log-lista").children.length,
+        logAntes,
+        consolaAppAntes,
+        consola: document.getElementById("previa-consola-lista").children.length,
         seleccion: [document.getElementById("previa-modo-vivo").getAttribute("aria-selected"),
           document.getElementById("previa-modo-render").getAttribute("aria-selected")],
       };
@@ -1667,9 +1894,11 @@ async function conductor() {
     comprueba("el texto del layout se dibuja dentro de su nodo, no solo su etiqueta",
       vivo.tinta.conTexto > 20 && vivo.tinta.sinTexto === 0 && vivo.tinta.texto === "Adiós",
       JSON.stringify(vivo.tinta).slice(0, 240));
-    comprueba("alternar a Render (eventos) conserva el log y volver a En vivo conserva su dibujo",
+    comprueba("alternar a Render (eventos) conserva el registro y la consola, y volver a En vivo su dibujo",
       vivo.enRender.vivo === true && vivo.enRender.render === false &&
-      vivo.enRender.log >= 1 && vivo.enRender.seleccion.join(",") === "false,true" &&
+      vivo.enRender.log === vivo.enRender.logAntes &&
+      vivo.enRender.consola === vivo.enRender.consolaAppAntes &&
+      vivo.enRender.seleccion.join(",") === "false,true" &&
       vivo.deVuelta.textos.includes("Adiós") && vivo.deVuelta.firma === vivo.adios.firma &&
       vivo.restaurado === true,
       JSON.stringify({ enRender: vivo.enRender, deVuelta: vivo.deVuelta, restaurado: vivo.restaurado }).slice(0, 360));
