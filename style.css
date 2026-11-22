@@ -454,6 +454,193 @@ kbd {
 .previa-lado { flex: 1 1 240px; min-width: 220px; max-width: 52ch; }
 .previa-lado .nota { margin: 0 0 10px; }
 
+/* ---- vista dividida: editor + previa del teléfono ------------------------
+   La fila sustituye al editor suelto como hijo flexible de #pestana: el editor conserva su
+   scroll propio y el panel lateral administra el ancho con --previa-ancho, que fija el
+   separador. Ninguno de los dos toca el modelo del documento: aquí solo se ve. */
+.editor-fila {
+  flex: 1 1 auto;
+  display: flex;
+  min-height: 0;
+  min-width: 0;
+}
+.editor-fila > .editor { flex: 1 1 auto; min-width: 0; }
+.separador-previa {
+  flex: 0 0 5px;
+  position: relative;
+  background: var(--borde);
+  cursor: col-resize;
+  touch-action: none;
+}
+.separador-previa[hidden] { display: none; }
+.separador-previa::after {
+  content: "";
+  position: absolute;
+  top: 50%;
+  left: 1px;
+  right: 1px;
+  height: 30px;
+  border-radius: 2px;
+  transform: translateY(-50%);
+  background: var(--borde2);
+}
+.separador-previa:hover,
+.separador-previa.arrastrando { background: var(--acento); }
+.separador-previa:hover::after,
+.separador-previa.arrastrando::after { background: var(--blanco); }
+.separador-previa:focus-visible {
+  outline: 2px solid var(--foco);
+  outline-offset: -2px;
+}
+body.separando-previa { cursor: col-resize; user-select: none; }
+
+.previa-lateral {
+  flex: 0 0 var(--previa-ancho, 340px);
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  min-height: 0;
+  background: var(--superficie2);
+  border-left: 1px solid var(--borde2);
+}
+.previa-lateral[hidden] { display: none; }
+.previa-lateral-cab {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 6px 4px 8px;
+  border-bottom: 1px solid var(--borde2);
+}
+.previa-modos { display: flex; gap: 2px; min-width: 0; flex: 1 1 auto; }
+.previa-modo {
+  background: transparent;
+  border: 0;
+  border-radius: 4px;
+  padding: 4px 8px;
+  color: var(--texto-medio);
+  font: inherit;
+  font-size: 11px;
+  white-space: nowrap;
+  cursor: pointer;
+}
+.previa-modo:hover { background: var(--boton-hover); color: var(--blanco); }
+.previa-modo.activo {
+  background: var(--fondo);
+  color: var(--blanco);
+  box-shadow: inset 0 -2px 0 var(--acento);
+}
+.previa-modo:focus-visible { outline: 2px solid var(--foco); outline-offset: -2px; }
+.previa-xml,
+.previa-render {
+  flex: 1 1 auto;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  min-height: 0;
+  min-width: 0;
+  padding: 8px;
+}
+.previa-xml[hidden],
+.previa-render[hidden] { display: none; }
+.previa-estado {
+  margin: 0;
+  color: var(--texto-medio);
+  font-size: 11px;
+  line-height: 1.35;
+}
+.previa-xml-codigo {
+  flex: 1 1 auto;
+  min-height: 0;
+  margin: 0;
+  padding: 8px 10px;
+  overflow: auto;
+  background: var(--fondo);
+  border: 1px solid var(--borde);
+  border-radius: 4px;
+  color: var(--texto-editor);
+  font: var(--ed-fuente);
+  font-variant-ligatures: none;
+  white-space: pre;
+  tab-size: 4;
+}
+.previa-marco-lateral {
+  flex: 1 1 56%;
+  display: flex;
+  justify-content: center;
+  min-height: 0;
+  padding: 6px;
+}
+.previa-canvas-lateral {
+  width: 100%;
+  height: 100%;
+  min-height: 120px;
+  max-width: 360px;
+}
+.previa-log {
+  flex: 1 1 44%;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-height: 84px;
+  padding-top: 6px;
+  border-top: 1px solid var(--borde);
+}
+.previa-log-cab {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  min-width: 0;
+}
+.previa-log-titulo {
+  color: var(--texto-fuerte);
+  font-size: 11px;
+  font-weight: 600;
+  white-space: nowrap;
+}
+.previa-log-cab .nota {
+  margin: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.previa-log-cab .nota.con-error { color: var(--peligro); }
+.previa-log-lista {
+  flex: 1 1 auto;
+  min-height: 0;
+  margin: 0;
+  padding: 6px 8px;
+  overflow: auto;
+  list-style: none;
+  background: var(--fondo);
+  border: 1px solid var(--borde);
+  border-radius: 4px;
+  font: var(--ed-fuente);
+  font-size: 11px;
+  line-height: 1.45;
+}
+.previa-log-linea {
+  display: flex;
+  gap: 6px;
+  min-width: 0;
+  padding: 1px 0;
+  color: var(--texto-editor);
+}
+.previa-log-linea + .previa-log-linea { border-top: 1px dotted var(--borde); }
+.previa-log-origen {
+  flex: 0 0 auto;
+  color: var(--sintaxis-anotacion);
+  font-variant-ligatures: none;
+}
+.previa-log-texto {
+  min-width: 0;
+  overflow-wrap: anywhere;
+  white-space: pre-wrap;
+}
+.previa-log-linea.aviso .previa-log-origen,
+.previa-log-linea.aviso .previa-log-texto { color: var(--aviso); }
+.previa-log-linea.peligro .previa-log-origen,
+.previa-log-linea.peligro .previa-log-texto { color: var(--peligro); }
+
 /* ---- contenido de Inicio -------------------------------------------------- */
 
 h1, h2, h3 { margin: 0; font-weight: 600; }
@@ -1309,6 +1496,15 @@ pre {
   .vista:not(.vista-editor) { padding: 16px 16px 44px; }
   .editor-tab { max-width: 22ch; }
   .panel-inferior { height: 42vh; }
+  /* en táctil la vista previa pasa debajo del editor: sin separador que arrastrar */
+  .editor-fila { flex-direction: column; }
+  .separador-previa { display: none; }
+  .previa-lateral {
+    flex: 0 0 38vh;
+    border-left: 0;
+    border-top: 1px solid var(--borde2);
+  }
+  .previa-marco-lateral { flex: 0 1 46%; }
   .barra-titulo .titulo-derecha { display: none; }
   #estado-cursor { display: none; }
 }

@@ -63,6 +63,8 @@ dar el editor por probado, comprueba en la salida `pestaña: N comprobaciones` y
 | `proyecto.js` | zip de exportar/importar (STORE/DEFLATE, CRC y rutas seguras) y ajustes leídos/escritos en el manifiesto. |
 | `temas.js` | temas de interfaz y terminal; cambia `data-tema` y variables CSS. Se carga como módulo en el `<head>`. |
 | `vistas.js` | cambio de vista, reflejo nombre/package y creación del proyecto desde el formulario. |
+| `vista-previa.js` | modelo y pintura de `apkc preview`: funciones puras y canvas; publica `apkc:previa-actualizada`. |
+| `previa-panel.js` | la vista dividida del editor: separador, XML en vivo y consola del intérprete. Recibe `hospedador` y `EDITOR`; no importa `pestana.js`. |
 | `diagnostico.js` | panel de Inicio que pinta `analyze()`; solo DOM, sin reglas propias. |
 | `hospedador.js` | worker de módulo: `fs`/`path`/`process` para Go y una cola de un comando por vez. |
 | `fs-fragmento.js` | `fs` con forma de Node sobre OPFS (lo importa el worker, no la página). |
@@ -81,6 +83,10 @@ los imports y no debe depender de ese puente.
 
 ## Contratos que rompen pruebas
 
+- **La vista dividida no muta el modelo.** `previa-panel.js` divide el ancho con
+  `--previa-ancho`, lee el layout del buffer o de OPFS y pinta el modelo ya emitido; ningún
+  `pointerdown` del separador ni del panel escribe en OPFS, cambia `estadoPestana` ni reescribe
+  `#codigo`. El texto del intérprete se pinta con `textContent`: `<script>` sale escapado.
 - **Los ids son contrato.** `prueba.js` comprueba que todo `getElementById` de `vistas.js`,
   `pestana.js` y `diagnostico.js` exista en `index.html`; `prueba-crear.js`, `prueba-pestana.js`
   y `e2e.sh` buscan ids concretos. Cambiar uno exige cambiar su prueba.

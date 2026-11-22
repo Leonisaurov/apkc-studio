@@ -98,6 +98,109 @@ persona, así que no pisa `#ultimo-codigo` ni la consola, y si el comando falla 
 mensaje del panel sin tocar el resultado de la compilación. Un campo nuevo en el JSON (por
 ejemplo el texto dinámico de la Fase 2) no rompe nada: se ignoran las claves que no se usan.
 
+El pintor no esconde el texto de un nodo bajo: la etiqueta de tipo solo entra si el nodo pasa de
+30 px y, si no, el texto se pinta con la fuente encogida al hueco (8-12 px) y recortado al
+rectángulo. Antes había un `alto >= 28` que dejaba sin pintar el «Hello World!» del apk Hola y el
+«Pulsos: 1» del Contador, que llegan con 18 px a la escala 0,75. `prueba-pestana.js` cuenta tinta
+dentro del nodo con texto y sin él, no solo la etiqueta.
+
+## Vista dividida: editor y teléfono
+
+La pestaña **Editor** se puede partir en dos: a la izquierda el editor de siempre y a la derecha
+un marco de teléfono con dos lecturas del mismo proyecto. Vive dentro de `#pestana`, no en la
+pestaña **Vista**, porque la utilidad es editar y ver a la vez; **Vista** sigue siendo el canvas a
+pantalla completa. El editor no cambia: mismo textarea, mismo undo tree, misma búsqueda, mismo
+diagnóstico en vivo y misma paleta. La fila es `.editor-fila`, con tres hijos:
+
+```html
+<div id="editor-fila" class="editor-fila">
+  <div class="editor">…</div>
+  <div id="separador-previa" role="separator" aria-orientation="vertical" tabindex="0" …></div>
+  <aside id="previa-lateral">
+    … #previa-modo-xml | #previa-modo-render …
+    <div id="previa-xml">…#previa-xml-codigo</div>
+    <div id="previa-render">…#previa-lateral-canvas … #previa-log</div>
+  </aside>
+</div>
+```
+
+| Id | Qué es |
+| --- | --- |
+| `#editor-fila` | la fila que reparte el ancho; guarda `--previa-ancho` |
+| `#separador-previa` | el separador: `role="separator"`, `aria-orientation="vertical"`, `tabindex="0"`, `aria-valuenow/min/max` y `aria-controls="previa-lateral"` |
+| `#previa-lateral` | el panel; `hidden` cuando se oculta |
+| `#previa-alternar` | el botón **Previa** de la barra del fichero; `aria-expanded` |
+| `#previa-cerrar` | la × de la cabecera del panel |
+| `#previa-modo-xml`, `#previa-modo-render` | las dos pestañas (`role="tab"`, `aria-selected`) |
+| `#previa-xml`, `#previa-render` | los paneles (`role="tabpanel"`) |
+| `#previa-xml-estado`, `#previa-xml-codigo` | ruta, líneas y aviso; el XML resaltado de solo lectura |
+| `#previa-lateral-canvas`, `#previa-render-estado` | el canvas del modelo y su línea de estado |
+| `#previa-log`, `#previa-log-cabecera`, `#previa-log-lista`, `#previa-log-vacio` | la consola del intérprete (`role="log"`) |
+
+`previa-panel.js` es dueño de esta pieza y no importa `pestana.js`: recibe `hospedador`, la carpeta
+del proyecto, `estadoPestana` y `EDITOR` desde `pestana.js` (`crearPreviaPanel`). Así el editor no
+gana una copia del estado y la prueba de node puede importar las funciones puras.
+
+### El separador
+
+- **Puntero**: `pointerdown` en el separador; el `pointermove` y el `pointerup` se siguen en el
+  documento para que soltar fuera no deje el arrastre pegado. Solo cambia `--previa-ancho` y
+  `body.separando-previa`: **no toca el modelo, el fichero ni el canvas**.
+- **Teclado**: `←`/`→` mueven 16 px (48 con `Shift`), `Home` deja el mínimo y `End` el máximo.
+  `aria-valuenow` se actualiza en cada paso.
+- **Rango**: 240-900 px, y el editor nunca baja de 280 px. Si la vista Editor está oculta la fila
+  mide cero, así que el recorte real se rehace con el `ResizeObserver` al mostrarla.
+- **Persistencia**: `apkc-studio/previa-ancho` (lo elegido), `apkc-studio/previa-visible`
+  (`1`/`0`) y `apkc-studio/previa-modo` (`xml`/`render`) en `localStorage`. Una preferencia
+  corrupta cae a 340 px, visible y en XML.
+- **Pantallas estrechas** (≤760 px): el separador se oculta y el panel pasa debajo del editor con
+  el 38 % del alto; no hay arrastre en táctil.
+
+### XML en vivo
+
+Muestra el `res/layout/*.xml` del proyecto, con el resaltado de `editor.js` (`esXml()` +
+`resaltar()`), en un `<pre>` de solo lectura: **no es un editor del XML**. La ruta se resuelve en
+este orden y se queda con la primera que se puede leer:
+
+1. el fichero abierto, si es un `res/layout*/*.xml`;
+2. el `layout` del modelo de `apkc preview` (acepta `main` o `res/layout/main.xml`);
+3. los layouts del árbol del proyecto, con `main.xml` primero.
+
+El contenido sale del **buffer del editor** cuando el layout mostrado es el documento activo —así
+se ve lo que se escribe aunque no se haya guardado, y el estado lo dice con `· sin guardar`— y de
+**OPFS** cuando está cerrado (con `hospedador.texto`). Se refresca con debounce de **350 ms** al
+teclear, 160 ms al cambiar de documento y 400 ms cuando el árbol se repinta (crear, subir, borrar).
+Nunca lanza un comando de apkc: `#ultimo-codigo` no cambia. Sin ningún layout el panel lo dice; si
+la lectura falla, el motivo va en `#previa-xml-estado`.
+
+### Render y consola de la ejecución
+
+La pestaña **Render (eventos)** pinta el mismo modelo que la pestaña Vista en `#previa-lateral-canvas`
+(con `pintarModelo`) y debajo lleva la consola de lo que hizo la app. El modelo llega por
+`apkc preview`; `vista-previa.js` publica el evento `apkc:previa-actualizada` con el modelo o con
+el motivo de no tenerlo, y el panel repinta sin volver a ejecutar nada.
+
+`resumenEjecucion(modelo)` (puro) acota `ejecucion` antes de pintarlo: `capturas` (máximo 64,
+`origen`, `id`, `texto`), `avisos` (máximo 24), `pasos`, `interacciones`, `actividad`, `metodo` y
+`error`. Solo acepta cadenas donde el JSON promete cadenas y números finitos donde promete
+números. La lista va en el orden del JSON: primero las capturas (`TextView.setText id/total:
+Pulsos: 1`, `Log.d: …`, `println: …`) y después los avisos, con la clase `aviso` para
+distinguirlos; el `error`, si lo hay, va al final con la clase `peligro` y la cabecera lo marca.
+La cabecera resume `onCreate · actividad · N pasos · M interacciones`.
+
+Todo se pinta con `textContent`: un `texto` con `<script>` sale escapado y no se convierte en
+marcado. Sin `ejecucion` (por ejemplo con `--sin-ejecutar` o sin `classes.dex`) el vacío explica
+por qué; si el preview falla, la consola se vacía con el mismo motivo y no toca `#consola-pestana`
+ni `#ultimo-codigo`. Al recargar la página arranca vacía.
+
+### Congeniar con compilar
+
+Compilar no cambia de pestaña: `previsualizarLoCompilado()` pinta el modelo y publica el evento; en
+modo Render el canvas se repinta en su caja y la consola se llena, en modo XML se relee el layout.
+El editor no pierde foco, cursor ni scroll porque nadie escribe en `#codigo`. La compilación corre
+en el worker como siempre y el editor sigue aceptando teclas mientras dura; el fallo del preview
+se queda en el panel (`#previa-render-estado`, `#previa-log-vacio`).
+
 ## Diagnóstico
 
 El bloque `#detalle-diagnostico` de Inicio es independiente del editor: un `<textarea
@@ -530,10 +633,10 @@ En `@media (max-width: 760px)`:
 | Comando | Que cubre |
 | --- | --- |
 | `node studio/prueba.js` | genera el zip, comprueba EOCD, plantillas, reglas, ids de `index.html` (también los de `diagnostico.js`, `temas.js` e `historial.js`), el resaltador puro y el undo tree (ramas, reconstrucción y poda) |
-| `node studio/prueba-navegador.js` | `http` sin COOP/COEP: DOM, tres vistas, tres botones de actividad, reflejo del nombre/package, aviso de que no hay OPFS, localStorage, el diagnóstico, los temas y la paleta ANSI |
+| `node studio/prueba-navegador.js` | `http` sin COOP/COEP: DOM, tres vistas, tres botones de actividad, reflejo del nombre/package, aviso de que no hay OPFS, localStorage, el diagnóstico, los temas y la paleta ANSI, y el contrato de la vista dividida (separador con teclado, alternancia XML/Render y consola vacía con su motivo) |
 | `APKC_WASM=... node studio/prueba-crear.js` | por http con OPFS: crear, escribir el proyecto, abrir el manifiesto, comprobar `data-ruta` del arbol, el icono, API 34, el árbol cerrado con sus botones, que `build/` se vea como generado y que el filtro conserve las carpetas, subir un archivo, moverlo de carpeta, exportar/importar el `.zip` (con binario), leer y guardar los ajustes en el manifiesto, varias pestañas, la persistencia tras recargar, el undo tree con ramas/IndexedDB, dos ventanas que se pasan guardados por BroadcastChannel y la fusión/conflicto de la misma línea |
-| `APKC_WASM=... APK_EJEMPLO=... KS_EJEMPLO=... ANDROID_JAR=... node studio/prueba-pestana.js` | 94 comprobaciones: editar, guardar, recargar, resaltar, números de línea, scroll de las tres capas, Tab/Shift+Tab/Enter con deshacer, jar del SDK local, `.zip` oficial con sus términos, compilar debug sin keystore, barra de descargas con descarga real, consola con colores ANSI, menú de fichero, renombrar/borrar, pantalla de carga, firmar, compilar release, verificar, recargar sin red, no pedir nada fuera del origen, la salida por trozos, el enlace `ruta:línea`, Detener y la fase en la barra |
-| `APKC=... APKC_WASM=... sh studio/e2e.sh` | todo lo anterior más los apk/aab nativos y la plantilla Contador; en la pestaña, 94 comprobaciones |
+| `APKC_WASM=... APK_EJEMPLO=... KS_EJEMPLO=... ANDROID_JAR=... node studio/prueba-pestana.js` | la pestaña completa: editar, guardar, recargar, resaltar, números de línea, scroll de las tres capas, Tab/Shift+Tab/Enter con deshacer, jar del SDK local, `.zip` oficial con sus términos, compilar debug sin keystore, barra de descargas con descarga real, consola con colores ANSI, menú de fichero, renombrar/borrar, pantalla de carga, firmar, compilar release, verificar, recargar sin red, no pedir nada fuera del origen, la salida por trozos, el enlace `ruta:línea`, Detener, la fase en la barra, y la vista dividida: separador por puntero y teclado, compilar→pintar sin mover el cursor, XML en vivo con su debounce y su fallback, alternancia XML/Render con estado, y la consola de la ejecución con el JSON del Contador, el `<script>` escapado y el límite de 64/24 |
+| `APKC=... APKC_WASM=... sh studio/e2e.sh` | todo lo anterior más los apk/aab nativos y la plantilla Contador; en la pestaña, 123 comprobaciones |
 
 El gate completo de la pagina es `e2e.sh`; `prueba-pestana.js` solo no basta para decir que la
 pagina funciona. Los comandos de entorno estan en `tools/entorno.sh` (`test`, `wasm`, `gate`).
@@ -549,7 +652,14 @@ estan en `studio/README.md` y en `docs/evidencia.md` §140. En resumen: se copia
 
 ## Limites conocidos
 
-- **Sin dividir el editor.** Hay varias pestañas, pero no dos grupos ni ventanas.
+- **La vista dividida es de una sola pareja.** El editor y el teléfono comparten fila; no hay dos
+  grupos de pestañas ni ventanas. En pantallas de 760 px o menos el panel pasa debajo y no se
+  redimensiona con el dedo.
+- **El XML en vivo no se edita ni se pliega.** Es un `<pre>` resaltado de solo lectura; el XML se
+  cambia en el editor de siempre. Tampoco sigue el cursor del editor: muestra el fichero entero.
+- **El render es el modelo de `apkc preview`, no la app ejecutándose.** La consola muestra lo que
+  el intérprete capturó en `onCreate` y en los clics registrados; no es un `logcat` ni hay hilos,
+  JNI ni excepciones fuera del subconjunto que el intérprete resuelve.
 - **Sin buscar ni reemplazar.** `Ctrl+F` es el del navegador, no el del editor.
 - **Sin cortar y pegar ni arrastrar en táctil.** Con ratón o lápiz hay arrastrar y soltar entre
   carpetas; en táctil, el menú de la fila ofrece **Mover a…**. Tampoco hay arrastrar y soltar para

@@ -78,6 +78,7 @@ const navegador = spawn(CHROME, [
   "--headless=new", "--no-sandbox", "--disable-setuid-sandbox", "--disable-gpu",
   "--disable-dev-shm-usage", "--remote-allow-origins=*",
   "--no-first-run", "--disable-extensions", "--disable-sync",
+  "--window-size=1440,900",
   "--user-data-dir=" + PERFIL, "--remote-debugging-port=" + CDP, URL_PAGINA,
 ], { stdio: ["ignore", "pipe", "pipe"] });
 let salidaNavegador = "";
@@ -1202,16 +1203,42 @@ async function conductor() {
         new TextEncoder().encode(${JSON.stringify(fuenteContador)}));
       await hospedador.limpiar("/proyecto/build");
       document.getElementById("storepass-compilar").value = "android";
+      // la vista dividida, en modo Render, y el cursor del editor en una posición conocida: compilar
+      // no puede cambiar ni una cosa ni la otra
+      document.getElementById("previa-modo-render").click();
+      const area = document.getElementById("codigo");
+      area.focus();
+      area.setSelectionRange(12, 12);
+      const rutaAntes = estadoPestana.ruta;
       await compilarDelTodo();
       const r = await correr(["verify", "build/app.apk"]);
       const texto = String(r.consola || "").replace(/\\u001b\\[[0-9]*m/g, "");
       const datos = await hospedador.bytes("/proyecto/build/app.apk");
+      const lateral = document.getElementById("previa-lateral-canvas");
+      const ctxLateral = lateral.getContext("2d");
+      const pixeles = ctxLateral.getImageData(0, 0, lateral.width, lateral.height).data;
+      const colores = new Set();
+      for (let i = 0; i < pixeles.length; i += 4) colores.add(pixeles[i] + "," + pixeles[i + 1] + "," + pixeles[i + 2] + "," + pixeles[i + 3]);
+      const vacio = document.getElementById("previa-log-vacio");
       return {
         codigo: document.getElementById("ultimo-codigo").textContent,
         bytes: datos ? Array.from(datos) : null,
         v1: texto.includes("v1 (JAR signing): ok"), v2: texto.includes("v2 (APK Signature Scheme v2): ok"),
         detalle: texto.split("\\n").filter(Boolean).slice(0, 2).join(" | "),
         consola: String(r.consola || "").slice(-260),
+        vista: document.body.dataset.vista,
+        rutaAntes, rutaTras: estadoPestana.ruta,
+        seleccion: [area.selectionStart, area.selectionEnd],
+        lateralColores: colores.size,
+        lateralAncho: lateral.width,
+        lateralAlto: lateral.height,
+        lateralVisible: lateral.clientWidth,
+        renderEstado: document.getElementById("previa-render-estado").textContent,
+        logCabecera: document.getElementById("previa-log-cabecera").textContent,
+        logEntradas: document.getElementById("previa-log-lista").children.length,
+        logTexto: document.getElementById("previa-log-lista").textContent,
+        logVacio: vacio.hidden ? "" : vacio.textContent,
+        consolaLimpia: !/Pulsos|Hello World|TextView\\.setText/.test(document.getElementById("consola-pestana").textContent),
       };
     })()`);
     const apkContador = Buffer.from(contador.bytes || [], "uint8");
@@ -1220,6 +1247,23 @@ async function conductor() {
     comprueba("y su apk verifica con la anonima, el if y la concatenación dentro",
       contador.v1 === true && contador.v2 === true,
       JSON.stringify(String(contador.detalle).slice(-180)));
+    // la vista dividida ya está delante mientras compila: la pantalla se repinta sola, el cursor
+    // del editor no se mueve y el modelo no se cuela en la consola de compilación
+    comprueba("compilar con la vista dividida repinta el teléfono sin cambiar de pestaña ni mover el cursor",
+      contador.vista === "pestana" && contador.lateralVisible > 0 &&
+      contador.lateralColores > 3 && contador.lateralAncho > 0 &&
+      contador.rutaAntes === contador.rutaTras &&
+      contador.seleccion[0] === 12 && contador.seleccion[1] === 12 &&
+      /Render/.test(String(contador.renderEstado)),
+      JSON.stringify({ vista: contador.vista, visible: contador.lateralVisible,
+        colores: contador.lateralColores, ancho: contador.lateralAncho,
+        seleccion: contador.seleccion, estado: contador.renderEstado }).slice(0, 320));
+    comprueba("la consola de la ejecución se llena al compilar y no toca la consola de apkc",
+      /pasos?/.test(String(contador.logCabecera)) &&
+      (contador.logEntradas > 0) !== (String(contador.logVacio).length > 0) &&
+      contador.consolaLimpia === true,
+      JSON.stringify({ cabecera: contador.logCabecera, entradas: contador.logEntradas,
+        vacio: String(contador.logVacio).slice(0, 120), limpia: contador.consolaLimpia }).slice(0, 320));
 
     // 12a-bis. la vista previa que se pintó al compilar: al entrar en la vista se repinta dentro
     // de la caja visible, con un color de fondo, el marco y cada rectángulo. El canvas es de solo
@@ -1275,6 +1319,9 @@ async function conductor() {
         estado: document.getElementById("vista-previa-estado").textContent,
         devuelto: r === null,
         bytes: sano ? sano.length : 0,
+        logLista: document.getElementById("previa-log-lista").children.length,
+        logVacio: !document.getElementById("previa-log-vacio").hidden,
+        logTexto: document.getElementById("previa-log-vacio").textContent,
       };
       await hospedador.escribir("/proyecto/build/app.apk", sano);
       return roto;
@@ -1284,6 +1331,316 @@ async function conductor() {
       previaRota.codigo === previaRota.antesCodigo && previaRota.consolaIgual === true &&
       /no devolvió un modelo legible|no hay build/i.test(String(previaRota.estado)),
       JSON.stringify(previaRota).slice(0, 320));
+    comprueba("un preview fallido deja la consola de la ejecución vacía y con su motivo",
+      previaRota.logLista === 0 && previaRota.logVacio === true &&
+      /no devolvió un modelo legible|no hay build/i.test(String(previaRota.logTexto)),
+      JSON.stringify({ lista: previaRota.logLista, vacio: previaRota.logVacio,
+        texto: String(previaRota.logTexto).slice(0, 160) }));
+
+    // 12a-ter-bis. la consola del intérprete con el JSON del Contador: la captura de `setText` con
+    // `Pulsos: 1`, los `Log.d`/`println`, los avisos aparte y las cuentas. Se inyecta por
+    // `pintarVistaPrevia`, que es la misma entrada que usa un build correcto, así la prueba no
+    // depende de lo que capture el fuente de este proyecto.
+    const logContador = await evaluar(`(async () => {
+      const vp = await import("/vista-previa.js");
+      const modelo = {
+        paquete: "com.hola.contador", version: "0.1", actividad: ".MainActivity",
+        layout: "res/layout/main.xml",
+        pantalla: { x: 0, y: 0, ancho: 360, alto: 640 }, aproximado: true, nodos: 2,
+        raiz: { tipo: "LinearLayout", rect: { x: 0, y: 0, ancho: 360, alto: 640 }, hijos: [
+          { tipo: "TextView", id: "id/total", texto: "Pulsos: 0", textoDinamico: "Pulsos: 1",
+            rect: { x: 0, y: 0, ancho: 176, alto: 48 } },
+        ] },
+        ejecucion: { actividad: "com.hola.contador.MainActivity", metodo: "onCreate", pasos: 137,
+          interacciones: 1,
+          capturas: [
+            { origen: "TextView.setText", id: "id/total", idRef: "0x7f010001", texto: "Pulsos: 1" },
+            { origen: "Log.d", texto: "onClick" },
+            { origen: "println", texto: "hola" },
+          ],
+          avisos: ["stub sin resolver: android.widget.Toast"] },
+      };
+      vp.pintarVistaPrevia(modelo);
+      const lista = document.getElementById("previa-log-lista");
+      const canvas = document.getElementById("previa-lateral-canvas");
+      const ctx = canvas.getContext("2d");
+      const pixeles = ctx.getImageData(0, 0, canvas.width, canvas.height).data;
+      const colores = new Set();
+      for (let i = 0; i < pixeles.length; i += 4) colores.add(pixeles[i] + "," + pixeles[i + 1] + "," + pixeles[i + 2] + "," + pixeles[i + 3]);
+      return {
+        cabecera: document.getElementById("previa-log-cabecera").textContent,
+        vacio: document.getElementById("previa-log-vacio").hidden,
+        lineas: [...lista.children].map((li) => ({ clase: li.className, texto: li.textContent })),
+        colores: colores.size,
+        render: document.getElementById("previa-render-estado").textContent,
+      };
+    })()`);
+    const lineasLog = logContador.lineas || [];
+    comprueba("la consola de la ejecución pinta las capturas del Contador con su origen y su id",
+      /onCreate/.test(String(logContador.cabecera)) && /137 pasos/.test(String(logContador.cabecera)) &&
+      /1 interacción/.test(String(logContador.cabecera)) &&
+      lineasLog.length === 4 &&
+      /TextView\.setText id\/total:.*Pulsos: 1/.test(String(lineasLog[0] && lineasLog[0].texto)) &&
+      /Log\.d:.*onClick/.test(String(lineasLog[1] && lineasLog[1].texto)) &&
+      /println:.*hola/.test(String(lineasLog[2] && lineasLog[2].texto)),
+      JSON.stringify({ cabecera: logContador.cabecera, lineas: lineasLog }).slice(0, 400));
+    comprueba("los avisos del intérprete van aparte y el vacío no tapa la lista",
+      /aviso/.test(String(lineasLog[3] && lineasLog[3].clase)) &&
+      /Toast/.test(String(lineasLog[3] && lineasLog[3].texto)) && logContador.vacio === true,
+      JSON.stringify({ clase: lineasLog[3] && lineasLog[3].clase, texto: lineasLog[3] && lineasLog[3].texto }));
+    comprueba("el render del Contador pinta el texto dinámico y no solo la etiqueta",
+      logContador.colores > 3 && /Render/.test(String(logContador.render)),
+      JSON.stringify({ colores: logContador.colores, estado: logContador.render }).slice(0, 240));
+
+    // 12a-ter-ies. el texto de un nodo bajo (24 px de layout, 18 px pintados) no se puede suprimir:
+    // se cuenta tinta dentro del nodo con el texto y sin él. Antes el guard `alto >= 28` dejaba el
+    // «Hello World!» del apk Hola y el «Pulsos: 1» del Contador sin pintar.
+    const tinta = await evaluar(`(async () => {
+      const vp = await import("/vista-previa.js");
+      const conNodo = (nodo) => ({ layout: "res/layout/main.xml",
+        pantalla: { ancho: 360, alto: 640 }, aproximado: true,
+        raiz: { tipo: "LinearLayout", rect: { x: 0, y: 0, ancho: 360, alto: 640 }, hijos: [nodo] } });
+      const medir = (modelo, texto) => {
+        const canvas = document.createElement("canvas");
+        vp.pintarModelo(canvas, modelo, { ancho: 270, alto: 480 });
+        const ctx = canvas.getContext("2d");
+        const dpr = canvas.width / 270;
+        const nodo = vp.rectsEscalados(modelo, 270, 480)[1];
+        // se recorta el borde del nodo: lo que se cuenta es tinta de texto, no el trazo de 1 px
+        const margen = 2 * dpr;
+        const x = Math.max(0, Math.round(nodo.x * dpr + margen));
+        const y = Math.max(0, Math.round(nodo.y * dpr + margen));
+        const ancho = Math.max(1, Math.round(nodo.ancho * dpr - 2 * margen));
+        const alto = Math.max(1, Math.round(nodo.alto * dpr - 2 * margen));
+        const datos = ctx.getImageData(x, y, ancho, alto).data;
+        const cuenta = new Map();
+        for (let i = 0; i < datos.length; i += 4) {
+          const clave = datos[i] + "," + datos[i + 1] + "," + datos[i + 2];
+          cuenta.set(clave, (cuenta.get(clave) || 0) + 1);
+        }
+        let fondo = [0, 0, 0], maximo = -1;
+        for (const [clave, n] of cuenta) {
+          if (n > maximo) { maximo = n; fondo = clave.split(",").map(Number); }
+        }
+        let tinta = 0;
+        for (let i = 0; i < datos.length; i += 4) {
+          const d = Math.abs(datos[i] - fondo[0]) + Math.abs(datos[i + 1] - fondo[1]) + Math.abs(datos[i + 2] - fondo[2]);
+          if (d > 40) tinta++;
+        }
+        return { tinta, alto: Math.round(nodo.alto), ancho: Math.round(nodo.ancho), texto: nodo.texto };
+      };
+      const hola = { tipo: "TextView", texto: "Hello World!", rect: { x: 0, y: 0, ancho: 112, alto: 24 } };
+      const contador = { tipo: "TextView", id: "id/total", texto: "Pulsos: 0", textoDinamico: "Pulsos: 1",
+        rect: { x: 0, y: 0, ancho: 88, alto: 24 } };
+      const conTexto = medir(conNodo(hola));
+      const sinTexto = medir(conNodo({ ...hola, texto: "" }));
+      const dinamico = medir(conNodo(contador));
+      const sinDinamico = medir(conNodo({ ...contador, texto: "", textoDinamico: "" }));
+      return { conTexto, sinTexto, dinamico, sinDinamico };
+    })()`);
+    comprueba("un nodo de 18 px pinta el texto: hay tinta con «Hello World!» y ninguna sin él",
+      tinta.conTexto.alto <= 20 && tinta.conTexto.tinta > 20 && tinta.sinTexto.tinta === 0 &&
+      tinta.conTexto.texto === "Hello World!",
+      JSON.stringify(tinta.conTexto) + " / " + JSON.stringify(tinta.sinTexto));
+    comprueba("y el texto dinámico del Contador también se pinta en el nodo bajo",
+      tinta.dinamico.tinta > 20 && tinta.sinDinamico.tinta === 0 &&
+      tinta.dinamico.texto === "Pulsos: 1",
+      JSON.stringify(tinta.dinamico) + " / " + JSON.stringify(tinta.sinDinamico));
+
+    // 12a-ter-sexies. el texto del intérprete es dato: un `<script>` en un `texto` sale escapado y
+    // nunca se convierte en marcado. Y el fallo del preview limpia la consola, sin tocar la de apkc.
+    const escapado = await evaluar(`(async () => {
+      const vp = await import("/vista-previa.js");
+      vp.pintarVistaPrevia({ layout: "res/layout/main.xml", pantalla: { ancho: 100, alto: 100 },
+        raiz: { tipo: "LinearLayout", rect: { x: 0, y: 0, ancho: 100, alto: 100 } },
+        ejecucion: { metodo: "onCreate", pasos: 3,
+          capturas: [
+            { origen: "Log.d", texto: "<script>alert(1)</script>" },
+            { origen: "TextView.setText id/total", texto: "<img src=x onerror=alert(2)>" },
+          ],
+          avisos: ["<b>aviso con marcado</b>"] } });
+      const lista = document.getElementById("previa-log-lista");
+      const r = {
+        scripts: lista.querySelectorAll("script").length,
+        imgs: lista.querySelectorAll("img").length,
+        negritas: lista.querySelectorAll("b").length,
+        html: lista.innerHTML,
+        texto: lista.textContent,
+        consola: document.getElementById("consola-pestana").textContent,
+      };
+      const antesCodigo = document.getElementById("ultimo-codigo").textContent;
+      vp.mensajeVistaPrevia("no hay nada que previsualizar");
+      r.trasMensaje = { lista: lista.children.length,
+        vacio: !document.getElementById("previa-log-vacio").hidden,
+        texto: document.getElementById("previa-log-vacio").textContent,
+        cabecera: document.getElementById("previa-log-cabecera").textContent,
+        ultimo: document.getElementById("ultimo-codigo").textContent === antesCodigo };
+      const restaurado = await previsualizarLoCompilado();
+      r.restaurado = restaurado !== null;
+      r.trasRestaurar = { lista: lista.children.length,
+        cabecera: document.getElementById("previa-log-cabecera").textContent };
+      return r;
+    })()`);
+    comprueba("un texto con <script> del intérprete se pinta escapado",
+      escapado.scripts === 0 && escapado.imgs === 0 && escapado.negritas === 0 &&
+      /&lt;script&gt;alert\(1\)&lt;\/script&gt;/.test(String(escapado.html)) &&
+      /<script>alert\(1\)<\/script>/.test(String(escapado.texto)) &&
+      /&lt;img src=x onerror=alert\(2\)&gt;/.test(String(escapado.html)),
+      JSON.stringify({ scripts: escapado.scripts, imgs: escapado.imgs, negritas: escapado.negritas,
+        html: String(escapado.html).slice(0, 240) }).slice(0, 400));
+    comprueba("el mensaje de fallo limpia la consola de la ejecución y no toca consola ni último código",
+      escapado.trasMensaje.lista === 0 && escapado.trasMensaje.vacio === true &&
+      /no hay nada que previsualizar/.test(String(escapado.trasMensaje.texto)) &&
+      escapado.trasMensaje.cabecera === "sin ejecución" && escapado.trasMensaje.ultimo === true &&
+      escapado.restaurado === true,
+      JSON.stringify(escapado.trasMensaje).slice(0, 300));
+
+    // 12a-septies. el XML en vivo: el layout tal como se escribe, con resaltado y sin compilar. Se
+    // lee del buffer del editor cuando es el documento abierto y de OPFS cuando está cerrado.
+    const xmlVivo = await evaluar(`(async () => {
+      marcarSucio(false);
+      await abrir("/proyecto/res/layout/main.xml");
+      document.getElementById("previa-modo-xml").click();
+      await new Promise((ok) => setTimeout(ok, 500));
+      const pre = document.getElementById("previa-xml-codigo");
+      const estado = document.getElementById("previa-xml-estado");
+      const antes = {
+        lineas: pre.textContent.split("\\n").length,
+        etiquetas: pre.querySelectorAll(".etiqueta").length,
+        atributos: pre.querySelectorAll(".atributo").length,
+        estado: estado.textContent,
+        codigo: document.getElementById("ultimo-codigo").textContent,
+      };
+      const area = document.getElementById("codigo");
+      area.value = area.value.replace("<LinearLayout", '<LinearLayout marca="en-vivo"');
+      area.dispatchEvent(new Event("input", { bubbles: true }));
+      await new Promise((ok) => setTimeout(ok, 700));
+      const despues = {
+        marca: /marca="en-vivo"/.test(pre.textContent),
+        linear: /LinearLayout/.test(pre.textContent),
+        estado: estado.textContent,
+        codigo: document.getElementById("ultimo-codigo").textContent,
+        guardado: false,
+      };
+      return { antes, despues, ruta: estadoPestana.ruta };
+    })()`);
+    comprueba("el XML en vivo muestra el layout del proyecto con resaltado y sin compilar",
+      /res\/layout\/main\.xml/.test(String(xmlVivo.antes.estado)) &&
+      /solo lectura/.test(String(xmlVivo.antes.estado)) &&
+      xmlVivo.antes.lineas > 3 && xmlVivo.antes.etiquetas > 0 && xmlVivo.antes.atributos > 0 &&
+      xmlVivo.antes.codigo === xmlVivo.despues.codigo,
+      JSON.stringify(xmlVivo.antes).slice(0, 320));
+    comprueba("y se actualiza al escribir, sin guardar y sin lanzar otro comando de apkc",
+      xmlVivo.despues.marca === true && xmlVivo.despues.linear === true &&
+      /sin guardar/.test(String(xmlVivo.despues.estado)) &&
+      xmlVivo.despues.codigo === xmlVivo.antes.codigo,
+      JSON.stringify(xmlVivo.despues).slice(0, 320));
+
+    // con otro fichero abierto el panel cae al layout del modelo o al primero del árbol, y sin
+    // ningún layout lo dice en vez de quedarse en blanco
+    const xmlFuera = await evaluar(`(async () => {
+      marcarSucio(false);
+      await abrir("/proyecto/src/com/myapp/MainActivity.java");
+      document.getElementById("previa-modo-render").click();
+      document.getElementById("previa-modo-xml").click();
+      await new Promise((ok) => setTimeout(ok, 800));
+      const pre = document.getElementById("previa-xml-codigo");
+      return {
+        abierto: estadoPestana.ruta,
+        estado: document.getElementById("previa-xml-estado").textContent,
+        layout: /LinearLayout/.test(pre.textContent),
+        etiquetas: pre.querySelectorAll(".etiqueta").length,
+      };
+    })()`);
+    comprueba("sin el layout abierto, el XML en vivo lee el layout del proyecto de OPFS",
+      /MainActivity\.java$/.test(String(xmlFuera.abierto)) &&
+      /res\/layout\/main\.xml/.test(String(xmlFuera.estado)) && xmlFuera.layout === true &&
+      xmlFuera.etiquetas > 0,
+      JSON.stringify(xmlFuera).slice(0, 280));
+
+    const xmlVacio = await evaluar(`(async () => {
+      const sano = await hospedador.texto("/proyecto/res/layout/main.xml");
+      await hospedador.limpiar("/proyecto/res/layout/main.xml");
+      document.getElementById("previa-modo-render").click();
+      document.getElementById("previa-modo-xml").click();
+      await new Promise((ok) => setTimeout(ok, 900));
+      const pre = document.getElementById("previa-xml-codigo");
+      const r = {
+        estado: document.getElementById("previa-xml-estado").textContent,
+        vacio: pre.textContent.trim() === "",
+      };
+      await hospedador.escribir("/proyecto/res/layout/main.xml", new TextEncoder().encode(sano));
+      document.getElementById("previa-modo-render").click();
+      document.getElementById("previa-modo-xml").click();
+      await new Promise((ok) => setTimeout(ok, 900));
+      r.restaurado = /LinearLayout/.test(document.getElementById("previa-xml-codigo").textContent);
+      return r;
+    })()`);
+    comprueba("sin ningún res/layout/*.xml el panel lo dice y no inventa un fichero",
+      /no tiene|No se pudo leer/.test(String(xmlVacio.estado)) && xmlVacio.vacio === true &&
+      xmlVacio.restaurado === true,
+      JSON.stringify(xmlVacio).slice(0, 280));
+
+    // 12a-octies. el separador: se arrastra con puntero, se mueve con el teclado y guarda el ancho
+    // sin tocar el modelo, el texto ni el cursor del editor.
+    const separadorPrueba = await evaluar(`(async () => {
+      const vp = await import("/vista-previa.js");
+      const sep = document.getElementById("separador-previa");
+      const panel = document.getElementById("previa-lateral");
+      const fila = document.getElementById("editor-fila");
+      const area = document.getElementById("codigo");
+      const modelo = await vp.modeloActual();
+      const antes = {
+        ancho: Math.round(panel.getBoundingClientRect().width),
+        codigo: document.getElementById("ultimo-codigo").textContent,
+        valor: area.value.length,
+        seleccion: area.selectionStart,
+        modelo: modelo ? JSON.stringify(modelo).length : 0,
+      };
+      const caja = fila.getBoundingClientRect();
+      const destino = Math.round(caja.right - 420);
+      sep.dispatchEvent(new PointerEvent("pointerdown", { bubbles: true, button: 0, pointerId: 7,
+        clientX: Math.round(caja.right - antes.ancho) }));
+      document.dispatchEvent(new PointerEvent("pointermove", { bubbles: true, pointerId: 7, clientX: destino }));
+      document.dispatchEvent(new PointerEvent("pointerup", { bubbles: true, pointerId: 7, clientX: destino }));
+      await new Promise((ok) => setTimeout(ok, 60));
+      const modeloTras = await vp.modeloActual();
+      const tras = {
+        ancho: Math.round(panel.getBoundingClientRect().width),
+        aria: Number(sep.getAttribute("aria-valuenow")),
+        guardado: Number(localStorage.getItem("apkc-studio/previa-ancho")),
+        codigo: document.getElementById("ultimo-codigo").textContent,
+        valor: area.value.length,
+        seleccion: area.selectionStart,
+        modelo: modeloTras ? JSON.stringify(modeloTras).length : 0,
+      };
+      sep.dispatchEvent(new KeyboardEvent("keydown", { key: "Home", bubbles: true }));
+      const minimo = Number(sep.getAttribute("aria-valuenow"));
+      sep.dispatchEvent(new KeyboardEvent("keydown", { key: "ArrowLeft", bubbles: true }));
+      const desdeMinimo = Number(sep.getAttribute("aria-valuenow"));
+      for (let i = 0; i < 6; i++) sep.dispatchEvent(new KeyboardEvent("keydown", { key: "ArrowLeft", bubbles: true }));
+      return {
+        antes, tras, minimo, desdeMinimo,
+        editor: Math.round(document.querySelector(".editor").getBoundingClientRect().width),
+        modeloIgual: antes.modelo === tras.modelo && antes.modelo > 0,
+      };
+    })()`);
+    comprueba("el separador se arrastra, actualiza aria-valuenow y guarda el ancho en localStorage",
+      Math.abs(separadorPrueba.tras.ancho - 420) <= 6 &&
+      separadorPrueba.tras.aria === separadorPrueba.tras.guardado &&
+      separadorPrueba.tras.aria === separadorPrueba.tras.ancho,
+      JSON.stringify(separadorPrueba.tras).slice(0, 240));
+    comprueba("arrastrar el separador no muta el modelo, el texto ni el cursor del editor",
+      separadorPrueba.modeloIgual === true &&
+      separadorPrueba.tras.codigo === separadorPrueba.antes.codigo &&
+      separadorPrueba.tras.valor === separadorPrueba.antes.valor &&
+      separadorPrueba.tras.seleccion === separadorPrueba.antes.seleccion &&
+      separadorPrueba.editor >= 280,
+      JSON.stringify({ antes: separadorPrueba.antes, tras: separadorPrueba.tras,
+        editor: separadorPrueba.editor }).slice(0, 320));
+    comprueba("el teclado del separador respeta el mínimo y el foco del editor sigue intacto",
+      separadorPrueba.minimo === 240 && separadorPrueba.desdeMinimo === 256,
+      JSON.stringify({ minimo: separadorPrueba.minimo, siguiente: separadorPrueba.desdeMinimo }));
 
     // 12a-quater. con la vista previa delante, el diagnóstico en vivo y la paleta siguen vivos:
     // los dos son document-wide y la tercera vista no puede taparlos ni romper su estado.
@@ -1528,12 +1885,20 @@ async function conductor() {
         activa: document.getElementById("vista").classList.contains("activa"),
         estado: document.getElementById("vista-previa-estado").textContent,
         canvas: !!document.getElementById("vista-previa"),
+        logLista: document.getElementById("previa-log-lista").children.length,
+        logVacio: !document.getElementById("previa-log-vacio").hidden,
+        logTexto: document.getElementById("previa-log-vacio").textContent,
       };
     })()`);
     comprueba("sin red, la página recargada carga vista-previa.js y la vista responde",
       trasOffline.cuerpo === "vista" && trasOffline.activa === true && trasOffline.canvas === true &&
       /[Cc]ompila/.test(String(trasOffline.estado)),
       JSON.stringify(trasOffline).slice(0, 240));
+    comprueba("al recargar, la consola de la ejecución arranca vacía y con su motivo",
+      trasOffline.logLista === 0 && trasOffline.logVacio === true &&
+      /[Cc]ompila/.test(String(trasOffline.logTexto)),
+      JSON.stringify({ lista: trasOffline.logLista, vacio: trasOffline.logVacio,
+        texto: String(trasOffline.logTexto).slice(0, 140) }));
     await exec("Network.emulateNetworkConditions", {
       offline: false, latency: 0, downloadThroughput: -1, uploadThroughput: -1,
     });

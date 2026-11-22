@@ -158,6 +158,24 @@ function colorDe(nombre, respaldo) {
 // comando: compilar puede ocurrir con la pestaña Vista oculta y el canvas mide cero entonces.
 let ultimoModelo = null;
 
+// El panel lateral de la vista dividida (previa-panel.js) no puede importar `ultimoModelo` sin
+// duplicar el estado, así que se le avisa con un evento cada vez que el modelo cambia. Va con el
+// modelo o con el motivo por el que no hay modelo, y nunca lleva el objeto a un `innerHTML`.
+const EVENTO = "apkc:previa-actualizada";
+
+// Nombre público del evento: el panel lateral lo escucha sin importar el estado interno.
+export const EVENTO_PREVIA = EVENTO;
+
+function avisar(modelo, mensaje) {
+  if (typeof document === "undefined" || typeof CustomEvent !== "function") return;
+  document.dispatchEvent(new CustomEvent(EVENTO, { detail: { modelo, mensaje } }));
+}
+
+// Lo que se puede repintar sin repetir `apkc preview`: solo la lectura del último modelo.
+export function modeloActual() {
+  return ultimoModelo;
+}
+
 function canvasDeLaVista() {
   if (typeof document === "undefined") return null;
   return document.getElementById("vista-previa");
@@ -182,7 +200,9 @@ export function mensajeVistaPrevia(texto) {
       ctx.clearRect(0, 0, canvas.width, canvas.height);
     }
   }
-  avisoDeLaVista(String(texto || ""));
+  const mensaje = String(texto || "");
+  avisoDeLaVista(mensaje);
+  avisar(null, mensaje);
 }
 
 // Pinta el modelo en el canvas. `medir` existe para las pruebas: permite fijar la caja lógica sin
@@ -252,14 +272,25 @@ export function pintarModelo(canvas, modelo, medir) {
     ctx.beginPath();
     ctx.rect(r.x + 1, r.y + 1, Math.max(1, r.ancho - 2), Math.max(1, r.alto - 2));
     ctx.clip();
+    // Un nodo bajo no pierde su texto: la etiqueta de tipo solo entra si sobra alto, y el texto se
+    // ajusta a la caja en vez de suprimirse. Antes había un `r.alto >= 28` que se comía el
+    // «Hello World!» del apk Hola (84×18 px con la escala 0,75): la pantalla salía vacía. El texto
+    // dinámico del Contador tenía el mismo alto y el mismo destino.
+    const etiqueta = r.id ? r.tipo + " · " + r.id : r.tipo;
     let linea = r.y + 3;
-    if (r.alto >= 14) {
-      const etiqueta = r.id ? r.tipo + " · " + r.id : r.tipo;
+    let hayEtiqueta = false;
+    if (r.alto >= 30) {
+      ctx.font = "11px ui-monospace, SFMono-Regular, Menlo, Consolas, monospace";
       ctx.fillStyle = tintaTenue;
       ctx.fillText(etiqueta, r.x + 5, linea, Math.max(0, r.ancho - 10));
       linea += 13;
+      hayEtiqueta = true;
     }
-    if (r.texto && r.alto >= 28) {
+    if (r.texto && r.alto >= 8) {
+      // una sola línea, con la fuente encogida al hueco real: 8..12 px según lo que quede
+      const disponible = (r.alto - (linea - r.y) - 2);
+      const tamano = Math.max(8, Math.min(12, Math.floor(hayEtiqueta ? disponible : r.alto - 4)));
+      ctx.font = tamano + "px ui-monospace, SFMono-Regular, Menlo, Consolas, monospace";
       ctx.fillStyle = tinta;
       ctx.fillText(r.texto, r.x + 5, linea, Math.max(0, r.ancho - 10));
     }
@@ -287,10 +318,13 @@ export function pintarVistaPrevia(modelo) {
   const declarados = aNumero(modelo.nodos);
   const nodos = declarados !== null && declarados > 0 ? declarados : nodosAplanados(modelo).length;
   const aproximado = modelo.aproximado === false ? "" : " (aproximada)";
-  avisoDeLaVista("Vista previa" + aproximado + " de " + (modelo.layout || "el layout") + ": " +
+  const texto = "Vista previa" + aproximado + " de " + (modelo.layout || "el layout") + ": " +
     nodos + " nodos en una pantalla de " +
     ((modelo.pantalla && modelo.pantalla.ancho) || PANTALLA_POR_DEFECTO.ancho) + "×" +
-    ((modelo.pantalla && modelo.pantalla.alto) || PANTALLA_POR_DEFECTO.alto) + " dp.");
+    ((modelo.pantalla && modelo.pantalla.alto) || PANTALLA_POR_DEFECTO.alto) + " dp.";
+  avisoDeLaVista(texto);
+  // el panel lateral pinta el mismo modelo y su consola sin volver a pedirlo
+  avisar(modelo, texto);
   return pintado;
 }
 
