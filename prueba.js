@@ -286,6 +286,24 @@ for (let i = 0; i < 600; i++) {
 }
 if (vistaPrevia.nodosAplanados({ raiz: cadena }).length > 512) mal("nodosAplanados no pone cota al árbol");
 
+// 6b-quater. el estado vacío y la línea del emulador son uno solo: el panel (`previa-panel.js`) los
+// importa de aquí, así que las dos superficies —la vista dividida y Pantalla— dicen lo mismo del
+// mismo modelo y ninguna llama «vista previa» al canvas que ejecuta la app.
+if (!/emulador/.test(vistaPrevia.MENSAJE_SIN_MODELO) || /vista previa/i.test(vistaPrevia.MENSAJE_SIN_MODELO)) {
+  mal("MENSAJE_SIN_MODELO no habla del emulador: " + vistaPrevia.MENSAJE_SIN_MODELO);
+}
+const textoEmulador = vistaPrevia.textoDelModelo(modeloPrevia);
+if (!/^Emulador/.test(textoEmulador) || !/3 nodos/.test(textoEmulador) || !/360×640 dp/.test(textoEmulador)) {
+  mal("textoDelModelo no describe el modelo: " + textoEmulador);
+}
+if (!/^Emulador de /.test(vistaPrevia.textoDelModelo({ ...modeloPrevia, aproximado: false }))) {
+  mal("textoDelModelo sigue diciendo «aproximado» con aproximado: false");
+}
+if (!/^Emulador aproximado de el layout/.test(vistaPrevia.textoDelModelo({ pantalla: {}, raiz: {} }))) {
+  mal("textoDelModelo no cae a «el layout» y a la pantalla por defecto: " +
+    vistaPrevia.textoDelModelo({ pantalla: {}, raiz: {} }));
+}
+
 // 6c. el texto de un nodo pintado es el dinámico si existe: el rect que va al canvas no puede
 //     quedarse con el texto del layout cuando la app ya escribió otro.
 const conDinamico = vistaPrevia.rectsEscalados({ pantalla: { ancho: 100, alto: 100 },
@@ -863,9 +881,9 @@ for (const [id, donde] of [
   ["previa-consola-lista", "las líneas de la consola de la app"],
   ["previa-consola-cabecera", "el resumen de la consola de la app"],
   ["previa-consola-vacio", "el mensaje de «sin salida»"],
-  ["previa-log-lista", "la consola de la ejecución"],
-  ["previa-log-cabecera", "el resumen de la ejecución"],
-  ["previa-log-vacio", "el mensaje de «sin ejecución»"],
+  ["previa-log-lista", "el registro del emulador"],
+  ["previa-log-cabecera", "la cabecera del registro del emulador"],
+  ["previa-log-vacio", "el mensaje de «sin ejecución» del registro del emulador"],
   ["previa-modo-editar", "el lápiz que entra y sale del modo editar"],
   ["previa-paleta", "la paleta de añadir elementos"],
   ["previa-anadir-textview", "el botón que añade un TextView"],
@@ -898,8 +916,8 @@ for (const [id, donde] of [
   ["vista-layout-canvas", "el canvas de Vista previa de la vista Pantalla"],
   ["vista-layout-estado", "la línea de estado de Vista previa en la vista Pantalla"],
   ["vista-emulador", "el panel del Emulador de la vista Pantalla"],
-  ["vista-log-lista", "la consola de la ejecución en la vista Pantalla"],
-  ["vista-log-cabecera", "el resumen de la ejecución en la vista Pantalla"],
+  ["vista-log-lista", "el registro del emulador en la vista Pantalla"],
+  ["vista-log-cabecera", "la cabecera del registro del emulador en la vista Pantalla"],
   ["vista-log-vacio", "el mensaje de «sin ejecución» en la vista Pantalla"],
   ["marco-vista-lado", "el marco redimensionable de la vista Pantalla"],
   ["vista-tirador-oeste", "la arista izquierda del panel de la vista Pantalla"],
@@ -1030,6 +1048,17 @@ if (!/>Vista previa<\/button>/.test(html) || !/>Emulador<\/button>/.test(html)) 
 }
 if (!/id="previa-modo-vivo"[^>]*>Vista previa</.test(html) || !/id="previa-modo-render"[^>]*>Emulador</.test(html)) {
   mal("los ids de modo no llevan el nombre nuevo en su texto");
+}
+// el nombre viejo tampoco vale en un `aria-label`: el mismo control —el canvas del emulador— decía
+// «Vista previa aproximada…» en el panel y «Emulador: …» en Pantalla. Las dos superficies se
+// anuncian igual, y el modo Vista previa no se cuela en el canvas que ejecuta la app.
+if (/aria-label="Vista previa[^"]*pantalla del apk/.test(html)) {
+  mal("el canvas del emulador conserva «Vista previa» en su aria-label");
+}
+const canvasEmulador = [...html.matchAll(/<canvas id="(previa-lateral-canvas|vista-previa)"[^>]*aria-label="([^"]*)"/g)];
+if (canvasEmulador.length !== 2) mal("los dos canvas del emulador no declaran aria-label");
+for (const [, idCanvas, rotulo] of canvasEmulador) {
+  if (!/^Emulador: /.test(rotulo)) mal("el canvas " + idCanvas + " no se anuncia como «Emulador: …»: " + rotulo);
 }
 // los ocho tiradores de cada marco: role=separator, el eje en data-eje y el cursor que toca
 for (const tirador of html.matchAll(/<div id="([^"]*tirador[^"]*|[^"]*separador-previa)"[^>]*>/g)) {

@@ -11,6 +11,11 @@ fork se mantienen bajo la misma licencia MIT.
 
 ## Vista previa del APK
 
+**«Emulador» es un nombre de la interfaz, no un emulador de Android.** El modo y la columna
+«Emulador» —el texto viejo decía «vista previa del apk»— pintan el modelo de `apkc preview` con
+este mismo módulo propio: no hay máquina virtual, ni AVD, ni ART de terceros; solo se interpreta
+`onCreate` sobre el dex y los recursos del propio apk.
+
 El módulo de vista previa (`apkc/preview.go`, `apkc/previewinterprete.go` y el pintor de la
 pestaña, `studio/vista-previa.js`) es **implementación propia**, publicada bajo la misma licencia
 MIT que el resto de este repositorio. No incorpora código de terceros: se apoya en los lectores
@@ -37,6 +42,11 @@ El `android.jar` es un componente del SDK de Android de Google. **No se distribu
 repositorio ni con la página**: se toma del SDK instalado por el usuario o se descarga desde la
 página oficial de Google, y sus términos se aceptan allí. La página solo hace un acuse informado;
 no concede derechos sobre el binario.
+
+El `android.jar` de sustitución que genera `tools/androidjar/` a partir de fuentes de AOSP es otro
+artefacto: se construye en local para probar el autocompletado sin red, **la página todavía no lo
+usa para compilar y no viaja con el sitio ni con este repositorio**. Sus términos son los de AOSP;
+esta nota no los cambia.
 
 ## Navegador de las pruebas
 
