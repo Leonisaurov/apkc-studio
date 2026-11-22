@@ -13,6 +13,9 @@
     "rose-pine": "Rosé Pine",
     "tokyo-night": "Tokyo Night",
     gruvbox: "Gruvbox",
+    taller: "Taller artesanal",
+    terminal: "Terminal moderno",
+    "azul-refinado": "Azul refinado",
   };
   const TERM = {
     catppuccin: "Catppuccin Mocha",

@@ -1314,6 +1314,82 @@ pre {
   --sintaxis-etiqueta: #8ec07c; --sintaxis-atributo: #83a598;
 }
 
+/* Tres mundos pididos por el usuario: solo aportan tipo, paleta, densidad y un gesto de firma.
+   La navegación, los controles y el layout siguen siendo los de la herramienta. */
+:root[data-tema="taller"] {
+  --fondo: #201d19; --fondo2: #29251f; --actividad: #171512;
+  --borde: #3a3329; --borde2: #514534;
+  --texto: #e8dfd1; --tenue: #b3a48e; --brillo: #fff4df;
+  --hover: #332d25; --activo: #43382a;
+  --acento: #e0a44a; --acento2: #f2c078; --entrada: #342e26;
+  --consola: #1c1915; --ok: #a9c47f; --aviso: #e8b45c;
+  --texto-medio: #d3c6b3; --texto-tenue: #b3a48e; --texto-fuerte: #fff4df;
+  --blanco: #f6ecd9; --texto-boton: #201d19;
+  --borde-fondo: #171512; --superficie: #29251f; --superficie2: #201d19; --superficie3: #342e26;
+  --boton: #342e26; --boton-hover: #43382a; --acento-claro: #f2c078;
+  --texto-editor: #f0e6d5; --peligro: #d97b62; --foco: #f2c078; --numero-linea: #8a7b64;
+  --scroll-track: #201d19; --scroll-thumb: #514534; --scroll-hover: #6a5942;
+  --sintaxis-palabra: #e0a44a; --sintaxis-anotacion: #e8b45c; --sintaxis-numero: #d98b6a;
+  --sintaxis-cadena: #a9c47f; --sintaxis-comentario: #8a7b64;
+  --sintaxis-etiqueta: #8fb6a5; --sintaxis-atributo: #e0a44a;
+  --tipo-titulo: Georgia, "Iowan Old Style", serif;
+}
+:root[data-tema="terminal"] {
+  --fondo: #0d110e; --fondo2: #121812; --actividad: #090c09;
+  --borde: #213026; --borde2: #33513a;
+  --texto: #c7e6cd; --tenue: #86a98c; --brillo: #e6ffe9;
+  --hover: #162018; --activo: #223326;
+  --acento: #74d68b; --acento2: #a4f0ae; --entrada: #162018;
+  --consola: #0d110e; --ok: #8ce39b; --aviso: #e2c46e;
+  --texto-medio: #a9c9ae; --texto-tenue: #86a98c; --texto-fuerte: #e6ffe9;
+  --blanco: #d6f2da; --texto-boton: #0d110e;
+  --borde-fondo: #090c09; --superficie: #121812; --superficie2: #0d110e; --superficie3: #162018;
+  --boton: #162018; --boton-hover: #223326; --acento-claro: #a4f0ae;
+  --texto-editor: #d6f2da; --peligro: #e58e7a; --foco: #a4f0ae; --numero-linea: #56705b;
+  --scroll-track: #0d110e; --scroll-thumb: #33513a; --scroll-hover: #456d4e;
+  --sintaxis-palabra: #74d68b; --sintaxis-anotacion: #e2c46e; --sintaxis-numero: #d5a76a;
+  --sintaxis-cadena: #a4f0ae; --sintaxis-comentario: #56705b;
+  --sintaxis-etiqueta: #86c9b8; --sintaxis-atributo: #74d68b;
+  --tipo-titulo: ui-monospace, "SFMono-Regular", Menlo, Consolas, monospace;
+}
+:root[data-tema="azul-refinado"] {
+  --fondo: #16202b; --fondo2: #1b2836; --actividad: #111a23;
+  --borde: #2a3b4d; --borde2: #3c5269;
+  --texto: #dbe7f2; --tenue: #9fb2c5; --brillo: #f5faff;
+  --hover: #223346; --activo: #2d435a;
+  --acento: #5aa9e6; --acento2: #8cc7f2; --entrada: #223346;
+  --consola: #131e29; --ok: #86c9a8; --aviso: #e2bf72;
+  --texto-medio: #c2d3e3; --texto-tenue: #9fb2c5; --texto-fuerte: #f5faff;
+  --blanco: #eef6fd; --texto-boton: #16202b;
+  --borde-fondo: #111a23; --superficie: #1b2836; --superficie2: #16202b; --superficie3: #223346;
+  --boton: #223346; --boton-hover: #2d435a; --acento-claro: #8cc7f2;
+  --texto-editor: #eaf3fb; --peligro: #e08d8d; --foco: #8cc7f2; --numero-linea: #7790a8;
+  --scroll-track: #16202b; --scroll-thumb: #3c5269; --scroll-hover: #4d6984;
+  --sintaxis-palabra: #5aa9e6; --sintaxis-anotacion: #e2bf72; --sintaxis-numero: #d99f8c;
+  --sintaxis-cadena: #86c9a8; --sintaxis-comentario: #7790a8;
+  --sintaxis-etiqueta: #7fc7c7; --sintaxis-atributo: #5aa9e6;
+  --tipo-titulo: system-ui, -apple-system, "Segoe UI", sans-serif;
+}
+
+/* Firma de cada tema, solo en el marco de la herramienta: nunca sustituye a un control. */
+:where(.barra-titulo .titulo, .lateral-cab > span:first-child, h1, h2, h3, h4) {
+  font-family: var(--tipo-titulo, inherit);
+  letter-spacing: -0.015em;
+}
+:root[data-tema="taller"] .actividad button.activo::before {
+  content: ""; position: absolute; left: 0; top: 9px; bottom: 9px; width: 3px;
+  background: var(--acento); border-radius: 2px;
+}
+:root[data-tema="terminal"] .actividad button.activo::after {
+  content: ""; position: absolute; right: 6px; top: 12px; width: 6px; height: 16px;
+  background: var(--acento); border-radius: 1px;
+}
+:root[data-tema="azul-refinado"] .pestana-vista.activo,
+:root[data-tema="azul-refinado"] .pestana-archivo.activa {
+  text-decoration: underline; text-decoration-color: var(--acento);
+  text-decoration-thickness: 1px; text-underline-offset: 5px;
+}
+
 /* ---- temas de terminal (paleta ANSI de la consola) ------------------------ */
 :root[data-tema-consola="catppuccin"] {
   --consola: #1e1e2e;
