@@ -992,7 +992,9 @@ pre {
 .resalto .atributo { color: var(--sintaxis-atributo); }
 
 /* El subrayado de `apkc check` va en su propia capa: el textarea es transparente y el <pre>
-   resaltado se repinta en cada pulsación, así que pintar sobre él borraría las marcas. */
+   resaltado se repinta en cada pulsación, así que pintar sobre él borraría las marcas. Sin columna
+   la marca cruza la línea entera; con columna, `diagnostico-vivo.js` le pone `left` y `width` en
+   línea para que subraye el token del error (`R.layout.main`), no la línea. */
 .diagnostico-marcas {
   position: absolute;
   inset: 0;
