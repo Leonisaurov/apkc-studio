@@ -167,7 +167,9 @@ import { repintarVistaPrevia } from "./vista-previa.js";
     }
     mostrar("pestana");
     try { history.replaceState(null, "", "#pestana"); } catch (e) { /* */ }
-    return "proyecto creado; abre un fichero del árbol y edítalo";
+    // El editor ya está delante con el manifiesto abierto: el aviso de Inicio cuenta lo que de
+    // verdad ha pasado (y no pide abrir un fichero que ya se abrió), para cuando se vuelva aquí.
+    return "proyecto creado: manifiesto, layout y MainActivity, abiertos en el Editor";
   }
 
   if (botonCrear) {

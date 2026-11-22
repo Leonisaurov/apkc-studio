@@ -805,7 +805,8 @@ export function crearPreviaPanel({ hospedador, proyecto, estadoPestana, editor }
       if (resumen.actividad) partes.push(resumen.actividad);
       partes.push(resumen.pasos + (resumen.pasos === 1 ? " paso" : " pasos"));
       if (resumen.interacciones) {
-        partes.push(resumen.interacciones + (resumen.interacciones === 1 ? " interacción" : " interacciones"));
+        // la misma palabra que el contador de pulsos: el registro y la cuenta hablan de lo mismo
+        partes.push(resumen.interacciones + (resumen.interacciones === 1 ? " clic" : " clics"));
       }
       cabecera.textContent = partes.join(" · ");
       cabecera.classList.toggle("con-error", !!resumen.error);
@@ -999,10 +1000,16 @@ export function crearPreviaPanel({ hospedador, proyecto, estadoPestana, editor }
         continue;
       }
       const pintado = pintarModelo(canvas, modelo);
+      // El clic mide en el espacio con el que se pintó, no en el clientWidth del momento: si el panel
+      // cambió de tamaño entre pintar y pulsar, el punto se desalinearía con los píxeles visibles.
+      if (pintado && pintado.ancho > 0 && pintado.alto > 0) {
+        canvas.__espacio = { ancho: pintado.ancho, alto: pintado.alto };
+      }
       if (estado) {
         const layout = modelo.layout ? String(modelo.layout) : "el layout";
         estado.textContent = (modelo.aproximado === false ? "Emulador de " : "Emulador aproximado de ") +
-          layout + " con los eventos de la app. Se actualiza al compilar.";
+          layout + " con los eventos de la app. Arranca en onCreate: pulsa una vista para ejecutar su " +
+          "OnClickListener; se actualiza al compilar.";
         if (pintado && pintado.valida === false) {
           estado.textContent = "El modelo de vista previa no trae una pantalla medible (ancho o alto no " +
             "finitos); no se pinta nada.";
@@ -1010,16 +1017,6 @@ export function crearPreviaPanel({ hospedador, proyecto, estadoPestana, editor }
       }
       if (!primero) primero = pintado;
     }
-    const pintado = pintarModelo(canvas, modelo);
-    // El clic mide en el espacio con el que se pintó, no en el clientWidth del momento: si el panel
-    // cambió de tamaño entre pintar y pulsar, el punto se desalinearía con los píxeles visibles.
-    if (pintado && pintado.ancho > 0 && pintado.alto > 0) {
-      canvas.__espacio = { ancho: pintado.ancho, alto: pintado.alto };
-    }
-    const layout = modelo.layout ? String(modelo.layout) : "el layout";
-    estado.textContent = "Emulador de " + layout +
-      (modelo.aproximado === false ? ", sin aproximar." : " aproximado.") +
-      " Arranca en onCreate: pulsa una vista para ejecutar su OnClickListener.";
     if (modelo) {
       pintarLog(modelo);
       pintarConsola(modelo);
@@ -1029,10 +1026,7 @@ export function crearPreviaPanel({ hospedador, proyecto, estadoPestana, editor }
       pintarConsola(modelo);
       pintarOyentes(modelo);
     }
-    if (pintado && pintado.valida === false) {
-      estado.textContent = "El modelo de vista previa no trae una pantalla medible; no se pinta nada.";
-    }
-    return pintado;
+    return primero;
   }
 
   function programarPintado() {

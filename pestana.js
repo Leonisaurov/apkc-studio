@@ -2759,8 +2759,14 @@ if (typeof document !== "undefined") {
     };
     EDITOR.inicializar();
     actualizarAccionesFichero();
-    // el panel lateral se engancha una vez; sus ids son contrato con las pruebas
-    PREVIA_PANEL.iniciar();
+    // el panel lateral se engancha una vez; sus ids son contrato con las pruebas. Si el panel
+    // revienta, el resto del editor no puede quedarse muerto: se avisa y se sigue enganchando
+    // pestañas, explorador, subida y persistencia, que es lo que la página necesita para editar.
+    try {
+      PREVIA_PANEL.iniciar();
+    } catch (err) {
+      mostrarFallo(err);
+    }
 
     // soltar en el hueco del explorador mueve a la raíz del proyecto
     const cajaArbol = document.getElementById("arbol-pestana");
