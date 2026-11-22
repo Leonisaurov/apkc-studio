@@ -828,7 +828,7 @@ function renderPestanas() {
     marca.className = "marca-sucio";
     marca.hidden = true;
     marca.setAttribute("aria-label", "cambios sin guardar");
-    marca.textContent = "●";
+    marca.textContent = "";
     tab.append(icono, nombre, marca);
     caja.appendChild(tab);
     return;
@@ -854,7 +854,7 @@ function renderPestanas() {
     if (activa) marca.id = "marca-sucio";
     marca.hidden = !doc.sucio;
     marca.setAttribute("aria-label", "cambios sin guardar");
-    marca.textContent = "●";
+    marca.textContent = "";
     const cerrar = document.createElement("button");
     cerrar.type = "button";
     cerrar.className = "editor-tab-cerrar";

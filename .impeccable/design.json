@@ -1,0 +1,16 @@
+{
+  "surface": "index.html",
+  "mode": "operate",
+  "themes": {
+    "apkc": { "fondo": "#1e1e1e", "acento": "#007acc", "tipo-titulo": "system-ui" },
+    "taller": { "fondo": "#201d19", "acento": "#e0a44a", "tipo-titulo": "Georgia, serif" },
+    "terminal": { "fondo": "#0d110e", "acento": "#74d68b", "tipo-titulo": "ui-monospace, monospace" },
+    "azul-refinado": { "fondo": "#16202b", "acento": "#5aa9e6", "tipo-titulo": "system-ui" }
+  },
+  "tokens": ["fondo", "fondo2", "actividad", "borde", "borde2", "texto", "tenue", "brillo", "acento", "acento2", "entrada", "superficie", "boton", "foco", "seleccion", "peligro-fondo", "numero-linea", "scroll-track", "scroll-thumb", "sintaxis-palabra", "sintaxis-cadena", "sintaxis-comentario", "ansi-0", "ansi-15", "tipo-titulo"],
+  "assets": {
+    "favicon": "data URI en index.html",
+    "pwa-icons": ["icons/icon-192.png", "icons/icon-512.png"],
+    "origen": "generados en este repo, sin stock ni servicios externos"
+  }
+}

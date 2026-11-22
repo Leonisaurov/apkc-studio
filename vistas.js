@@ -174,4 +174,19 @@ import {
       }
     });
   }
+
+  // Instalación PWA: el navegador decide cuándo se ofrece; si no hay API no mostramos el botón.
+  // No es una petición de red: el manifest ya está enlazado en el documento (§176).
+  const instalar = document.getElementById("instalar-app");
+  if (instalar && typeof navigator.install === "function") {
+    instalar.hidden = false;
+    instalar.addEventListener("click", async () => {
+      try {
+        await navigator.install();
+      } catch (e) {
+        if (aviso) aviso.textContent = "el navegador no permitió instalar la app: " +
+          (e && e.message ? e.message : e);
+      }
+    });
+  }
 })();

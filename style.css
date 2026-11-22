@@ -10,7 +10,7 @@ html.apkc-aislando::after {
   content: "Preparando el navegador…";
   position: fixed; inset: 0; z-index: 9999;
   display: grid; place-items: center;
-  background: var(--fondo, #1e1e1e); color: var(--tenue, #858585);
+  background: var(--fondo, #1e1e1e); color: var(--tenue, #a3a3a3);
   font: 14px/1.4 system-ui, sans-serif;
 }
 
@@ -32,12 +32,12 @@ html.apkc-aislando::after {
   --borde: #2b2b2b;
   --borde2: #3c3c3c;
   --texto: #cccccc;
-  --tenue: #858585;
+  --tenue: #a3a3a3;
   --brillo: #e6edf3;
   --hover: #2a2d2e;
   --activo: #37373d;
   --acento: #007acc;
-  --acento2: #1f8ad2;
+  --acento2: #1769a8;
   --entrada: #3c3c3c;
   --consola: #1e1e2e;
   --ok: #89d185;
@@ -58,8 +58,9 @@ html.apkc-aislando::after {
   --acento-claro: #4daafc;
   --texto-editor: #d4d4d4;
   --peligro: #f48771;
+  --seleccion: rgba(0, 122, 204, .45); --peligro-fondo: #5a1d1d;
   --foco: #007fd4;
-  --numero-linea: #6e7681;
+  --numero-linea: #8b949e;
   --scroll-track: #1e1e1e;
   --scroll-thumb: #4b4b4b;
   --scroll-hover: #5f5f5f;
@@ -273,7 +274,7 @@ kbd {
 .arbol-pestana a:hover .arbol-descargar { opacity: 1; color: var(--blanco); }
 .arbol-pestana .vacio {
   padding: 12px;
-  color: #6e6e6e;
+  color: var(--texto-medio);
   font-size: 12px;
   line-height: 1.6;
 }
@@ -289,9 +290,9 @@ kbd {
   position: absolute;
   left: 2px;
   top: 2px;
-  border-left: 4px solid var(--texto-tenue);
-  border-top: 3px solid transparent;
-  border-bottom: 3px solid transparent;
+  border-left: 2px solid var(--texto-tenue);
+  border-top: 2px solid transparent;
+  border-bottom: 2px solid transparent;
   transition: transform .1s;
 }
 .arbol-flecha.abierta::before { transform: rotate(90deg); }
@@ -385,6 +386,7 @@ kbd {
   align-items: stretch;
   background: var(--fondo2);
   border-bottom: 1px solid var(--borde-fondo);
+  padding: 3px 0;
   overflow-x: auto;
   overflow-y: hidden;
 }
@@ -401,7 +403,7 @@ kbd {
   white-space: nowrap;
   position: relative;
 }
-.pestana-vista:hover { background: #2f2f2f; color: #ddd; }
+.pestana-vista:hover { background: var(--hover); color: var(--texto-fuerte); }
 .pestana-vista.activa { background: var(--fondo); color: var(--blanco); }
 .pestana-vista.activa::after {
   content: "";
@@ -438,7 +440,7 @@ h3 { font-size: 12px; letter-spacing: .07em; text-transform: uppercase; color: v
 p { margin: 8px 0; }
 .sub { color: var(--texto-medio); max-width: 78ch; }
 .nota { color: var(--tenue); font-size: 12px; }
-.miga { font-size: 11px; letter-spacing: .06em; text-transform: uppercase; color: #7a7a7a; margin: 0 0 6px; }
+.miga { font-size: 11px; letter-spacing: .06em; text-transform: uppercase; color: var(--texto-medio); margin: 0 0 6px; }
 .miga span { color: var(--boton-hover); padding: 0 4px; }
 
 .bienvenida { margin-bottom: 18px; max-width: 900px; }
@@ -503,12 +505,12 @@ button {
   cursor: pointer;
 }
 button:hover { background: var(--boton-hover); }
-button:active { background: #2f3337; }
+button:active { background: var(--activo); }
 button:disabled { opacity: .45; cursor: not-allowed; }
 button:disabled:hover { background: var(--boton); }
 button.primario { background: var(--acento); border-color: var(--acento); color: var(--texto-boton); }
 button.primario:hover { background: var(--acento2); border-color: var(--acento2); }
-button:focus-visible { outline: 1px solid var(--foco); outline-offset: 1px; }
+button:focus-visible { outline: 2px solid var(--foco); outline-offset: 2px; }
 .boton-enlace {
   display: inline-block;
   padding: 5px 12px;
@@ -519,7 +521,7 @@ button:focus-visible { outline: 1px solid var(--foco); outline-offset: 1px; }
   background: var(--superficie3);
   font-size: 12px;
 }
-.boton-enlace:hover { background: #37373d; text-decoration: none; }
+.boton-enlace:hover { background: var(--boton-hover); text-decoration: none; }
 .boton-enlace[aria-disabled="true"] { opacity: .45; cursor: not-allowed; }
 
 .crear-minimo { display: grid; gap: 12px; max-width: 620px; }
@@ -534,6 +536,9 @@ button:focus-visible { outline: 1px solid var(--foco); outline-offset: 1px; }
   background: var(--fondo-suave, transparent);
   line-height: 1.5;
 }
+.idioma-ui { display: inline-flex; align-items: center; gap: 8px; font-size: 12px; color: var(--texto-medio); }
+.idioma-ui select { font: inherit; }
+.atajos h2 { margin: 0 0 2px; font-size: 13px; color: var(--texto-fuerte); }
 .atajos {
   display: grid;
   gap: 6px;
@@ -634,7 +639,11 @@ details > summary {
   user-select: none;
 }
 details > summary::-webkit-details-marker { display: none; }
-details > summary::before { content: "▸"; display: inline-block; width: 14px; color: var(--texto-tenue); transition: transform .12s; }
+details > summary::before {
+  content: ""; display: inline-block; width: 8px; height: 8px; margin-right: 6px;
+  background: var(--texto-tenue); clip-path: polygon(20% 0, 100% 50%, 20% 100%);
+  transition: transform .12s;
+}
 details[open] > summary::before { transform: rotate(90deg); }
 details > summary:hover { color: var(--blanco); }
 details > :not(summary) { margin-left: 12px; margin-right: 12px; }
@@ -679,7 +688,7 @@ pre {
   height: 38px;
   background: var(--fondo2);
   border-bottom: 1px solid var(--borde-fondo);
-  padding-right: 8px;
+  padding: 5px 8px 5px 0;
 }
 .pestanas-archivo {
   display: flex;
@@ -696,7 +705,7 @@ pre {
   flex: 0 0 auto;
   min-width: 0;
   max-width: 28ch;
-  padding: 0 10px 0 14px;
+  padding: 5px 10px 5px 14px;
   background: var(--fondo2);
   border-right: 1px solid var(--borde-fondo);
   border-top: 1px solid transparent;
@@ -748,7 +757,10 @@ pre {
   box-shadow: 0 3px 0 var(--acento-claro);
 }
 #fichero-abierto { overflow: hidden; text-overflow: ellipsis; }
-.marca-sucio { color: #d7ba7d; font-size: 11px; line-height: 1; }
+.marca-sucio {
+  display: inline-block; flex: none; width: 8px; height: 8px; border-radius: 50%;
+  background: var(--aviso); vertical-align: middle;
+}
 .editor-tabs .nota { margin: 0 6px; align-self: center; }
 #detener-comando {
   border: 1px solid var(--borde);
@@ -828,10 +840,8 @@ pre {
 }
 .menu-editor > summary::before { display: none; }
 .menu-editor > summary::after {
-  content: "▾";
-  margin-left: 6px;
-  color: var(--texto-tenue);
-  font-size: 10px;
+  content: ""; display: inline-block; width: 7px; height: 7px; margin-left: 6px;
+  background: var(--texto-tenue); clip-path: polygon(0 20%, 100% 20%, 50% 100%);
 }
 .menu-editor[open] > summary { background: var(--boton-hover); }
 .menu-editor-lista {
@@ -900,6 +910,11 @@ pre {
   padding: 2px 8px;
 }
 .buscar-barra #buscar-estado { margin-left: auto; }
+.buscar-barra button svg {
+  width: 12px; height: 12px; vertical-align: -2px;
+  fill: none; stroke: currentColor; stroke-width: 1.8;
+  stroke-linecap: round; stroke-linejoin: round;
+}
 
 .editor {
   flex: 1 1 auto;
@@ -957,7 +972,7 @@ pre {
   width: 100%;
 }
 #codigo::placeholder { color: var(--numero-linea); -webkit-text-fill-color: var(--numero-linea); }
-#codigo::selection { background: rgba(38, 79, 120, .55); }
+#codigo::selection { background: var(--seleccion); }
 #codigo:focus { outline: none; }
 #codigo:focus-visible { outline: 2px solid var(--foco, #007acc); outline-offset: -2px; }
 .capas:focus-within { box-shadow: inset 0 0 0 1px var(--foco); }
@@ -1134,9 +1149,9 @@ pre {
   text-align: left;
   font-size: 12px;
 }
-.menu-archivo button:hover { background: #094771; color: var(--blanco); }
+.menu-archivo button:hover { background: var(--activo); color: var(--blanco); }
 .menu-archivo button.peligro { color: var(--peligro); }
-.menu-archivo button.peligro:hover { background: #5a1d1d; color: var(--blanco); }
+.menu-archivo button.peligro:hover { background: var(--peligro-fondo); color: var(--blanco); }
 
 /* ---- pantalla de carga ---------------------------------------------------- */
 
@@ -1180,7 +1195,7 @@ pre {
   padding: 16px 22px;
   border: 1px solid var(--borde2);
   border-radius: 6px;
-  background: #252532;
+  background: var(--superficie3);
   color: var(--brillo);
   box-shadow: 0 8px 30px rgba(0, 0, 0, .5);
   font-size: 13px;
@@ -1257,6 +1272,7 @@ pre {
   --borde-fondo: #11111b; --superficie: #181825; --superficie2: #11111b; --superficie3: #313244;
   --boton: #313244; --boton-hover: #45475a; --acento-claro: #89b4fa;
   --texto-editor: #cdd6f4; --peligro: #f38ba8; --foco: #b4befe; --numero-linea: #6c7086;
+  --seleccion: rgba(137, 180, 250, .35); --peligro-fondo: #45202f;
   --scroll-track: #11111b; --scroll-thumb: #45475a; --scroll-hover: #585b70;
   --sintaxis-palabra: #89b4fa; --sintaxis-anotacion: #f9e2af; --sintaxis-numero: #fab387;
   --sintaxis-cadena: #a6e3a1; --sintaxis-comentario: #6c7086;
@@ -1274,6 +1290,7 @@ pre {
   --borde-fondo: #191724; --superficie: #1f1d2e; --superficie2: #191724; --superficie3: #26233a;
   --boton: #26233a; --boton-hover: #403d52; --acento-claro: #ebbcba;
   --texto-editor: #e0def4; --peligro: #eb6f92; --foco: #ebbcba; --numero-linea: #6e6a86;
+  --seleccion: rgba(235, 188, 186, .30); --peligro-fondo: #462533;
   --scroll-track: #191724; --scroll-thumb: #403d52; --scroll-hover: #524f67;
   --sintaxis-palabra: #9ccfd8; --sintaxis-anotacion: #f6c177; --sintaxis-numero: #ebbcba;
   --sintaxis-cadena: #f6c177; --sintaxis-comentario: #6e6a86;
@@ -1291,6 +1308,7 @@ pre {
   --borde-fondo: #12121a; --superficie: #16161e; --superficie2: #1a1b26; --superficie3: #292e42;
   --boton: #292e42; --boton-hover: #3b4261; --acento-claro: #7aa2f7;
   --texto-editor: #c0caf5; --peligro: #f7768e; --foco: #7aa2f7; --numero-linea: #3b4261;
+  --seleccion: rgba(122, 162, 247, .35); --peligro-fondo: #483444;
   --scroll-track: #1a1b26; --scroll-thumb: #3b4261; --scroll-hover: #545c7e;
   --sintaxis-palabra: #7aa2f7; --sintaxis-anotacion: #e0af68; --sintaxis-numero: #ff9e64;
   --sintaxis-cadena: #9ece6a; --sintaxis-comentario: #565f89;
@@ -1308,6 +1326,7 @@ pre {
   --borde-fondo: #1d2021; --superficie: #1d2021; --superficie2: #282828; --superficie3: #3c3836;
   --boton: #3c3836; --boton-hover: #504945; --acento-claro: #83a598;
   --texto-editor: #ebdbb2; --peligro: #fb4934; --foco: #83a598; --numero-linea: #665c54;
+  --seleccion: rgba(131, 165, 152, .35); --peligro-fondo: #5c2b24;
   --scroll-track: #1d2021; --scroll-thumb: #504945; --scroll-hover: #665c54;
   --sintaxis-palabra: #83a598; --sintaxis-anotacion: #fabd2f; --sintaxis-numero: #d3869b;
   --sintaxis-cadena: #b8bb26; --sintaxis-comentario: #928374;
@@ -1328,6 +1347,7 @@ pre {
   --borde-fondo: #171512; --superficie: #29251f; --superficie2: #201d19; --superficie3: #342e26;
   --boton: #342e26; --boton-hover: #43382a; --acento-claro: #f2c078;
   --texto-editor: #f0e6d5; --peligro: #d97b62; --foco: #f2c078; --numero-linea: #8a7b64;
+  --seleccion: rgba(224, 164, 74, .32); --peligro-fondo: #4a2c22;
   --scroll-track: #201d19; --scroll-thumb: #514534; --scroll-hover: #6a5942;
   --sintaxis-palabra: #e0a44a; --sintaxis-anotacion: #e8b45c; --sintaxis-numero: #d98b6a;
   --sintaxis-cadena: #a9c47f; --sintaxis-comentario: #8a7b64;
@@ -1346,6 +1366,7 @@ pre {
   --borde-fondo: #090c09; --superficie: #121812; --superficie2: #0d110e; --superficie3: #162018;
   --boton: #162018; --boton-hover: #223326; --acento-claro: #a4f0ae;
   --texto-editor: #d6f2da; --peligro: #e58e7a; --foco: #a4f0ae; --numero-linea: #56705b;
+  --seleccion: rgba(116, 214, 139, .30); --peligro-fondo: #3a1d18;
   --scroll-track: #0d110e; --scroll-thumb: #33513a; --scroll-hover: #456d4e;
   --sintaxis-palabra: #74d68b; --sintaxis-anotacion: #e2c46e; --sintaxis-numero: #d5a76a;
   --sintaxis-cadena: #a4f0ae; --sintaxis-comentario: #56705b;
@@ -1364,6 +1385,7 @@ pre {
   --borde-fondo: #111a23; --superficie: #1b2836; --superficie2: #16202b; --superficie3: #223346;
   --boton: #223346; --boton-hover: #2d435a; --acento-claro: #8cc7f2;
   --texto-editor: #eaf3fb; --peligro: #e08d8d; --foco: #8cc7f2; --numero-linea: #7790a8;
+  --seleccion: rgba(90, 169, 230, .32); --peligro-fondo: #4f2b2b;
   --scroll-track: #16202b; --scroll-thumb: #3c5269; --scroll-hover: #4d6984;
   --sintaxis-palabra: #5aa9e6; --sintaxis-anotacion: #e2bf72; --sintaxis-numero: #d99f8c;
   --sintaxis-cadena: #86c9a8; --sintaxis-comentario: #7790a8;
@@ -1376,16 +1398,22 @@ pre {
   font-family: var(--tipo-titulo, inherit);
   letter-spacing: -0.015em;
 }
+/* Taller: marca ámbar de 3px en el riel y en el borde inferior de la pestaña activa. */
 :root[data-tema="taller"] .actividad button.activo::before {
   content: ""; position: absolute; left: 0; top: 9px; bottom: 9px; width: 3px;
   background: var(--acento); border-radius: 2px;
 }
+:root[data-tema="taller"] .editor-tab.activa { box-shadow: inset 0 -3px 0 var(--acento); }
+/* Terminal: bloque sólido a la derecha del riel y de la pestaña activa. */
 :root[data-tema="terminal"] .actividad button.activo::after {
   content: ""; position: absolute; right: 6px; top: 12px; width: 6px; height: 16px;
   background: var(--acento); border-radius: 1px;
 }
+:root[data-tema="terminal"] .editor-tab.activa { box-shadow: inset -6px 0 0 var(--acento); }
+/* Azul: subrayado de 1px bajo la pestaña activa y bajo el icono activo del riel. */
 :root[data-tema="azul-refinado"] .pestana-vista.activo,
-:root[data-tema="azul-refinado"] .pestana-archivo.activa {
+:root[data-tema="azul-refinado"] .editor-tab.activa,
+:root[data-tema="azul-refinado"] .actividad button.activo {
   text-decoration: underline; text-decoration-color: var(--acento);
   text-decoration-thickness: 1px; text-underline-offset: 5px;
 }

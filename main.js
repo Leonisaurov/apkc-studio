@@ -3,4 +3,5 @@
 import "./pestana.js";
 import "./vistas.js";
 import "./diagnostico.js";
+import "./idioma.js";
 import "./offline.js";

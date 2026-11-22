@@ -127,40 +127,45 @@
 
         <section id="crear" class="vista activa">
           <div class="bienvenida">
-            <p class="miga">apkc studio <span>›</span> inicio</p>
-            <h1>Crear un proyecto</h1>
-            <p class="sub">Pon el nombre, el package y, si quieres, un icono. Después editas todos los
+            <h1 data-i18n="crear.titulo">Crear un proyecto</h1>
+            <p class="sub" data-i18n="crear.sub">Pon el nombre, el package y, si quieres, un icono. Después editas todos los
               ficheros generados y compilas la app aquí mismo, sin Gradle y sin salir del navegador.</p>
           </div>
 
           <form id="form" class="crear-minimo">
-            <label>Nombre de la app <input name="name" value="Mi app" required autocomplete="off"></label>
-            <label>Package <input name="package" value="com.mi.app" required autocomplete="off"
+            <label><span data-i18n="crear.nombre">Nombre de la app</span> <input name="name" value="Mi app" required autocomplete="off"></label>
+            <label><span data-i18n="crear.package">Package</span> <input name="package" value="com.mi.app" required autocomplete="off"
                    pattern="[a-z][a-z0-9_]*(\.[a-z0-9_]+)+" title="minúsculas, dos tramos como mínimo"></label>
-            <label>Icono (opcional, PNG) <input type="file" id="icono" accept="image/png"></label>
-            <label>Plantilla
+            <label><span data-i18n="crear.icono">Icono (opcional, PNG)</span> <input type="file" id="icono" accept="image/png"></label>
+            <label><span data-i18n="crear.plantilla">Plantilla</span>
               <select id="plantilla">
                 <option value="hola" selected>Hola mundo</option>
                 <option value="contador">Contador (botón y cuenta)</option>
               </select>
             </label>
             <div class="acciones">
-              <button id="crear-proyecto" class="primario" type="button">Crear proyecto y editar</button>
+              <button id="crear-proyecto" class="primario" type="button" data-i18n="crear.boton">Crear proyecto y editar</button>
+              <button id="instalar-app" type="button" hidden data-i18n="crear.instalar">Instalar apkc studio</button>
               <span id="estado-crear" class="nota"></span>
             </div>
           </form>
 
-          <p class="nota aviso-almacenamiento" id="aviso-almacenamiento">
-            El proyecto vive en el almacenamiento de <strong>este navegador</strong> (OPFS), en este
+          <p class="nota aviso-almacenamiento" id="aviso-almacenamiento" data-i18n="crear.almacenamiento">
+            El proyecto vive en el almacenamiento de este navegador (OPFS), en este
             origen y en este dispositivo. Cambiar de puerto o dominio, abrirlo en otro navegador o
-            borrar los datos del sitio lo elimina. Usa <strong>Archivo → Exportar proyecto (.zip)</strong>
+            borrar los datos del sitio lo elimina. Usa Archivo → Exportar proyecto (.zip)
             para guardar una copia y poder importarla después.
           </p>
 
+          <label class="idioma-ui"><span data-i18n="ajustes.idioma">Idioma</span>
+            <select id="idioma-ui"><option value="es">Español</option><option value="en">English</option></select>
+          </label>
+
           <div class="atajos">
-            <div><kbd>Ctrl</kbd> + <kbd>S</kbd> guarda el fichero abierto</div>
-            <div><kbd>Ctrl</kbd> + <kbd>Enter</kbd> repite el último comando</div>
-            <div><kbd>Ctrl</kbd> + <kbd>`</kbd> abre o cierra el panel</div>
+            <h2 data-i18n="ayudas.titulo">Atajos de teclado</h2>
+            <div><kbd>Ctrl</kbd> + <kbd>S</kbd> <span data-i18n="atajo.guardar">guarda el fichero abierto</span></div>
+            <div><kbd>Ctrl</kbd> + <kbd>Enter</kbd> <span data-i18n="atajo.repetir">repite el último comando</span></div>
+            <div><kbd>Ctrl</kbd> + <kbd>`</kbd> <span data-i18n="atajo.panel">abre o cierra el panel</span></div>
           </div>
 
           <details id="detalle-diagnostico" class="diagnostico">
@@ -186,7 +191,7 @@
               <div class="editor-tab activa">
                 <span class="editor-tab-icono" aria-hidden="true"></span>
                 <span id="fichero-abierto">Sin fichero</span>
-                <span id="marca-sucio" class="marca-sucio" hidden aria-label="cambios sin guardar">●</span>
+                <span id="marca-sucio" class="marca-sucio" hidden aria-label="cambios sin guardar"></span>
               </div>
             </div>
             <span id="ocupado" class="nota" hidden>apkc trabajando…</span>
@@ -235,7 +240,9 @@
             <button id="buscar-siguiente" type="button" title="Siguiente (Enter)">Siguiente</button>
             <button id="reemplazar-uno" type="button" hidden>Reemplazar</button>
             <button id="reemplazar-todos" type="button" hidden>Todo</button>
-            <button id="buscar-cerrar" type="button" title="Cerrar (Esc)" aria-label="Cerrar la búsqueda">×</button>
+            <button id="buscar-cerrar" type="button" title="Cerrar (Esc)" aria-label="Cerrar la búsqueda">
+              <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18"/></svg>
+            </button>
             <span id="buscar-estado" class="nota" role="status" aria-live="polite"></span>
           </div>
 
