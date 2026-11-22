@@ -106,6 +106,56 @@ id="salida-apkc">`, los botones `#analizar-salida` y `#limpiar-salida`, el resul
 `informe()` de `app.js`; no tiene reglas propias ni envía el texto a ningún sitio. Cada regla
 reconocida se registra en `localStorage` y el informe se descarga como `informe-apkc.md`.
 
+### Diagnóstico en vivo
+
+`diagnostico-vivo.js` es otra pieza: mientras se escribe un `.java`, el texto del editor se copia a
+`/proyecto/.apkc-check.java` y se manda a `apkc check` por el hospedador de siempre (worker + wasm).
+No hay reglas nuevas ni envío a ningún sitio, y el temporal se borra después de cada pasada. El
+debounce son **350 ms** (`ESPERA`), y una pasada tarda ~1,6 s en la pestaña (§200).
+
+Ids y contrato:
+
+| Id | Papel |
+| --- | --- |
+| `#diagnostico-vivo-estado` | resumen: `sin errores`, `N error(es)`, `comprobando…`, `no se pudo comprobar: …`. Lleva `role="status"` y `aria-live="polite"` |
+| `#diagnostico-vivo-lista` | una entrada por error; cada una es un `<button>` con un `<code>` (la posición) y el mensaje |
+| `#diagnostico-marcas` | la capa del subrayado, encima de `#codigo` y con `pointer-events: none` |
+
+El JSON de `apkc check` trae, por error, `linea`, `columna` (solo si el error nació en un token),
+`posicion` (`archivo:linea:columna`, o `archivo:linea` cuando no hay columna) y `mensaje` (la
+explicación, sin la posición repetida). **La posición es lo que se pinta**, no la línea suelta: el
+enlace del botón salta a `linea` y el subrayado usa `columna` para caer sobre el token real
+(`R.layout.main`), no sobre la línea entera. Ahí hay **dos conversiones** y las dos importan:
+
+- `apkc` cuenta la columna en **caracteres** (runes) y desde 1; el editor indexa en **unidades
+  UTF-16** y desde 0. Un carácter astral (`\uD83D\uDE00`: un rune, dos unidades) desplaza el corte,
+  así que `indiceUTF16()` traduce la columna al índice del editor. La marca guarda las dos cosas:
+  `data-columna` (runes, la de `apkc`) y `data-utf16` (unidades, con la que se corta).
+- El ancho **no** es «columnas por ancho de carácter»: un tabulador llega a su parada (`tab-size: 4`
+  en `style.css`) y un astral puede ocupar dos celdas. `anchoDe()` mide con una sonda de la misma
+  fuente el prefijo y el token; la marca guarda `data-izquierda` (píxeles del prefijo) y
+  `data-ancho` (píxeles del token). `sincronizar()` solo les suma el padding de 12 px y el
+  `scrollLeft`: no se vuelve a medir texto al desplazarse. Las medidas se rehacen al pintar, así que
+  cambiar `#fuente-editor` no las deja viejas.
+
+Convención, dicha una sola vez: **la columna del JSON está en runes y desde 1**; la traducción a
+UTF-16 y a píxeles es del editor.
+
+`apkc check` recibe cuatro banderas que la pestaña usa juntas:
+
+- `--proyecto /proyecto`: enlaza `res/` en memoria (o usa la `R.java` que dejó el build) para que
+  `R.layout.main` exista. Sin esto la `R` no viaja en el `android.jar` y el diagnóstico inventaba un
+  error que la compilación nunca da.
+- `--nombre MainActivity.java`: el temporal se llama `.apkc-check.java`; la posición tiene que decir
+  el fichero real.
+- `--sdk-version` y `--codename`: en la pestaña el jar está en `/sdk/android.jar` y su ruta no dice la
+  versión del platform; son los mismos valores ocultos (`#sdk-version`/`#codename`) que lee
+  `apkc build`.
+
+El diagnóstico no pasa por `correr()`: no escribe en la consola ni cambia `#ultimo-codigo`, y
+`prueba-pestana.js` lo comprueba junto con el caso de `R.layout.main` (§200). `diagnostico.js` no
+participa en esto: pinta la salida pegada de `apkc`, no los errores del editor.
+
 ## Explorador
 
 El arbol vive en la barra lateral, no dentro del area de codigo:
@@ -482,8 +532,8 @@ En `@media (max-width: 760px)`:
 | `node studio/prueba.js` | genera el zip, comprueba EOCD, plantillas, reglas, ids de `index.html` (también los de `diagnostico.js`, `temas.js` e `historial.js`), el resaltador puro y el undo tree (ramas, reconstrucción y poda) |
 | `node studio/prueba-navegador.js` | `http` sin COOP/COEP: DOM, tres vistas, tres botones de actividad, reflejo del nombre/package, aviso de que no hay OPFS, localStorage, el diagnóstico, los temas y la paleta ANSI |
 | `APKC_WASM=... node studio/prueba-crear.js` | por http con OPFS: crear, escribir el proyecto, abrir el manifiesto, comprobar `data-ruta` del arbol, el icono, API 34, el árbol cerrado con sus botones, que `build/` se vea como generado y que el filtro conserve las carpetas, subir un archivo, moverlo de carpeta, exportar/importar el `.zip` (con binario), leer y guardar los ajustes en el manifiesto, varias pestañas, la persistencia tras recargar, el undo tree con ramas/IndexedDB, dos ventanas que se pasan guardados por BroadcastChannel y la fusión/conflicto de la misma línea |
-| `APKC_WASM=... APK_EJEMPLO=... KS_EJEMPLO=... ANDROID_JAR=... node studio/prueba-pestana.js` | 83 comprobaciones: editar, guardar, recargar, resaltar, números de línea, scroll de las tres capas, Tab/Shift+Tab/Enter con deshacer, jar del SDK local, `.zip` oficial con sus términos, compilar debug sin keystore, barra de descargas con descarga real, consola con colores ANSI, menú de fichero, renombrar/borrar, pantalla de carga, firmar, compilar release, verificar, recargar sin red, no pedir nada fuera del origen, la salida por trozos, el enlace `ruta:línea`, Detener y la fase en la barra |
-| `APKC=... APKC_WASM=... sh studio/e2e.sh` | todo lo anterior más los apk/aab nativos y la plantilla Contador; en la pestaña, 83 comprobaciones |
+| `APKC_WASM=... APK_EJEMPLO=... KS_EJEMPLO=... ANDROID_JAR=... node studio/prueba-pestana.js` | 94 comprobaciones: editar, guardar, recargar, resaltar, números de línea, scroll de las tres capas, Tab/Shift+Tab/Enter con deshacer, jar del SDK local, `.zip` oficial con sus términos, compilar debug sin keystore, barra de descargas con descarga real, consola con colores ANSI, menú de fichero, renombrar/borrar, pantalla de carga, firmar, compilar release, verificar, recargar sin red, no pedir nada fuera del origen, la salida por trozos, el enlace `ruta:línea`, Detener y la fase en la barra |
+| `APKC=... APKC_WASM=... sh studio/e2e.sh` | todo lo anterior más los apk/aab nativos y la plantilla Contador; en la pestaña, 94 comprobaciones |
 
 El gate completo de la pagina es `e2e.sh`; `prueba-pestana.js` solo no basta para decir que la
 pagina funciona. Los comandos de entorno estan en `tools/entorno.sh` (`test`, `wasm`, `gate`).

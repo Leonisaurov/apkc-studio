@@ -26,22 +26,84 @@ import { hospedador, estadoPestana, DOCUMENTOS, RUTA_JAR, irALinea } from "./pes
     return Number.isFinite(alto) && alto > 0 ? alto : 20;
   }
 
+  // Geometría de una línea. Hay dos conversiones y ninguna es opcional:
+  //   (a) `apkc` cuenta la columna en caracteres (runes) y el editor indexa en unidades UTF-16, así
+  //       que un carácter astral (`\uD83D\uDE00`, un rune y dos unidades) desplaza el corte;
+  //   (b) el ancho no es «columnas por ancho de carácter»: un tabulador llega a su parada (`tab-size:
+  //       4` en style.css) y un astral puede ocupar dos celdas. Se mide el prefijo.
+  function indiceUTF16(texto, columna) {
+    let i = 0;
+    let runes = 1;
+    while (i < texto.length && runes < columna) {
+      const punto = texto.codePointAt(i) || 0;
+      i += punto > 0xffff ? 2 : 1;
+      runes++;
+    }
+    return i;
+  }
+
+  // Mide en píxeles un trozo de texto con la fuente y el tabulador del textarea. Es una sonda fuera
+  // de pantalla: el resultado no depende de dónde esté el cursor ni del scroll.
+  function anchoDe(texto) {
+    if (!texto) return 0;
+    const estilo = getComputedStyle(area);
+    const sonda = document.createElement("span");
+    sonda.textContent = texto;
+    sonda.style.position = "absolute";
+    sonda.style.visibility = "hidden";
+    sonda.style.whiteSpace = "pre";
+    sonda.style.fontFamily = estilo.fontFamily;
+    sonda.style.fontSize = estilo.fontSize;
+    sonda.style.fontWeight = estilo.fontWeight;
+    sonda.style.letterSpacing = estilo.letterSpacing;
+    sonda.style.tabSize = estilo.tabSize;
+    document.body.appendChild(sonda);
+    const ancho = sonda.getBoundingClientRect().width;
+    sonda.remove();
+    return Number.isFinite(ancho) ? ancho : 0;
+  }
+
+  // El token que hay que subrayar: desde el índice, el identificador o la cadena de accesos
+  // (`R.layout.main`) que sigue. Si el error cae en un signo, se subraya ese signo.
+  function tokenEn(texto, indice) {
+    const resto = String(texto || "").slice(Math.max(0, indice));
+    const m = /^[A-Za-z0-9_$.]+/.exec(resto);
+    return m ? m[0] : resto.slice(0, 1);
+  }
+
   function sincronizar() {
     const alto = alturaLinea();
     for (const nodo of marcas.children) {
       const linea = Number(nodo.dataset.linea) || 1;
       nodo.style.top = (10 + (linea - 1) * alto + alto - 2 - area.scrollTop) + "px";
+      // la izquierda y el ancho se midieron al pintar; aquí solo se les suma el padding y el scroll
+      if (nodo.dataset.izquierda !== undefined) {
+        nodo.style.right = "auto";
+        nodo.style.left = (12 + Number(nodo.dataset.izquierda) - area.scrollLeft) + "px";
+        nodo.style.width = (Number(nodo.dataset.ancho) || 0) + "px";
+      }
     }
   }
 
   function pintar() {
     marcas.textContent = "";
+    const lineas = area.value.split("\n");
     for (const e of errores) {
       const linea = Number(e.linea);
       if (!linea || linea < 1) continue;
       const marca = document.createElement("span");
       marca.className = "marca-error";
       marca.dataset.linea = String(linea);
+      const columna = Number(e.columna);
+      if (columna > 0) {
+        const texto = lineas[linea - 1] || "";
+        const indice = indiceUTF16(texto, columna);
+        const token = tokenEn(texto, indice);
+        marca.dataset.columna = String(columna); // la de apkc, en caracteres
+        marca.dataset.utf16 = String(indice);    // lo que el editor corta
+        marca.dataset.izquierda = String(anchoDe(texto.slice(0, indice)));
+        marca.dataset.ancho = String(anchoDe(token));
+      }
       marcas.appendChild(marca);
     }
     sincronizar();
@@ -59,7 +121,9 @@ import { hospedador, estadoPestana, DOCUMENTOS, RUTA_JAR, irALinea } from "./pes
       const boton = document.createElement("button");
       boton.type = "button";
       const where = document.createElement("code");
-      where.textContent = "línea " + (Number(e.linea) || "?");
+      // `archivo:línea:columna` cuando el error nació en un token; `archivo:línea` si solo se sabe la
+      // línea. Se enlaza al sitio exacto y el texto dice qué pasa, sin repetir la posición.
+      where.textContent = e.posicion || ("línea " + (Number(e.linea) || "?"));
       boton.appendChild(where);
       boton.appendChild(document.createTextNode(String(e.mensaje || "")));
       boton.addEventListener("click", () => {
@@ -109,7 +173,22 @@ import { hospedador, estadoPestana, DOCUMENTOS, RUTA_JAR, irALinea } from "./pes
     try {
       const escrito = await hospedador.escribir(TEMPORAL, new TextEncoder().encode(texto));
       if (escrito && escrito.tipo === "error") throw new Error(escrito.error);
-      const r = await hospedador.ejecutar(["check", "--android-jar", RUTA_JAR, TEMPORAL]);
+      // `--proyecto` es lo que hace que `R.layout.main` exista: check enlaza res/ (o usa la R.java que
+      // dejó el build) y, sin él, la R no viaja en el android.jar y el diagnóstico acusaba un error
+      // que la compilación nunca da. `--nombre` pone el fichero real en `archivo:línea:columna` en vez
+      // del temporal. La API va porque en la pestaña el jar está en `/sdk/android.jar` y su ruta no
+      // dice la versión del platform; son los mismos valores ocultos que lee `apkc build`.
+      const argv = ["check", "--android-jar", RUTA_JAR];
+      const api = document.getElementById("sdk-version");
+      const codename = document.getElementById("codename");
+      if (api && api.value) {
+        argv.push("--sdk-version", api.value);
+        if (codename && codename.value) argv.push("--codename", codename.value);
+      }
+      argv.push("--nombre", ruta.split("/").pop() || TEMPORAL);
+      if (ruta.startsWith("/proyecto/")) argv.push("--proyecto", "/proyecto");
+      argv.push(TEMPORAL);
+      const r = await hospedador.ejecutar(argv);
       if (r && r.tipo === "error") throw new Error(r.error);
       const dato = leerJson(r && r.consola);
       if (!dato) throw new Error("apkc check no devolvió JSON");
@@ -118,7 +197,9 @@ import { hospedador, estadoPestana, DOCUMENTOS, RUTA_JAR, irALinea } from "./pes
       const resumen = errores.length
         ? errores.length + (errores.length === 1 ? " error" : " errores")
         : "sin errores";
-      estado.textContent = resumen + (dato.aviso ? " · " + dato.aviso : "");
+      const notas = [dato.aviso, dato.recursos && /^sin R/.test(dato.recursos) ? dato.recursos : ""]
+        .filter(Boolean);
+      estado.textContent = resumen + (notas.length ? " · " + notas.join(" · ") : "");
       pintar();
     } catch (e) {
       if (mio === serie) {

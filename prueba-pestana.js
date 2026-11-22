@@ -6,6 +6,7 @@
 // levanta servidor.js, lanza chromium headless por CDP, conduce la página y apaga todo.
 import { spawn } from "node:child_process";
 import fs from "node:fs";
+import net from "node:net";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -42,6 +43,20 @@ if (!APK || !fs.existsSync(APK)) falta("APK_EJEMPLO apuntando a una apk construi
 if (!KS || !fs.existsSync(KS)) falta("KS_EJEMPLO apuntando a un keystore");
 
 const esperar = (ms) => new Promise((r) => setTimeout(r, ms));
+
+// Un puerto ocupado por otro servidor (otro worktree, una sesión vieja) hace que la página hable con
+// un extraño: los endpoints dinámicos responden «no existe» y la prueba falla por algo que no es el
+// código. Se comprueba antes de arrancar y se dice con nombre.
+function puertoOcupado(puerto) {
+  return new Promise((res) => {
+    const sonda = net.createServer();
+    sonda.once("error", () => res(true));
+    sonda.once("listening", () => sonda.close(() => res(false)));
+    sonda.listen(puerto, "127.0.0.1");
+  });
+}
+if (await puertoOcupado(PUERTO)) falta("el puerto " + PUERTO + " ya está ocupado: usa STUDIO_SERVIDOR_PORT");
+if (await puertoOcupado(Number(CDP))) falta("el puerto CDP " + CDP + " ya está ocupado: usa STUDIO_PORT");
 
 // --- el servidor y el navegador -----------------------------------------------------------
   const envServidor = { ...process.env, APKC_WASM: path.resolve(WASM), APK_EJEMPLO: path.resolve(APK), KS_EJEMPLO: path.resolve(KS) };
@@ -137,6 +152,12 @@ async function conductor() {
   fs.rmSync(descargas, { recursive: true, force: true });
   fs.mkdirSync(descargas, { recursive: true });
   await exec("Page.setDownloadBehavior", { behavior: "allow", downloadPath: descargas });
+
+  // el jar del SDK entra por el propio origen; si el servidor no lo encuentra, la pestaña no puede
+  // compilar nada y conviene saberlo antes de la primera sección que lo necesita
+  const jarInfo = await evaluar(`fetch("/android-jar-info").then((r) => r.json()).catch((e) => ({ error: String(e) }))`);
+  console.log("  --- entorno: ANDROID_JAR=" + (process.env.ANDROID_JAR || "<vacío>") +
+    " ANDROID_HOME=" + (process.env.ANDROID_HOME || "<vacío>") + " jar=" + JSON.stringify(jarInfo));
 
   comprueba("la página está aislada (OPFS sincrónico disponible)",
     await evaluar("crossOriginIsolated === true"));
@@ -559,8 +580,8 @@ async function conductor() {
     lista: document.getElementById("diagnostico-vivo-lista").textContent,
     marcas: document.getElementById("diagnostico-marcas").children.length
   })`);
-  comprueba("el diagnóstico en vivo marca el error y lo muestra",
-    /error/i.test(String(vida.estado)) && /linea 4|linea 5/.test(String(vida.lista)) && vida.marcas >= 1,
+  comprueba("el diagnóstico en vivo marca el error de sintaxis y lo muestra",
+    /error/i.test(String(vida.estado)) && /vivo\.java:(4|5)/.test(String(vida.lista)) && vida.marcas >= 1,
     JSON.stringify(vida).slice(0, 200));
 
   await evaluar(`document.dispatchEvent(new KeyboardEvent("keydown",
@@ -578,9 +599,14 @@ async function conductor() {
     paletaAbierta === true && /Guardar fichero/.test(String(filtro)) && paletaCerrada === true,
     JSON.stringify({ paletaAbierta, filtro: String(filtro).slice(0, 60), paletaCerrada }));
 
-  // se deja un fuente válido: las compilaciones posteriores de esta misma prueba recorren /proyecto
-  await evaluar(`hospedador.escribir("/proyecto/vivo.java",
-    new TextEncoder().encode("package p;\\npublic class Vivo {}\\n"))`);
+  // se deja un fuente válido y limpio: las compilaciones posteriores recorren /proyecto y abrir otro
+  // fichero no se puede encontrar un documento sucio que dispare el confirm
+  await evaluar(`(async () => {
+    await hospedador.escribir("/proyecto/vivo.java", new TextEncoder().encode("package p;\\npublic class Vivo {}\\n"));
+    EDITOR.poner("package p;\\npublic class Vivo {}\\n");
+    marcarSucio(false);
+    return true;
+  })()`);
 
   // buscar y reemplazar dentro del editor, con el undo tree detrás; se hace en un fichero
   // aparte para no tocar el fuente que luego se compila
@@ -660,6 +686,179 @@ async function conductor() {
     comprueba("el android.jar entra en OPFS desde el propio origen", jarPuesto.escrito > 1000000, jarPuesto.escrito + " bytes");
     comprueba("el android.jar vuelve a leerse por el fs de la pestaña", jarPuesto.leido === jarPuesto.escrito,
       "leido " + jarPuesto.leido + ", cabecera " + JSON.stringify(jarPuesto.cabecera) + ", arbol " + jarPuesto.nodo);
+
+    // 4c. diagnóstico en vivo con el android.jar ya en OPFS. Es el caso del §200: `R.layout.main`
+    // no puede ser un falso error y un id que no existe tiene que salir con `archivo:línea:columna`
+    // y el token subrayado, no la línea entera. El diagnóstico corre por el hospedador, no por
+    // `correr()`: no puede ensuciar la consola ni el último código.
+    const antes4c = await evaluar(`({
+      ultimo: document.getElementById("ultimo-codigo").textContent,
+      consola: document.getElementById("consola-pestana").textContent.length,
+      estado: document.getElementById("diagnostico-vivo-estado").textContent.trim()
+    })`);
+    const original = await evaluar(`(async () => {
+      marcarSucio(false);
+      const arbol = await hospedador.arbol();
+      const nodo = (arbol.nodos || []).find((n) => /MainActivity\\.java$/.test(n.ruta));
+      if (!nodo) return { error: "sin MainActivity.java" };
+      await abrir(nodo.ruta);
+      const area = document.getElementById("codigo");
+      const texto = area.value;
+      if (!/R\\.layout\\.main/.test(texto)) return { error: "el MainActivity no usa R.layout.main" };
+      area.value = texto.replace("R.layout.main", "R.layout.noexiste");
+      area.dispatchEvent(new Event("input", { bubbles: true }));
+      return { texto, linea: area.value.split("\\n").findIndex((l) => l.includes("R.layout.noexiste")) + 1 };
+    })()`);
+    // El diagnóstico corre en el worker y su debounce son 350 ms: se espera **dentro de la página**
+    // al resumen («N error», «sin errores», «no se pudo»), que es lo que el usuario ve. La espera se
+    // hace en una sola evaluación para no medir el ruido de los viajes por CDP.
+    // `anterior` es el resumen que ya estaba en pantalla: sin él, la segunda espera se cerraría con el
+    // resultado viejo antes de que el diagnóstico nuevo hubiera corrido.
+    const esperarResumen = (ms, anterior) => evaluar(`(async () => {
+      const t0 = Date.now();
+      const visto = [];
+      const antes = ${JSON.stringify(anterior || "")};
+      let previo = "";
+      let cambio = false;
+      while (Date.now() - t0 < ${ms}) {
+        const e = document.getElementById("diagnostico-vivo-estado").textContent.trim();
+        if (e !== previo) { visto.push((Date.now() - t0) + "ms " + e.slice(0, 60)); previo = e; }
+        if (e !== antes) cambio = true;
+        if (cambio && /^([0-9]+ error|sin errores|no se pudo)/.test(e)) return { ms: Date.now() - t0, estado: e, visto };
+        await new Promise((r) => setTimeout(r, 200));
+      }
+      return { ms: Date.now() - t0, estado: null, visto };
+    })()`);
+    const roto = await esperarResumen(30000, antes4c.estado);
+    const pintado = await evaluar(`({
+      estado: document.getElementById("diagnostico-vivo-estado").textContent,
+      lista: document.getElementById("diagnostico-vivo-lista").textContent,
+      posicion: (document.querySelector("#diagnostico-vivo-lista code") || {}).textContent || "",
+      marcas: Array.from(document.getElementById("diagnostico-marcas").children).map((m) => Object.assign({}, m.dataset))
+    })`);
+    comprueba("el diagnóstico en vivo nombra archivo:línea:columna y el token",
+      roto && new RegExp("MainActivity\\.java:" + original.linea + ":[0-9]+").test(pintado.posicion) &&
+      /R\.layout\.noexiste/.test(String(pintado.lista)) && !/no esta medido/.test(String(pintado.lista)),
+      JSON.stringify({ roto, pintado, original }).slice(0, 420));
+    comprueba("el subrayado cae sobre el token y no sobre la línea entera",
+      pintado.marcas.length >= 1 && Number(pintado.marcas[0].columna) > 0 &&
+      Number(pintado.marcas[0].ancho) > 50,
+      JSON.stringify(pintado.marcas).slice(0, 200));
+    // y el fuente bueno, tal como lo genera la página, no da ni un error: `R.layout.main` se resuelve
+    // porque check enlaza la R del proyecto. Se devuelve el buffer a su texto con `EDITOR.poner`, que
+    // es la entrada única y marca el documento limpio, para no dejar el proyecto sucio al compilar.
+    await evaluar(`(() => {
+      EDITOR.poner(${JSON.stringify(original.texto)});
+      document.getElementById("codigo").dispatchEvent(new Event("input", { bubbles: true }));
+      return true;
+    })()`);
+    const sano = await esperarResumen(30000, roto && roto.estado);
+    const sanoLista = await evaluar(`document.getElementById("diagnostico-vivo-lista").textContent`);
+    comprueba("setContentView(R.layout.main) no da error en el diagnóstico en vivo",
+      sano && /^sin errores/.test(sano.estado) && /Sin errores/.test(String(sanoLista)),
+      JSON.stringify({ sano, sanoLista }).slice(0, 240));
+    // 4d. Dos conversiones que el subrayado tiene que hacer bien, y que un ancho «columnas por
+    // carácter» no hace: `apkc` cuenta la columna en caracteres (runes) y el editor corta en unidades
+    // UTF-16 (un astral son dos), y un tabulador ocupa hasta su parada de `tab-size`. Se prueban las
+    // dos formas sobre la misma línea, y la marca tiene que subrayar `R.layout.noexiste` entero.
+    const geometria = await evaluar(`(async () => {
+      const area = document.getElementById("codigo");
+      const lineas = area.value.split("\\n");
+      const i = lineas.findIndex((l) => /R\\.layout\\.main/.test(l));
+      if (i < 0) return { error: "sin setContentView en el fuente" };
+      const sangria = (lineas[i].match(/^[ \\t]*/) || [""])[0];
+      const medir = (texto) => {
+        const estilo = getComputedStyle(area);
+        const sonda = document.createElement("span");
+        sonda.textContent = texto;
+        sonda.style.cssText = "position:absolute;visibility:hidden;white-space:pre";
+        sonda.style.fontFamily = estilo.fontFamily;
+        sonda.style.fontSize = estilo.fontSize;
+        sonda.style.fontWeight = estilo.fontWeight;
+        sonda.style.letterSpacing = estilo.letterSpacing;
+        sonda.style.tabSize = estilo.tabSize;
+        document.body.appendChild(sonda);
+        const ancho = sonda.getBoundingClientRect().width;
+        sonda.remove();
+        return ancho;
+      };
+      const caracter = medir("0");
+      const casos = [
+        { nombre: "astral", linea: sangria + "/* \\uD83D\\uDE00 */ setContentView(R.layout.noexiste);" },
+        { nombre: "tabs", linea: "\\t\\tsetContentView(R.layout.noexiste);" }
+      ];
+      const salida = [];
+      for (const caso of casos) {
+        const copia = lineas.slice();
+        copia[i] = caso.linea;
+        const anterior = document.getElementById("diagnostico-vivo-estado").textContent.trim();
+        EDITOR.poner(copia.join("\\n"));
+        area.dispatchEvent(new Event("input", { bubbles: true }));
+        const t0 = Date.now();
+        let estado = null;
+        let cambio = false;
+        while (Date.now() - t0 < 30000) {
+          const e = document.getElementById("diagnostico-vivo-estado").textContent.trim();
+          if (e !== anterior) cambio = true;
+          if (cambio && /^([0-9]+ error|sin errores|no se pudo)/.test(e)) { estado = e; break; }
+          await new Promise((r) => setTimeout(r, 200));
+        }
+        const marca = document.querySelector("#diagnostico-marcas .marca-error");
+        const columna = marca ? Number(marca.dataset.columna) : 0;
+        // el índice UTF-16 del token, contado aparte del código que se prueba
+        let utf16 = 0, runes = 1;
+        while (utf16 < caso.linea.length && runes < columna) {
+          const punto = caso.linea.codePointAt(utf16);
+          utf16 += punto > 0xffff ? 2 : 1;
+          runes++;
+        }
+        salida.push({
+          nombre: caso.nombre, estado, columna,
+          // el corte viejo (slice(columna-1), todo en unidades UTF-16) acertaba con tabuladores y
+          // fallaba con el astral: se guarda para que la comprobación lo diga, no para usarlo
+          ingenuo: /^[A-Za-z0-9_$.]/.test(caso.linea.slice(columna - 1)),
+          posicion: (document.querySelector("#diagnostico-vivo-lista code") || {}).textContent || "",
+          datos: marca ? Object.assign({}, marca.dataset) : null,
+          esperado: { caracter, prefijo: medir(caso.linea.slice(0, utf16)), token: medir("R.layout.noexiste"), utf16 }
+        });
+      }
+      EDITOR.poner(lineas.join("\\n"));
+      area.dispatchEvent(new Event("input", { bubbles: true }));
+      return { salida, linea: lineas[i] };
+    })()`);
+    const cierre = await esperarResumen(30000, geometria && geometria.salida && geometria.salida.length
+      ? geometria.salida[geometria.salida.length - 1].estado : undefined);
+    const astral = geometria && geometria.salida ? geometria.salida.find((c) => c.nombre === "astral") : null;
+    const tabs = geometria && geometria.salida ? geometria.salida.find((c) => c.nombre === "tabs") : null;
+    comprueba("un astral delante del token no desplaza el subrayado (rune frente a UTF-16)",
+      astral && astral.datos && astral.estado && /^[0-9]+ error/.test(astral.estado) &&
+      // un astral antes del token: el índice UTF-16 es la columna (0-based = columna - 1 + 1 unidad
+      // extra) y el corte viejo caía dentro del par subrogado
+      Number(astral.datos.utf16) === astral.columna && astral.ingenuo === false &&
+      new RegExp("MainActivity\\.java:" + original.linea + ":" + astral.columna + "$").test(astral.posicion) &&
+      Math.abs(Number(astral.datos.ancho) - astral.esperado.token) < 2 &&
+      Number(astral.datos.ancho) > 10 * astral.esperado.caracter &&
+      Math.abs(Number(astral.datos.izquierda) - astral.esperado.prefijo) < 2,
+      JSON.stringify(astral).slice(0, 420));
+    comprueba("con tabuladores delante, la marca cae en la parada real y subraya el token entero",
+      tabs && tabs.datos && tabs.estado && /^[0-9]+ error/.test(tabs.estado) &&
+      // los tabuladores son una unidad cada uno: el índice es columna - 1, y el corte viejo acertaba
+      Number(tabs.datos.utf16) === tabs.columna - 1 && tabs.ingenuo === true &&
+      Math.abs(Number(tabs.datos.izquierda) - tabs.esperado.prefijo) < 2 &&
+      Number(tabs.datos.izquierda) > (tabs.columna - 1) * tabs.esperado.caracter + 2 * tabs.esperado.caracter &&
+      Math.abs(Number(tabs.datos.ancho) - tabs.esperado.token) < 2,
+      JSON.stringify(tabs).slice(0, 420));
+    comprueba("tras devolver el fuente, el diagnóstico vuelve a estar limpio",
+      cierre && /^sin errores/.test(cierre.estado), JSON.stringify(cierre).slice(0, 200));
+
+    const despues4c = await evaluar(`({
+      ultimo: document.getElementById("ultimo-codigo").textContent,
+      consola: document.getElementById("consola-pestana").textContent
+    })`);
+    comprueba("el diagnóstico en vivo no ensucia la consola ni el último código",
+      despues4c.ultimo === antes4c.ultimo && !/apkc check|"tipo":"check"/.test(String(despues4c.consola)),
+      JSON.stringify({ antes: antes4c, ultimo: despues4c.ultimo, consola: String(despues4c.consola).slice(-160) }));
+    console.log("  --- 4c: roto en " + (roto ? roto.ms : "?") + " ms, sano en " + (sano ? sano.ms : "?") + " ms");
 
     const compilado = await evaluar(`(async () => {
       const ks = new Uint8Array(await (await fetch("/keystore-ejemplo")).arrayBuffer());
