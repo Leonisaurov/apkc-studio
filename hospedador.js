@@ -147,54 +147,87 @@ async function ejecutar(argv, env) {
   };
 
   if (!bytesModule) {
-    // El manifiesto que escribe tools/sitio.sh fija el tamaño y el SHA-256 del binario. Una copia
-    // cacheada o bajada a trozos puede traer 200 y la cabecera de longitud completa, así que solo
-    // se fía de esos dos números. Se prueba la copia del SW, una URL nueva que fuerza red y el binario
-    // sin comprimir. Todo del mismo origen (regla 4).
+    // El manifiesto fija tamaño y SHA-256. Se intenta la copia normal (healthy), después la red
+    // con `?directo=` (el SW la deja pasar sin tocarla) y, si el host trunca respuestas grandes,
+    // se reconstruye el fichero con peticiones Range de 256 KB, medida que sí llega entera.
     let manifest = null;
     try {
       const r = await fetch("/wasm-manifest.json");
       if (r.ok) manifest = await r.json();
-    } catch (e) { /* sin manifiesto: se cae a la comprobación de cabecera */ }
-    const íntegro = async (candidato) => {
-      if (!magicoWasm(candidato) || candidato.length < 1024) return false;
-      if (manifest && manifest.bytes && candidato.length !== manifest.bytes) return false;
-      if (manifest && manifest.sha256 && typeof crypto !== "undefined" && crypto.subtle) {
-        const h = await crypto.subtle.digest("SHA-256", candidato);
-        const hex = Array.from(new Uint8Array(h)).map((b) => b.toString(16).padStart(2, "0")).join("");
-        if (hex !== manifest.sha256) return false;
+    } catch (e) { /* sin manifiesto: solo se comprueba la cabecera wasm */ }
+    const huella = async (bytes) => {
+      if (typeof crypto === "undefined" || !crypto.subtle) return null;
+      const h = await crypto.subtle.digest("SHA-256", bytes);
+      return Array.from(new Uint8Array(h)).map((b) => b.toString(16).padStart(2, "0")).join("");
+    };
+    const íntegro = async (c) => {
+      if (!magicoWasm(c) || c.length < 1024) return false;
+      if (manifest && manifest.bytes && c.length !== manifest.bytes) return false;
+      if (manifest && manifest.sha256) {
+        const h = await huella(c);
+        if (h && h !== manifest.sha256) return false;
       }
       return true;
     };
-    const rutas = ["/apkc.wasm.gz", "/apkc.wasm.gz?directo=" + Date.now(),
-                   "/apkc.wasm", "/apkc.wasm?directo=" + Date.now()];
-    for (const ruta of rutas) {
+    const descomprime = async (gz) => {
+      if (typeof DecompressionStream !== "function") return null;
+      const llano = new Blob([gz]).stream().pipeThrough(new DecompressionStream("gzip"));
+      return new Uint8Array(await new Response(llano).arrayBuffer());
+    };
+    const pruebaGz = async (gz) => {
+      const c = await descomprime(gz);
+      if (!c || !(await íntegro(c))) return false;
+      bytesModule = c;
+      return true;
+    };
+    const entero = async (ruta, comprimido) => {
       try {
-        const respuesta = await fetch(ruta);
-        if (!respuesta.ok) continue;
-        const crudo = new Uint8Array(await respuesta.arrayBuffer());
-        const esperado = Number(respuesta.headers.get("content-length") || 0);
-        if (esperado && crudo.length !== esperado) {
-          console.warn("wasm truncado en", ruta, crudo.length, "de", esperado);
-          continue;
-        }
-        let candidato = crudo;
-        if (ruta.indexOf(".gz") >= 0) {
-          if (typeof DecompressionStream !== "function") continue;
-          const llano = new Blob([crudo]).stream().pipeThrough(new DecompressionStream("gzip"));
-          candidato = new Uint8Array(await new Response(llano).arrayBuffer());
-        }
-        if (await íntegro(candidato)) {
-          bytesModule = candidato;
-          break;
-        }
-        console.warn("wasm no íntegro en", ruta, candidato.length, "bytes");
+        const r = await fetch(ruta);
+        if (!r.ok) return false;
+        const b = new Uint8Array(await r.arrayBuffer());
+        const cl = Number(r.headers.get("content-length") || 0);
+        if (cl && b.length !== cl) return false;
+        return comprimido ? pruebaGz(b) : (await íntegro(b) ? (bytesModule = b, true) : false);
       } catch (e) {
         console.warn("no se pudo cargar", ruta + ":", e && e.message ? e.message : e);
+        return false;
       }
-    }
-    if (!bytesModule) {
-      throw new Error("no se pudo bajar un apkc.wasm íntegro: recarga con Ctrl+Mayús+R o borra los datos del sitio");
+    };
+    const porRangos = async (ruta, total, comprimido) => {
+      const TROZO = 262144;
+      const bytes = new Uint8Array(total);
+      let pos = 0;
+      for (let ini = 0; ini < total; ini += TROZO) {
+        const fin = Math.min(ini + TROZO, total) - 1;
+        try {
+          const r = await fetch(ruta + (ruta.indexOf("?") < 0 ? "?" : "&") +
+            "directo=" + Date.now() + "-" + ini, { headers: { Range: "bytes=" + ini + "-" + fin } });
+          if (r.status !== 206 && !r.ok) return false;
+          const b = new Uint8Array(await r.arrayBuffer());
+          if (b.length !== fin - ini + 1) return false;
+          bytes.set(b, pos); pos += b.length;
+        } catch (e) { return false; }
+      }
+      if (comprimido) {
+        if (manifest && manifest.gzSha256) {
+          const h = await huella(bytes);
+          if (h && h !== manifest.gzSha256) return false;
+        }
+        return pruebaGz(bytes);
+      }
+      if (!(await íntegro(bytes))) return false;
+      bytesModule = bytes;
+      return true;
+    };
+
+    if (!await entero("/apkc.wasm.gz", true)) {
+      if (!manifest || !manifest.gzBytes || !await porRangos("/apkc.wasm.gz", manifest.gzBytes, true)) {
+        if (!await entero("/apkc.wasm", false)) {
+          if (!manifest || !manifest.bytes || !await porRangos("/apkc.wasm", manifest.bytes, false)) {
+            throw new Error("no se pudo bajar un apkc.wasm íntegro: usa Reparar caché en Ajustes o recarga con Ctrl+Mayús+R");
+          }
+        }
+      }
     }
   }
   // la instancia se crea CADA VEZ: un binario de Go en wasm no puede volver a correrse sobre la

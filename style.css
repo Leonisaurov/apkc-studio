@@ -1535,6 +1535,10 @@ pre {
   font-size: 11px;
 }
 .menu-apariencia-lista select { width: 100%; }
+.reparacion { border-top: 1px solid var(--borde); padding-top: 8px; }
+.reparacion summary { font-size: 11px; color: var(--tenue); cursor: pointer; }
+.reparacion .nota { margin: 6px 0; font-size: 11px; line-height: 1.5; }
+.reparacion button { width: 100%; }
 
 /* ---- barra del editor en modo solo iconos --------------------------------- */
 :root[data-botones="iconos"] .texto-boton { display: none; }

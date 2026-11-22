@@ -69,6 +69,12 @@ self.addEventListener("fetch", (evento) => {
   const url = new URL(peticion.url);
   if (url.origin !== self.location.origin) return;
   if (SOLO_RED.some((patron) => patron.test(url.pathname))) return;
+  // `?directo=` pide explícitamente la red: la copia cacheada puede estar truncada y un
+  // `caches.match(..., { ignoreSearch: true })` la devolvería aunque la URL lleve otra query.
+  if (url.searchParams.has("directo")) {
+    evento.respondWith(fetch(peticion).then(conCabeceras));
+    return;
+  }
 
   // El shell y los módulos van a la red primero: así una actualización no se queda servida por
   // una caché vieja. La caché es el respaldo para cuando no hay red. El wasm y las imágenes sí

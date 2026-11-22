@@ -5,3 +5,4 @@ import "./vistas.js";
 import "./diagnostico.js";
 import "./idioma.js";
 import "./offline.js";
+import "./reparar.js";
