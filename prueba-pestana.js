@@ -2056,6 +2056,25 @@ async function conductor() {
         sucio: !document.getElementById("marca-sucio").hidden,
         campo: (document.querySelector('[data-propiedad="android:text"]') || {}).value,
       };
+      // el texto del layout es dato: un <script> en android:text no se convierte en marcado, el
+      // XML lo escapa y el undo tree devuelve el texto anterior
+      const campoHostil = document.querySelector('[data-propiedad="android:text"]');
+      const antesHostil = area.value;
+      campoHostil.value = "A & B <script>alert(1)</script>";
+      campoHostil.dispatchEvent(new Event("change", { bubbles: true }));
+      await new Promise((ok) => setTimeout(ok, 750));
+      const inyectados = document.querySelectorAll("#previa-propiedades script").length;
+      const xmlHostil = /A &amp; B &lt;script&gt;alert\\(1\\)&lt;\\/script&gt;/.test(area.value) &&
+        !/<script>/i.test(area.value);
+      const deshechoHostil = deshacer();
+      await new Promise((ok) => setTimeout(ok, 300));
+      const hostil = {
+        campo: !!campoHostil && campoHostil.value === "A & B <script>alert(1)</script>",
+        inyectados,
+        xml: xmlHostil,
+        deshecho: deshechoHostil,
+        vuelta: area.value === antesHostil,
+      };
       const campoId2 = document.querySelector('[data-propiedad="android:id"]');
       campoId2.value = "saludo";
       campoId2.dispatchEvent(new Event("change", { bubbles: true }));
@@ -2255,7 +2274,7 @@ async function conductor() {
       EDITOR.cambiar(0, area.value.length, original, [0, 0]);
       await new Promise((ok) => setTimeout(ok, 800));
       marcarSucio(false);
-      return { apagado, encendido, annadido, ficha, cambioTexto, cambioId, cambioFondo, seleccionRaiz,
+      return { apagado, encendido, annadido, ficha, cambioTexto, hostil, cambioId, cambioFondo, seleccionRaiz,
         cambioOrientacion, cambioTipo, rechazoRel, annadidoEdit, antesArrastre, arrastrado, borrado,
         vuelta, conSeleccion, suelto, enRender, restaurado: area.value === original };
     })()`);
@@ -2287,26 +2306,13 @@ async function conductor() {
       editorLayout.cambioTexto.ultimo === true && editorLayout.cambioTexto.sucio === true &&
       editorLayout.cambioTexto.campo === "Hola & adiós",
       JSON.stringify(editorLayout.cambioTexto).slice(0, 360));
-    // el texto del layout es dato: un `<script>` en android:text no puede convertirse en marcado
-    const txtHostil = await evaluar(`(async () => {
-      const campo = document.querySelector('[data-propiedad="android:text"]');
-      const area = document.getElementById("codigo");
-      const antes = area.value;
-      campo.value = 'A &amp; B <script>alert(1)</script>';
-      campo.dispatchEvent(new Event("change", { bubbles: true }));
-      await new Promise((ok) => setTimeout(ok, 750));
-      const inyectados = document.querySelectorAll('[data-propiedad] script').length;
-      // el XML correcto NO lleva la etiqueta literal: la ha escapado como &lt;script&gt;
-      const xmlEscapado = /&lt;script&gt;/.test(area.value) && !/<script>/i.test(area.value);
-      document.dispatchEvent(new KeyboardEvent("keydown",
-        { key: "z", ctrlKey: true, bubbles: true, cancelable: true }));
-      await new Promise((ok) => setTimeout(ok, 300));
-      return { inyectados, xmlEscapado, deshecho: area.value === antes };
-    })()`);
+    // el texto del layout es dato: un `<script>` en android:text se escapa en el XML, no se
+    // convierte en marcado y el undo tree devuelve el texto anterior
     comprueba("un <script> en android:text se escapa, no se inyecta y el cambio se deshace",
-      txtHostil.inyectados === 0 && txtHostil.xmlEscapado === true &&
-      txtHostil.deshecho === true,
-      JSON.stringify(txtHostil).slice(0, 280));
+      editorLayout.hostil.campo === true && editorLayout.hostil.inyectados === 0 &&
+      editorLayout.hostil.xml === true && editorLayout.hostil.deshecho === true &&
+      editorLayout.hostil.vuelta === true,
+      JSON.stringify(editorLayout.hostil).slice(0, 320));
 
     comprueba("cambiar android:id normaliza a @+id y el modelo conserva el nodo seleccionado",
       editorLayout.cambioId.xml === true && editorLayout.cambioId.id === "id/saludo" &&
