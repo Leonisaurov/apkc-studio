@@ -7,6 +7,8 @@
 //   - jerarquía de vistas y los contenedores `LinearLayout` (vertical/horizontal, pesos) y los de
 //     marco (`FrameLayout`, `RelativeLayout`, `ScrollView`, `ConstraintLayout`… como marco);
 //   - `android:text` literal y `@string/nombre` con el mapa que se le pase (OPFS lo lee el panel);
+//   - `android:background` y `android:textColor` (`#RGB`, `#ARGB`, `#RRGGBB`, `#AARRGGBB` o
+//     `@color/nombre` con el mapa de colores que también lee el panel), que el canvas usa al pintar;
 //   - `layout_width`/`layout_height` con `match_parent`, `wrap_content` y `Ndp`;
 //   - `layout_weight`, `gravity`, `layout_gravity`, `padding` y `layout_margin` (y sus lados).
 //
@@ -160,6 +162,27 @@ function aNumero(valor) {
   return Number.isFinite(n) ? n : 0;
 }
 
+// Un color del layout en la forma que entiende el canvas. Android escribe `#ARGB` y `#AARRGGBB`;
+// el canvas espera `#RGBA`/`#RRGGBBAA`, así que se reordenan los canales. `@color/nombre` se resuelve
+// con el mapa que lee el panel de `res/values*/colors.xml`; una referencia que no está se deja sin
+// color en vez de inventar uno.
+function colorDeCanvas(valor, colores, profundidad = 0) {
+  if (typeof valor !== "string") return "";
+  const v = valor.trim();
+  if (!v) return "";
+  if (/^#[0-9a-fA-F]{3}$/.test(v) || /^#[0-9a-fA-F]{6}$/.test(v)) return v;
+  if (/^#[0-9a-fA-F]{4}$/.test(v)) {
+    const [a, r, g, b] = v.slice(1).split("");
+    return "#" + r + r + g + g + b + b + a + a;
+  }
+  if (/^#[0-9a-fA-F]{8}$/.test(v)) return "#" + v.slice(3) + v.slice(1, 3);
+  const m = /^@color\/([A-Za-z_][A-Za-z0-9_]*)$/.exec(v);
+  if (m && colores && profundidad < 2 && Object.prototype.hasOwnProperty.call(colores, m[1])) {
+    return colorDeCanvas(String(colores[m[1]]), colores, profundidad + 1);
+  }
+  return "";
+}
+
 // `Ndp`/`Npx`/`Nsp` se toman como dp; match_parent devuelve el máximo y wrap_content devuelve null
 // (que el llamante resuelve con la medida intrínseca).
 function dimension(valor, maximo) {
@@ -226,7 +249,7 @@ function resolverTexto(valor, strings, resolucion) {
   return decodificar(valor);
 }
 
-function crearNodo(elemento, resolucion, strings) {
+function crearNodo(elemento, resolucion, strings, colores) {
   const tipo = elemento.nombre.replace(/^.*\./, "");
   const id = (() => {
     const crudo = local(elemento.atributos, "id");
@@ -238,6 +261,8 @@ function crearNodo(elemento, resolucion, strings) {
     tipo,
     id,
     texto: resolverTexto(local(elemento.atributos, "text"), strings, resolucion),
+    fondo: colorDeCanvas(local(elemento.atributos, "background"), colores),
+    colorTexto: colorDeCanvas(local(elemento.atributos, "textColor"), colores),
     atributos: elemento.atributos,
     hijos: [],
     rect: { x: 0, y: 0, ancho: 0, alto: 0 },
@@ -245,7 +270,7 @@ function crearNodo(elemento, resolucion, strings) {
   resolucion.elementos++;
   for (const hijo of elemento.hijos) {
     if (hijo.nombre === "#texto") continue;
-    nodo.hijos.push(crearNodo(hijo, resolucion, strings));
+    nodo.hijos.push(crearNodo(hijo, resolucion, strings, colores));
   }
   return nodo;
 }
@@ -402,7 +427,7 @@ export function modeloDeLayout(xml, opciones = {}) {
       ? Number(opciones.pantalla.alto) : PANTALLA_POR_DEFECTO.alto,
   };
   const resolucion = { elementos: 0, sinStrings: 0 };
-  const raiz = crearNodo(elemento, resolucion, opciones.strings || {});
+  const raiz = crearNodo(elemento, resolucion, opciones.strings || {}, opciones.colores || {});
   raiz.rect = { x: 0, y: 0, ancho: pantalla.ancho, alto: pantalla.alto };
   disponer(raiz);
   const modelo = {

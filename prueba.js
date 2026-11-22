@@ -574,6 +574,145 @@ if (!enVacia.ok || !vistaXml.modeloDeLayout(enVacia.xml).ok || !/<TextView\b/.te
   mal("añadir sobre una raíz autocerrada no abre la etiqueta: " + (enVacia.error || enVacia.xml));
 }
 
+// 6b-ter. las propiedades de un nodo: se leen y se escriben sobre el texto, con entidades, ids,
+// colores y la orientación de la raíz. Todo puro; el panel solo pone los campos.
+const conProps = `<?xml version="1.0" encoding="utf-8"?>
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:orientation="vertical"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:background="#101010">
+
+    <TextView
+        android:id="@+id/saludo"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:text="A &amp; B"
+        android:textColor="#ff0000"/>
+</LinearLayout>
+`;
+const propsTexto = layoutEditor.leerPropiedades(conProps, [0]);
+if (!propsTexto.ok || propsTexto.tipo !== "TextView" || propsTexto.raiz !== false) {
+  mal("leerPropiedades no ve el TextView: " + JSON.stringify(propsTexto));
+} else if (propsTexto.valores["android:text"] !== "A & B" ||
+    propsTexto.valores["android:id"] !== "@+id/saludo" ||
+    propsTexto.valores["android:textColor"] !== "#ff0000") {
+  mal("leerPropiedades no devuelve los valores del XML: " + JSON.stringify(propsTexto.valores));
+}
+const propsRaiz = layoutEditor.leerPropiedades(conProps, []);
+if (!propsRaiz.ok || propsRaiz.raiz !== true || propsRaiz.tipo !== "LinearLayout" ||
+    propsRaiz.valores["android:orientation"] !== "vertical" ||
+    propsRaiz.valores["android:background"] !== "#101010") {
+  mal("leerPropiedades no lee la raíz y su orientación: " + JSON.stringify(propsRaiz));
+}
+const textoEscrito = layoutEditor.escribirPropiedad(conProps, [0], "android:text", "Hola <tú> & yo");
+if (!textoEscrito.ok || textoEscrito.valor !== "Hola <tú> & yo" ||
+    !/android:text="Hola &lt;tú&gt; &amp; yo"/.test(textoEscrito.xml)) {
+  mal("escribirPropiedad no escapa el texto: " + (textoEscrito.error || textoEscrito.xml));
+} else {
+  const m = vistaXml.modeloDeLayout(textoEscrito.xml);
+  if (!m.ok || m.modelo.raiz.hijos[0].texto !== "Hola <tú> & yo") {
+    mal("el texto escapado no vuelve igual al modelo: " + JSON.stringify(m.modelo && m.modelo.raiz.hijos[0].texto));
+  }
+}
+const idEscrito = layoutEditor.escribirPropiedad(conProps, [0], "android:id", "@id/viejo");
+if (!idEscrito.ok || !/android:id="@\+id\/viejo"/.test(idEscrito.xml)) {
+  mal("escribirPropiedad no normaliza el id a @+id: " + (idEscrito.error || idEscrito.xml));
+}
+if (layoutEditor.escribirPropiedad(conProps, [0], "android:id", "1 dos").ok) {
+  mal("escribirPropiedad acepta un id que no es un identificador");
+}
+const colorEscrito = layoutEditor.escribirPropiedad(conProps, [0], "android:background", "#00ff00");
+if (!colorEscrito.ok) mal("escribirPropiedad rechaza un color #RRGGBB: " + colorEscrito.error);
+else {
+  const m = vistaXml.modeloDeLayout(colorEscrito.xml);
+  const hijo = m.ok ? m.modelo.raiz.hijos[0] : null;
+  if (!hijo || hijo.fondo !== "#00ff00" || hijo.colorTexto !== "#ff0000") {
+    mal("el color escrito no llega al modelo en vivo: " + JSON.stringify(hijo && { f: hijo.fondo, t: hijo.colorTexto }));
+  }
+}
+if (layoutEditor.escribirPropiedad(conProps, [0], "android:background", "rojo").ok) {
+  mal("escribirPropiedad acepta «rojo» como color");
+}
+const conRef = vistaXml.modeloDeLayout(
+  '<TextView xmlns:android="http://schemas.android.com/apk/res/android" ' +
+  'android:background="@color/marca" android:textColor="#80ff0000" android:text="x"/>',
+  { colores: { marca: "#123456" } });
+if (!conRef.ok || conRef.modelo.raiz.fondo !== "#123456" ||
+    conRef.modelo.raiz.colorTexto !== "#ff000080") {
+  mal("el modelo en vivo no resuelve @color ni reordena el alfa: " +
+    JSON.stringify(conRef.modelo && { f: conRef.modelo.raiz.fondo, t: conRef.modelo.raiz.colorTexto }));
+}
+const dimensionEscrita = layoutEditor.escribirPropiedad(conProps, [0], "android:layout_width", "match_parent");
+if (!dimensionEscrita.ok || !/android:layout_width="match_parent"/.test(dimensionEscrita.xml)) {
+  mal("escribirPropiedad no escribe match_parent: " + (dimensionEscrita.error || ""));
+}
+if (layoutEditor.escribirPropiedad(conProps, [0], "android:layout_width", "ancho").ok) {
+  mal("escribirPropiedad acepta «ancho» como dimensión");
+}
+const pesoEscrito = layoutEditor.escribirPropiedad(conProps, [0], "android:layout_weight", "2");
+if (!pesoEscrito.ok || !/android:layout_weight="2"/.test(pesoEscrito.xml)) {
+  mal("escribirPropiedad no escribe el peso: " + (pesoEscrito.error || ""));
+}
+if (layoutEditor.escribirPropiedad(conProps, [0], "android:layout_weight", "-1").ok) {
+  mal("escribirPropiedad acepta un peso negativo");
+}
+const gravedadEscrita = layoutEditor.escribirPropiedad(conProps, [0], "android:gravity", "center|right");
+if (!gravedadEscrita.ok || !/android:gravity="center\|right"/.test(gravedadEscrita.xml)) {
+  mal("escribirPropiedad no escribe la gravedad: " + (gravedadEscrita.error || ""));
+}
+if (layoutEditor.escribirPropiedad(conProps, [0], "android:gravity", "centro").ok) {
+  mal("escribirPropiedad acepta una gravedad inventada");
+}
+const orientacionEscrita = layoutEditor.escribirPropiedad(conProps, [], "android:orientation", "horizontal");
+if (!orientacionEscrita.ok) mal("escribirPropiedad no cambia la orientación de la raíz: " + orientacionEscrita.error);
+else {
+  const m = vistaXml.modeloDeLayout(orientacionEscrita.xml);
+  if (!m.ok || vistaXml.atributoLocal(m.modelo.raiz.atributos, "orientation") !== "horizontal") {
+    mal("la orientación escrita no llega a la raíz del modelo");
+  }
+}
+const desconocida = layoutEditor.escribirPropiedad(conProps, [0], "android:style", "x");
+if (desconocida.ok || !/propiedad desconocida/.test(desconocida.error)) {
+  mal("escribirPropiedad no rechaza por nombre una propiedad desconocida");
+}
+
+// el tipo del layout raíz: se conservan atributos e hijos; RelativeLayout se rechaza por nombre
+const aMarco = layoutEditor.cambiarTipoRaiz(conProps, "FrameLayout");
+if (!aMarco.ok || !/<FrameLayout\b/.test(aMarco.xml) || /<LinearLayout\b/.test(aMarco.xml) ||
+    !/<TextView\b/.test(aMarco.xml) || /android:orientation/.test(aMarco.xml)) {
+  mal("cambiarTipoRaiz no pasa a FrameLayout conservando los hijos: " + (aMarco.error || aMarco.xml));
+}
+const aLineal = aMarco.ok ? layoutEditor.cambiarTipoRaiz(aMarco.xml, "LinearLayout") : aMarco;
+if (!aLineal.ok || !/android:orientation="vertical"/.test(aLineal.xml)) {
+  mal("cambiarTipoRaiz no vuelve a LinearLayout con orientación: " + (aLineal.error || ""));
+}
+const relativo = layoutEditor.cambiarTipoRaiz(conProps, "RelativeLayout");
+if (relativo.ok || relativo.rechazado !== "RelativeLayout" || !/RelativeLayout/.test(relativo.error)) {
+  mal("cambiarTipoRaiz no rechaza RelativeLayout por su nombre: " + JSON.stringify(relativo));
+}
+const desdeRelativo = layoutEditor.cambiarTipoRaiz(
+  '<RelativeLayout xmlns:android="http://schemas.android.com/apk/res/android"/>', "LinearLayout");
+if (desdeRelativo.ok) mal("cambiarTipoRaiz acepta cambiar una raíz que no es lineal ni marco");
+
+// la paleta: ordenada, sin duplicados, cada tipo deja un XML válido y avisa si el dibujo no lo imita
+const paleta = layoutEditor.tiposDisponibles();
+const requeridos = ["TextView", "Button", "ImageView", "ImageButton", "EditText", "CheckBox",
+  "RadioButton", "Switch", "ProgressBar", "SeekBar", "View", "LinearLayout", "FrameLayout",
+  "RelativeLayout", "ScrollView", "TableLayout", "GridLayout", "Space"];
+if (new Set(paleta).size !== paleta.length) mal("la paleta repite tipos: " + paleta.join(","));
+for (const tipo of requeridos) if (!paleta.includes(tipo)) mal("la paleta no ofrece " + tipo);
+for (const tipo of paleta) {
+  const info = layoutEditor.infoTipo(tipo);
+  if (!info || info.tipo !== tipo) mal("infoTipo no describe " + tipo);
+  const insertado2 = layoutEditor.insertarElemento(layoutBase, { tipo });
+  if (!insertado2.ok) mal("la paleta no puede añadir " + tipo + ": " + insertado2.error);
+  else if (!vistaXml.modeloDeLayout(insertado2.xml).ok) mal("el XML de " + tipo + " no se analiza");
+}
+if (layoutEditor.infoTipo("CheckBox").aviso === "" || layoutEditor.infoTipo("TextView").aviso !== "") {
+  mal("la paleta no marca con aviso los tipos que el dibujo no imita");
+}
+
 // el bloque que emite el intérprete: capturas en orden, avisos aparte, cuentas y error tolerantes
 const ejecucionContador = {
   actividad: "com.hola.contador.MainActivity", metodo: "onCreate", pasos: 128, interacciones: 1,
@@ -734,6 +873,24 @@ for (const [id, donde] of [
   ["previa-anadir-imageview", "el botón que añade un ImageView"],
   ["previa-anadir-linearlayout", "el botón que añade un LinearLayout"],
   ["previa-anadir-framelayout", "el botón que añade un FrameLayout"],
+  ["previa-anadir-edittext", "el botón que añade un EditText"],
+  ["previa-anadir-imagebutton", "el botón que añade un ImageButton"],
+  ["previa-anadir-checkbox", "el botón que añade un CheckBox"],
+  ["previa-anadir-radiobutton", "el botón que añade un RadioButton"],
+  ["previa-anadir-switch", "el botón que añade un Switch"],
+  ["previa-anadir-progressbar", "el botón que añade un ProgressBar"],
+  ["previa-anadir-seekbar", "el botón que añade un SeekBar"],
+  ["previa-anadir-view", "el botón que añade un View"],
+  ["previa-anadir-space", "el botón que añade un Space"],
+  ["previa-anadir-relativelayout", "el botón que añade un RelativeLayout"],
+  ["previa-anadir-scrollview", "el botón que añade un ScrollView"],
+  ["previa-anadir-tablelayout", "el botón que añade un TableLayout"],
+  ["previa-anadir-gridlayout", "el botón que añade un GridLayout"],
+  ["previa-propiedades", "la ficha de propiedades del modo editar"],
+  ["previa-propiedades-titulo", "el título de la ficha de propiedades"],
+  ["previa-propiedades-campos", "los campos de la ficha de propiedades"],
+  ["previa-propiedades-vacio", "el aviso de que no hay nada seleccionado"],
+  ["previa-seleccionar-raiz", "el botón que selecciona el layout raíz"],
   ["previa-editar-estado", "la línea de estado del modo editar"],
   ["vista-modo-previa", "la pestaña Vista previa de la vista Pantalla"],
   ["vista-modo-emulador", "la pestaña Emulador de la vista Pantalla"],
@@ -766,8 +923,14 @@ if (!/id="previa-modo-editar"[^>]*aria-pressed="false"/.test(html)) {
 if (!/id="previa-paleta"[^>]*hidden/.test(html)) {
   mal("la paleta de añadir empieza visible: solo debe verse en modo editar");
 }
-for (const tipo of ["TextView", "Button", "ImageView", "LinearLayout", "FrameLayout"]) {
+for (const tipo of ["TextView", "Button", "ImageView", "LinearLayout", "FrameLayout", "EditText",
+  "ImageButton", "CheckBox", "RadioButton", "Switch", "ProgressBar", "SeekBar", "View", "Space",
+  "RelativeLayout", "ScrollView", "TableLayout", "GridLayout"]) {
   if (!new RegExp('data-tipo="' + tipo + '"').test(html)) mal("la paleta no ofrece " + tipo);
+  // cada botón se anuncia con su nombre y se alcanza con Tab: no basta el `title`
+  if (!new RegExp('<button[^>]*data-tipo="' + tipo + '"[^>]*aria-label=').test(html)) {
+    mal("el botón de la paleta de " + tipo + " no tiene aria-label");
+  }
 }
 // el modo «en vivo» dibuja el layout: no puede quedar ni un visor de código XML en el panel
 for (const idViejo of ["previa-xml", "previa-xml-codigo", "previa-xml-estado", "previa-modo-xml"]) {
