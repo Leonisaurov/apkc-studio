@@ -6,8 +6,8 @@ const NOMBRE = "apkc-studio";
 
 let politica = null;
 try {
-  if (typeof TrustedTypes !== "undefined" && TrustedTypes.createPolicy) {
-    politica = TrustedTypes.createPolicy(NOMBRE, {
+  if (typeof trustedTypes !== "undefined" && trustedTypes.createPolicy) {
+    politica = trustedTypes.createPolicy(NOMBRE, {
       createHTML(cadena) {
         const texto = String(cadena);
         if (/<\s*script\b|\son[a-z]+\s*=/i.test(texto)) {
