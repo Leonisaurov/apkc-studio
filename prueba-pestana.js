@@ -2871,6 +2871,25 @@ async function conductor() {
       document.getElementById("previa-propiedades-cerrar").click();
       await nav(180);
       const trasCerrar = { seleccion: PREVIA_PANEL.estado().seleccion, ficha: ficha.hidden };
+      // 7b. el deshacer REAL del editor (la misma función que el botón Historial, no un Ctrl+Z
+      // sintético) quita el nodo que soltó la paleta: XML y modelo vuelven al estado anterior
+      const botonesAntesDeshacer = contarBotones(PREVIA_PANEL.modeloVivo());
+      const deshecho = deshacer();
+      await nav(400);
+      await PREVIA_PANEL.refrescarVivo();
+      const modeloDeshecho = PREVIA_PANEL.modeloVivo();
+      const undo = {
+        hecho: deshecho === true,
+        botonesAntes: botonesAntesDeshacer,
+        botones: contarBotones(modeloDeshecho),
+        botonesInicial: botonesModeloAntes,
+        xmlIgual: area.value === antesXml,
+        idFuera: !/@\\+id\\/boton\\b/.test(area.value),
+        nodoFuera: !modeloDeshecho || !seleccion ||
+          enRuta(modeloDeshecho.raiz, seleccion) === null,
+        modeloValido: !!modeloDeshecho,
+        sucio: !document.getElementById("marca-sucio").hidden,
+      };
       // 8. Vista previa y Emulador siguen midiendo lo mismo; el lápiz no los toca
       document.getElementById("previa-modo-render").click();
       await nav(200);
@@ -2890,7 +2909,7 @@ async function conductor() {
       return { antes, trasEncender, capas, scroll: { ...scroll, desplazado },
         plegada, desplegada, cajaAntesPlegar, realimentacion, soltado, trasSoltar,
         camposVisibles, fichaDentro, fichaPlegada, trasEsc, fichaAlSeleccionar, trasCerrar,
-        enRender, final, restaurado: area.value === original };
+        undo, enRender, final, restaurado: area.value === original };
     })()`);
     await exec("Emulation.clearDeviceMetricsOverride");
     await esperar(400);
@@ -2950,6 +2969,639 @@ async function conductor() {
       editorFlotante.restaurado === true,
       JSON.stringify({ enRender: editorFlotante.enRender, final: editorFlotante.final,
         antes: editorFlotante.antes, restaurado: editorFlotante.restaurado }).slice(0, 360));
+    comprueba("deshacer() del editor quita el nodo soltado del XML y del modelo y deja el número de botones inicial",
+      editorFlotante.undo.hecho === true &&
+      editorFlotante.undo.xmlIgual === true &&
+      editorFlotante.undo.idFuera === true &&
+      editorFlotante.undo.nodoFuera === true &&
+      editorFlotante.undo.modeloValido === true &&
+      editorFlotante.undo.botonesAntes === editorFlotante.undo.botonesInicial + 1 &&
+      editorFlotante.undo.botones === editorFlotante.undo.botonesInicial,
+      JSON.stringify(editorFlotante.undo).slice(0, 360));
+
+    // 12a-septies-sexies. El destino de un tipo soltado es el CONTENEDOR bajo el puntero, no
+    // siempre la raíz: sobre un LinearLayout interno entra como hijo suyo (la ruta del padre no
+    // está vacía), con XML válido y el nodo nuevo seleccionado.
+    // De la ficha, el id, el texto con `&amp;` y el color ya están medidos en «la ficha de
+    // propiedades muestra el TextView…», «cambiar android:text escribe el XML escapado…»,
+    // «un <script> en android:text…» y «cambiar android:background llega al modelo…» del bloque
+    // 12a-septies; aquí solo falta el diff mínimo, que no se repite. El `#ultimo-codigo` intacto
+    // también se mide allí («cambiar android:text … no toca #ultimo-codigo»).
+    const editorAnidado = await evaluar(`(async () => {
+      const vp = await import("/vista-previa.js");
+      const vx = await import("/vista-xml.js");
+      const nav = (ms) => new Promise((ok) => setTimeout(ok, ms));
+      marcarSucio(false);
+      await abrir("/proyecto/res/layout/main.xml");
+      if (!PREVIA_PANEL.estado().visible) document.getElementById("previa-alternar").click();
+      document.getElementById("previa-modo-vivo").click();
+      await nav(900);
+      const area = document.getElementById("codigo");
+      const original = area.value;
+      const anidado = '<?xml version="1.0" encoding="utf-8"?>\\n' +
+        '<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"\\n' +
+        '    android:orientation="vertical"\\n' +
+        '    android:layout_width="match_parent"\\n' +
+        '    android:layout_height="match_parent">\\n\\n' +
+        '    <LinearLayout\\n' +
+        '        android:id="@+id/interno"\\n' +
+        '        android:orientation="vertical"\\n' +
+        '        android:layout_width="match_parent"\\n' +
+        '        android:layout_height="wrap_content">\\n\\n' +
+        '        <TextView\\n' +
+        '            android:id="@+id/dentro"\\n' +
+        '            android:layout_width="wrap_content"\\n' +
+        '            android:layout_height="wrap_content"\\n' +
+        '            android:text="Dentro"/>\\n' +
+        '    </LinearLayout>\\n\\n' +
+        '    <TextView\\n' +
+        '        android:id="@+id/fuera"\\n' +
+        '        android:layout_width="wrap_content"\\n' +
+        '        android:layout_height="wrap_content"\\n' +
+        '        android:text="Fuera"/>\\n' +
+        '</LinearLayout>\\n';
+      EDITOR.cambiar(0, area.value.length, anidado, [0, 0]);
+      await nav(900);
+      const editar = document.getElementById("previa-modo-editar");
+      if (!PREVIA_PANEL.estado().editando) { editar.click(); await nav(400); }
+      const canvas = document.getElementById("previa-vivo-canvas");
+      const modelo = PREVIA_PANEL.modeloVivo();
+      const interno = modelo ? modelo.raiz.hijos.find((h) => h.id === "id/interno") : null;
+      const listo = !!(modelo && interno && interno.rect &&
+        interno.rect.ancho > 0 && interno.rect.alto > 0);
+      const caja = listo ? vp.escalaPara(modelo, canvas.clientWidth, canvas.clientHeight) : null;
+      const cajaCanvas = canvas.getBoundingClientRect();
+      const factor = cajaCanvas.width > 0 && canvas.clientWidth
+        ? canvas.clientWidth / cajaCanvas.width : 1;
+      const punto = listo ? {
+        x: cajaCanvas.left +
+          (caja.x + (interno.rect.x + interno.rect.ancho / 2) * caja.escala) / factor,
+        y: cajaCanvas.top +
+          (caja.y + (interno.rect.y + interno.rect.alto / 2) * caja.escala) / factor,
+      } : null;
+      const boton = document.getElementById("previa-anadir-button");
+      const cajaBoton = boton.getBoundingClientRect();
+      if (punto) {
+        boton.dispatchEvent(new PointerEvent("pointerdown", { bubbles: true, button: 0,
+          pointerId: 51, clientX: cajaBoton.left + 10, clientY: cajaBoton.top + 10 }));
+        document.dispatchEvent(new PointerEvent("pointermove", { bubbles: true, pointerId: 51,
+          clientX: punto.x - 20, clientY: punto.y + 12 }));
+        document.dispatchEvent(new PointerEvent("pointermove", { bubbles: true, pointerId: 51,
+          clientX: punto.x, clientY: punto.y }));
+        document.dispatchEvent(new PointerEvent("pointerup", { bubbles: true, pointerId: 51,
+          clientX: punto.x, clientY: punto.y }));
+        await nav(900);
+      }
+      const modeloTras = PREVIA_PANEL.modeloVivo();
+      const seleccion = PREVIA_PANEL.estado().seleccion;
+      const enRuta = (raiz, ruta) => {
+        let n = raiz;
+        for (const i of ruta || []) n = n && (n.hijos || [])[i];
+        return n || null;
+      };
+      const padreRuta = seleccion ? seleccion.slice(0, -1) : null;
+      const padre = modeloTras && padreRuta ? enRuta(modeloTras.raiz, padreRuta) : null;
+      const nuevo = modeloTras && seleccion ? enRuta(modeloTras.raiz, seleccion) : null;
+      const validado = vx.modeloDeLayout(area.value);
+      const raizValidada = validado.ok ? validado.modelo.raiz : null;
+      const internoValidado = raizValidada
+        ? raizValidada.hijos.find((h) => h.id === "id/interno") : null;
+      const dentro = nuevo && padre && nuevo.rect && padre.rect
+        ? nuevo.rect.x >= padre.rect.x - 0.5 && nuevo.rect.y >= padre.rect.y - 0.5 &&
+          nuevo.rect.x + nuevo.rect.ancho <= padre.rect.x + padre.rect.ancho + 0.5 &&
+          nuevo.rect.y + nuevo.rect.alto <= padre.rect.y + padre.rect.alto + 0.5
+        : false;
+      const anidadoOk = {
+        listo,
+        punto: !!punto,
+        seleccion,
+        padreId: padre ? padre.id : "",
+        padreTipo: padre ? padre.tipo : "",
+        nuevoTipo: nuevo ? nuevo.tipo : "",
+        rutaHonda: !!seleccion && seleccion.length >= 2,
+        dentro,
+        xmlValido: !!validado.ok,
+        enElPadre: !!(internoValidado &&
+          (internoValidado.hijos || []).some((h) => h.tipo === "Button")),
+        fueraIntacto: !!(raizValidada &&
+          (raizValidada.hijos || []).some((h) => h.id === "id/fuera")),
+      };
+      // el fondo que escribe la ficha tiene que ser un solo trozo insertado: el resto del fichero
+      // queda igual, así que el undo tree guarda un cambio pequeño y no se relanza ninguna pasada
+      const diferencia = (a, b) => {
+        const max = Math.min(a.length, b.length);
+        let ini = 0;
+        while (ini < max && a[ini] === b[ini]) ini++;
+        let fa = a.length, fb = b.length;
+        while (fa > ini && fb > ini && a[fa - 1] === b[fb - 1]) { fa--; fb--; }
+        return { ini, fin: fa, medio: b.slice(ini, fb) };
+      };
+      const antesColor = area.value;
+      const campoFondo = document.querySelector(
+        '#previa-propiedades-campos [data-propiedad="android:background"]');
+      let dif = null;
+      if (campoFondo && !document.getElementById("previa-propiedades").hidden) {
+        campoFondo.value = "#123456";
+        campoFondo.dispatchEvent(new Event("change", { bubbles: true }));
+        await nav(800);
+        dif = diferencia(antesColor, area.value);
+      }
+      const fondo = {
+        campo: !!campoFondo,
+        escrito: /android:background="#123456"/.test(area.value),
+        medio: dif ? dif.medio : "",
+        largo: dif ? dif.medio.length : -1,
+        unico: !!dif && dif.fin === dif.ini && dif.medio.length > 0 && dif.medio.length < 64,
+        campoValor: (document.querySelector(
+          '#previa-propiedades-campos [data-propiedad="android:background"]') || {}).value || "",
+      };
+      if (PREVIA_PANEL.estado().editando) { editar.click(); await nav(200); }
+      marcarSucio(false);
+      EDITOR.cambiar(0, area.value.length, original, [0, 0]);
+      await nav(900);
+      marcarSucio(false);
+      return { anidadoOk, fondo, restaurado: area.value === original };
+    })()`);
+    comprueba("soltar un tipo sobre un LinearLayout interno lo deja como hijo suyo, con XML válido y seleccionado",
+      editorAnidado.anidadoOk.listo === true && editorAnidado.anidadoOk.punto === true &&
+      editorAnidado.anidadoOk.rutaHonda === true &&
+      editorAnidado.anidadoOk.padreId === "id/interno" &&
+      editorAnidado.anidadoOk.padreTipo === "LinearLayout" &&
+      editorAnidado.anidadoOk.nuevoTipo === "Button" &&
+      editorAnidado.anidadoOk.dentro === true &&
+      editorAnidado.anidadoOk.xmlValido === true &&
+      editorAnidado.anidadoOk.enElPadre === true &&
+      editorAnidado.anidadoOk.fueraIntacto === true,
+      JSON.stringify(editorAnidado.anidadoOk).slice(0, 420));
+    comprueba("la ficha escribe el fondo con un solo trozo y no reescribe el fichero",
+      editorAnidado.fondo.campo === true && editorAnidado.fondo.escrito === true &&
+      editorAnidado.fondo.unico === true && editorAnidado.fondo.campoValor === "#123456" &&
+      editorAnidado.restaurado === true,
+      JSON.stringify(editorAnidado.fondo).slice(0, 320));
+
+    // 12a-septies-septies. El historial del DISEÑADOR, el indicador de destino y la basura. Los
+    // tres son gestos del modo editar: Ctrl+Z con el foco en el canvas deshace el diseño (no el
+    // texto), el arrastre enseña la línea o el hueco donde va a caer y la basura/Supr borran.
+    const editorNuevo = await evaluar(`(async () => {
+      const vp = await import("/vista-previa.js");
+      const nav = (ms) => new Promise((ok) => setTimeout(ok, ms));
+      marcarSucio(false);
+      await abrir("/proyecto/res/layout/main.xml");
+      if (!PREVIA_PANEL.estado().visible) document.getElementById("previa-alternar").click();
+      document.getElementById("previa-modo-vivo").click();
+      await nav(900);
+      const area = document.getElementById("codigo");
+      const original = area.value;
+      const canvas = document.getElementById("previa-vivo-canvas");
+      const paleta = document.getElementById("previa-paleta");
+      if (paleta) paleta.dataset.plegada = "0";
+      const editar = document.getElementById("previa-modo-editar");
+      if (!PREVIA_PANEL.estado().editando) { editar.click(); await nav(400); }
+      const ultimoAntes = document.getElementById("ultimo-codigo").textContent;
+      const contar = (m, tipo) => {
+        let n = 0;
+        const buscar = (nodo) => {
+          if (nodo.tipo === tipo) n++;
+          for (const h of nodo.hijos || []) buscar(h);
+        };
+        if (m && m.raiz) buscar(m.raiz);
+        return n;
+      };
+      const pulsar = (tecla, opciones) => {
+        canvas.dispatchEvent(new KeyboardEvent("keydown", Object.assign({ key: tecla,
+          bubbles: true, cancelable: true }, opciones || {})));
+      };
+      // 1. añadir un TextView, Ctrl+Z con el foco en el canvas lo quita y Ctrl+Mayús+Z lo devuelve
+      const textosAntes = contar(PREVIA_PANEL.modeloVivo(), "TextView");
+      document.getElementById("previa-anadir-textview").click();
+      await nav(800);
+      const trasAnadir = { textos: contar(PREVIA_PANEL.modeloVivo(), "TextView"),
+        editando: PREVIA_PANEL.estado().editando,
+        foco: document.activeElement === canvas,
+        deshacer: !document.getElementById("previa-editar-deshacer").disabled,
+        rehacer: !document.getElementById("previa-editar-rehacer").disabled };
+      canvas.focus();
+      pulsar("z", { ctrlKey: true });
+      await nav(700);
+      await PREVIA_PANEL.refrescarVivo();
+      const trasDeshacer = { textos: contar(PREVIA_PANEL.modeloVivo(), "TextView"),
+        xml: area.value === original,
+        ultimo: document.getElementById("ultimo-codigo").textContent,
+        deshacer: !document.getElementById("previa-editar-deshacer").disabled,
+        rehacer: !document.getElementById("previa-editar-rehacer").disabled };
+      pulsar("z", { ctrlKey: true, shiftKey: true });
+      await nav(700);
+      await PREVIA_PANEL.refrescarVivo();
+      const trasRehacer = { textos: contar(PREVIA_PANEL.modeloVivo(), "TextView"),
+        xml: /<TextView\\b/.test(area.value) && area.value !== original,
+        ultimo: document.getElementById("ultimo-codigo").textContent };
+      // se deshace otra vez para dejar el layout como estaba
+      pulsar("z", { ctrlKey: true });
+      await nav(700);
+      await PREVIA_PANEL.refrescarVivo();
+      const limpio = { textos: contar(PREVIA_PANEL.modeloVivo(), "TextView"),
+        xml: area.value === original };
+      // 2. el indicador de destino: hueco en un marco, línea en un lineal, y se apaga al soltar
+      const marcoXml = '<?xml version="1.0" encoding="utf-8"?>\\n' +
+        '<FrameLayout xmlns:android="http://schemas.android.com/apk/res/android"\\n' +
+        '    android:layout_width="match_parent"\\n' +
+        '    android:layout_height="match_parent">\\n\\n' +
+        '    <TextView\\n' +
+        '        android:id="@+id/uno"\\n' +
+        '        android:layout_width="wrap_content"\\n' +
+        '        android:layout_height="wrap_content"\\n' +
+        '        android:text="Uno"/>\\n' +
+        '</FrameLayout>\\n';
+      EDITOR.cambiar(0, area.value.length, marcoXml, [0, 0]);
+      await nav(900);
+      const modeloMarco = PREVIA_PANEL.modeloVivo();
+      const cajaMarco = modeloMarco ? vp.escalaPara(modeloMarco, canvas.clientWidth, canvas.clientHeight) : null;
+      const cajaCanvas = canvas.getBoundingClientRect();
+      const factor = cajaCanvas.width > 0 && canvas.clientWidth ? canvas.clientWidth / cajaCanvas.width : 1;
+      const enCliente = (mx, my) => ({
+        x: cajaCanvas.left + (cajaMarco.x + mx * cajaMarco.escala) / factor,
+        y: cajaCanvas.top + (cajaMarco.y + my * cajaMarco.escala) / factor,
+      });
+      const p1 = enCliente(80, 120);
+      const p2 = enCliente(220, 360);
+      const botonPaleta = document.getElementById("previa-anadir-button");
+      const cajaBoton = botonPaleta.getBoundingClientRect();
+      const arrastrar = (destino, idPuntero) => {
+        botonPaleta.dispatchEvent(new PointerEvent("pointerdown", { bubbles: true, button: 0,
+          pointerId: idPuntero, clientX: cajaBoton.left + 10, clientY: cajaBoton.top + 10 }));
+        document.dispatchEvent(new PointerEvent("pointermove", { bubbles: true, pointerId: idPuntero,
+          clientX: (cajaBoton.left + destino.x) / 2, clientY: (cajaBoton.top + destino.y) / 2 }));
+        document.dispatchEvent(new PointerEvent("pointermove", { bubbles: true, pointerId: idPuntero,
+          clientX: destino.x, clientY: destino.y }));
+      };
+      const linea = document.getElementById("previa-destino-linea");
+      const hueco = document.getElementById("previa-destino-hueco");
+      arrastrar(p1, 61);
+      const huecoUno = { visible: !hueco.hidden, lineaOculta: linea.hidden,
+        x: hueco.style.left, y: hueco.style.top, ancho: hueco.style.width };
+      document.dispatchEvent(new PointerEvent("pointermove", { bubbles: true, pointerId: 61,
+        clientX: p2.x, clientY: p2.y }));
+      const huecoDos = { visible: !hueco.hidden, x: hueco.style.left, y: hueco.style.top };
+      // se suelta fuera del canvas: no se añade nada y el indicador se apaga
+      document.dispatchEvent(new PointerEvent("pointerup", { bubbles: true, pointerId: 61,
+        clientX: cajaCanvas.right + 40, clientY: cajaCanvas.top + 20 }));
+      await nav(500);
+      const marcoTrasSoltar = { xml: area.value === marcoXml, indicadores: linea.hidden && hueco.hidden };
+      const linealXml = '<?xml version="1.0" encoding="utf-8"?>\\n' +
+        '<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"\\n' +
+        '    android:orientation="vertical"\\n' +
+        '    android:layout_width="match_parent"\\n' +
+        '    android:layout_height="match_parent">\\n\\n' +
+        '    <TextView\\n' +
+        '        android:id="@+id/arriba"\\n' +
+        '        android:layout_width="wrap_content"\\n' +
+        '        android:layout_height="wrap_content"\\n' +
+        '        android:text="Arriba"/>\\n\\n' +
+        '    <TextView\\n' +
+        '        android:id="@+id/abajo"\\n' +
+        '        android:layout_width="wrap_content"\\n' +
+        '        android:layout_height="wrap_content"\\n' +
+        '        android:text="Abajo"/>\\n' +
+        '</LinearLayout>\\n';
+      EDITOR.cambiar(0, area.value.length, linealXml, [0, 0]);
+      await nav(900);
+      const modeloLineal = PREVIA_PANEL.modeloVivo();
+      const cajaLineal = modeloLineal ? vp.escalaPara(modeloLineal, canvas.clientWidth, canvas.clientHeight) : null;
+      const enClienteLineal = (mx, my) => ({
+        x: cajaCanvas.left + (cajaLineal.x + mx * cajaLineal.escala) / factor,
+        y: cajaCanvas.top + (cajaLineal.y + my * cajaLineal.escala) / factor,
+      });
+      arrastrar(enClienteLineal(180, 10), 62);
+      const lineaUno = { visible: !linea.hidden, huecoOculto: hueco.hidden,
+        top: linea.style.top, alto: linea.style.height };
+      document.dispatchEvent(new PointerEvent("pointermove", { bubbles: true, pointerId: 62,
+        clientX: enClienteLineal(180, 40).x, clientY: enClienteLineal(180, 40).y }));
+      const lineaDos = { visible: !linea.hidden, top: linea.style.top };
+      document.dispatchEvent(new PointerEvent("pointerup", { bubbles: true, pointerId: 62,
+        clientX: cajaCanvas.right + 40, clientY: cajaCanvas.top + 20 }));
+      await nav(500);
+      const linealTrasSoltar = { xml: area.value === linealXml, indicadores: linea.hidden && hueco.hidden };
+      // 3. basura y Supr: borran el nodo, la raíz se rechaza y Ctrl+Z lo devuelve
+      PREVIA_PANEL.seleccionar([1]);
+      await nav(250);
+      const borrarBoton = document.getElementById("previa-propiedades-eliminar");
+      borrarBoton.click();
+      await nav(800);
+      const trasBasura = { xml: !/id\\/abajo/.test(area.value),
+        nodos: PREVIA_PANEL.modeloVivo().raiz.hijos.map((h) => h.id),
+        nota: document.getElementById("previa-editar-estado").textContent };
+      canvas.focus();
+      pulsar("z", { ctrlKey: true });
+      await nav(700);
+      await PREVIA_PANEL.refrescarVivo();
+      const trasDeshacerBorrado = { xml: /id\\/abajo/.test(area.value),
+        nodos: PREVIA_PANEL.modeloVivo().raiz.hijos.map((h) => h.id) };
+      PREVIA_PANEL.seleccionar([]);
+      await nav(200);
+      const xmlAntesRaiz = area.value;
+      document.getElementById("previa-editar-eliminar").click();
+      await nav(300);
+      const raizRechazada = { xml: area.value === xmlAntesRaiz,
+        nota: document.getElementById("previa-editar-estado").textContent };
+      PREVIA_PANEL.seleccionar([0]);
+      await nav(200);
+      canvas.focus();
+      pulsar("Delete");
+      await nav(800);
+      const trasSupr = { xml: !/id\\/arriba/.test(area.value),
+        nodos: PREVIA_PANEL.modeloVivo().raiz.hijos.map((h) => h.id) };
+      pulsar("z", { ctrlKey: true });
+      await nav(700);
+      await PREVIA_PANEL.refrescarVivo();
+      const trasDeshacerSupr = { xml: /id\\/arriba/.test(area.value),
+        nodos: PREVIA_PANEL.modeloVivo().raiz.hijos.map((h) => h.id) };
+      // limpieza
+      if (PREVIA_PANEL.estado().editando) { editar.click(); await nav(200); }
+      marcarSucio(false);
+      EDITOR.cambiar(0, area.value.length, original, [0, 0]);
+      await nav(900);
+      marcarSucio(false);
+      return { textosAntes, trasAnadir, trasDeshacer, trasRehacer, limpio, ultimoAntes,
+        huecoUno, huecoDos, marcoTrasSoltar, lineaUno, lineaDos, linealTrasSoltar,
+        trasBasura, trasDeshacerBorrado, raizRechazada, trasSupr, trasDeshacerSupr,
+        restaurado: area.value === original };
+    })()`);
+    comprueba("Ctrl+Z con el foco en el canvas deshace el diseño y Ctrl+Mayús+Z lo rehace, sin tocar #ultimo-codigo",
+      editorNuevo.trasAnadir.textos === editorNuevo.textosAntes + 1 &&
+      editorNuevo.trasAnadir.editando === true && editorNuevo.trasAnadir.foco === true &&
+      editorNuevo.trasAnadir.deshacer === true &&
+      editorNuevo.trasDeshacer.textos === editorNuevo.textosAntes &&
+      editorNuevo.trasDeshacer.xml === true &&
+      editorNuevo.trasDeshacer.ultimo === editorNuevo.ultimoAntes &&
+      editorNuevo.trasDeshacer.rehacer === true &&
+      editorNuevo.trasRehacer.textos === editorNuevo.textosAntes + 1 &&
+      editorNuevo.trasRehacer.xml === true &&
+      editorNuevo.trasRehacer.ultimo === editorNuevo.ultimoAntes &&
+      editorNuevo.limpio.textos === editorNuevo.textosAntes && editorNuevo.limpio.xml === true,
+      JSON.stringify(editorNuevo).slice(0, 520));
+    comprueba("el indicador de destino aparece y cambia con el puntero: hueco en un marco, línea en un lineal",
+      editorNuevo.huecoUno.visible === true && editorNuevo.huecoUno.lineaOculta === true &&
+      editorNuevo.huecoDos.visible === true &&
+      (editorNuevo.huecoUno.x !== editorNuevo.huecoDos.x ||
+        editorNuevo.huecoUno.y !== editorNuevo.huecoDos.y) &&
+      editorNuevo.marcoTrasSoltar.xml === true && editorNuevo.marcoTrasSoltar.indicadores === true &&
+      editorNuevo.lineaUno.visible === true && editorNuevo.lineaUno.huecoOculto === true &&
+      editorNuevo.lineaDos.visible === true && editorNuevo.lineaUno.top !== editorNuevo.lineaDos.top &&
+      editorNuevo.linealTrasSoltar.xml === true &&
+      editorNuevo.linealTrasSoltar.indicadores === true,
+      JSON.stringify({ huecoUno: editorNuevo.huecoUno, huecoDos: editorNuevo.huecoDos,
+        lineaUno: editorNuevo.lineaUno, lineaDos: editorNuevo.lineaDos,
+        marco: editorNuevo.marcoTrasSoltar }).slice(0, 460));
+    comprueba("la basura y Supr borran el nodo seleccionado, la raíz se rechaza y Ctrl+Z lo devuelve",
+      editorNuevo.trasBasura.xml === true &&
+      editorNuevo.trasBasura.nodos.join(",") === "id/arriba" &&
+      editorNuevo.trasDeshacerBorrado.xml === true &&
+      editorNuevo.trasDeshacerBorrado.nodos.join(",") === "id/arriba,id/abajo" &&
+      editorNuevo.raizRechazada.xml === true && /raíz/.test(editorNuevo.raizRechazada.nota) &&
+      editorNuevo.trasSupr.xml === true &&
+      editorNuevo.trasSupr.nodos.join(",") === "id/abajo" &&
+      editorNuevo.trasDeshacerSupr.xml === true &&
+      editorNuevo.trasDeshacerSupr.nodos.join(",") === "id/arriba,id/abajo",
+      JSON.stringify({ basura: editorNuevo.trasBasura, raiz: editorNuevo.raizRechazada,
+        supr: editorNuevo.trasSupr, deshacer: editorNuevo.trasDeshacerSupr }).slice(0, 460));
+
+    // 12a-septies-octies. El visor de jerarquía (sin botón «Layout raíz»), el «↑ Padre» y la
+    // configuración de la raíz al seleccionar el hueco; y el campo de imagen de un ImageView con
+    // su fichero importado a OPFS, el icono del sistema y el contentDescription.
+    const editorCapas = await evaluar(`(async () => {
+      const vp = await import("/vista-previa.js");
+      const nav = (ms) => new Promise((ok) => setTimeout(ok, ms));
+      marcarSucio(false);
+      await abrir("/proyecto/res/layout/main.xml");
+      if (!PREVIA_PANEL.estado().visible) document.getElementById("previa-alternar").click();
+      document.getElementById("previa-modo-vivo").click();
+      await nav(900);
+      const area = document.getElementById("codigo");
+      const original = area.value;
+      const canvas = document.getElementById("previa-vivo-canvas");
+      const editar = document.getElementById("previa-modo-editar");
+      const paleta = document.getElementById("previa-paleta");
+      if (paleta) paleta.dataset.plegada = "0";
+      const anidado = '<?xml version="1.0" encoding="utf-8"?>\\n' +
+        '<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"\\n' +
+        '    android:orientation="vertical"\\n' +
+        '    android:layout_width="match_parent"\\n' +
+        '    android:layout_height="match_parent">\\n\\n' +
+        '    <LinearLayout\\n' +
+        '        android:id="@+id/interno"\\n' +
+        '        android:orientation="vertical"\\n' +
+        '        android:layout_width="match_parent"\\n' +
+        '        android:layout_height="wrap_content">\\n\\n' +
+        '        <TextView\\n' +
+        '            android:id="@+id/dentro"\\n' +
+        '            android:layout_width="wrap_content"\\n' +
+        '            android:layout_height="wrap_content"\\n' +
+        '            android:text="Dentro"/>\\n' +
+        '    </LinearLayout>\\n\\n' +
+        '    <TextView\\n' +
+        '        android:id="@+id/fuera"\\n' +
+        '        android:layout_width="wrap_content"\\n' +
+        '        android:layout_height="wrap_content"\\n' +
+        '        android:text="Fuera"/>\\n' +
+        '</LinearLayout>\\n';
+      EDITOR.cambiar(0, area.value.length, anidado, [0, 0]);
+      await nav(900);
+      if (!PREVIA_PANEL.estado().editando) { editar.click(); await nav(400); }
+      const medidasAntes = { ancho: canvas.clientWidth, alto: canvas.clientHeight };
+      document.getElementById("previa-jerarquia-alternar").click();
+      await nav(400);
+      const filas = Array.from(document.querySelectorAll("#previa-jerarquia-lista button[data-ruta]"))
+        .map((b) => ({ ruta: b.dataset.ruta, texto: b.textContent, activa: b.classList.contains("activa") }));
+      const jerarquia = {
+        visible: !document.getElementById("previa-jerarquia").hidden,
+        filas,
+        canvas: { ancho: canvas.clientWidth, alto: canvas.clientHeight },
+        boton: document.getElementById("previa-jerarquia-alternar").getAttribute("aria-pressed"),
+      };
+      document.querySelector('#previa-jerarquia-lista button[data-ruta="1"]').click();
+      await nav(400);
+      const seleccionFila = { seleccion: PREVIA_PANEL.estado().seleccion,
+        titulo: document.getElementById("previa-propiedades-titulo").textContent,
+        activa: (document.querySelector('#previa-jerarquia-lista button[data-ruta="1"]') || {})
+          .classList.contains("activa") };
+      document.getElementById("previa-propiedades-padre").click();
+      await nav(300);
+      const padre = { seleccion: PREVIA_PANEL.estado().seleccion,
+        titulo: document.getElementById("previa-propiedades-titulo").textContent,
+        tipo: (document.querySelector("[data-raiz-tipo]") || { value: "" }).value,
+        orientacion: (document.querySelector('[data-propiedad="android:orientation"]') || { value: "" }).value,
+        padding: !!document.querySelector('[data-propiedad="android:padding"]'),
+        fondo: !!document.querySelector('[data-propiedad="android:background"]'),
+        padreDeshabilitado: document.getElementById("previa-propiedades-padre").disabled };
+      // clic en el hueco del canvas: la raíz se selecciona sin botón
+      PREVIA_PANEL.seleccionar([1]);
+      await nav(250);
+      const modelo = PREVIA_PANEL.modeloVivo();
+      const caja = vp.escalaPara(modelo, canvas.clientWidth, canvas.clientHeight);
+      const cajaCanvas = canvas.getBoundingClientRect();
+      const factor = cajaCanvas.width > 0 && canvas.clientWidth ? canvas.clientWidth / cajaCanvas.width : 1;
+      const hueco = {
+        x: cajaCanvas.left + (caja.x + 180 * caja.escala) / factor,
+        y: cajaCanvas.top + (caja.y + 600 * caja.escala) / factor,
+      };
+      canvas.dispatchEvent(new PointerEvent("pointerdown", { bubbles: true, button: 0, pointerId: 71,
+        clientX: hueco.x, clientY: hueco.y }));
+      canvas.dispatchEvent(new PointerEvent("pointerup", { bubbles: true, pointerId: 71,
+        clientX: hueco.x, clientY: hueco.y }));
+      await nav(300);
+      const raizPorHueco = { seleccion: PREVIA_PANEL.estado().seleccion,
+        botonViejo: document.getElementById("previa-seleccionar-raiz") };
+      // cambiar el id de un nodo se ve en la jerarquía sin compilar
+      PREVIA_PANEL.seleccionar([0, 0]);
+      await nav(300);
+      const campoId = document.querySelector('#previa-propiedades-campos [data-propiedad="android:id"]');
+      if (campoId) {
+        campoId.value = "renombrado";
+        campoId.dispatchEvent(new Event("change", { bubbles: true }));
+      }
+      await nav(900);
+      const jerarquiaViva = {
+        xml: /android:id="@\\+id\\/renombrado"/.test(area.value),
+        filas: Array.from(document.querySelectorAll("#previa-jerarquia-lista button[data-ruta]"))
+          .map((b) => b.textContent),
+      };
+      // la imagen de un ImageView: campo, fichero a OPFS, contentDescription e icono del sistema
+      const conImagen = '<?xml version="1.0" encoding="utf-8"?>\\n' +
+        '<FrameLayout xmlns:android="http://schemas.android.com/apk/res/android"\\n' +
+        '    android:layout_width="match_parent"\\n' +
+        '    android:layout_height="match_parent">\\n\\n' +
+        '    <ImageView\\n' +
+        '        android:id="@+id/foto"\\n' +
+        '        android:layout_width="wrap_content"\\n' +
+        '        android:layout_height="wrap_content"/>\\n' +
+        '</FrameLayout>\\n';
+      EDITOR.cambiar(0, area.value.length, conImagen, [0, 0]);
+      await nav(900);
+      PREVIA_PANEL.seleccionar([0]);
+      await nav(300);
+      const medidasImagen = { ancho: canvas.clientWidth, alto: canvas.clientHeight };
+      const campo = document.querySelector('#previa-propiedades-campos [data-propiedad="android:src"]');
+      const elegir = Array.from(document.querySelectorAll("#previa-propiedades-campos button"))
+        .find((b) => /Elegir fichero/.test(b.textContent));
+      const iconos = document.querySelector("[data-icono-sistema]");
+      const campoImagen = {
+        campo: !!campo,
+        aria: campo ? campo.getAttribute("aria-label") : "",
+        elegir: !!elegir,
+        elegirRol: elegir ? (elegir.getAttribute("role") || "") : "",
+        elegirAria: elegir ? elegir.getAttribute("aria-label") : "",
+        iconos: iconos ? iconos.options.length : 0,
+        iconoDelete: iconos ? Array.from(iconos.options).some((o) => o.value === "@android:drawable/ic_delete") : false,
+        canvasAria: canvas.getAttribute("aria-label"),
+        canvasRol: canvas.getAttribute("role"),
+        archivo: !!document.getElementById("previa-imagen-archivo"),
+      };
+      // un PNG 1x1 de verdad, sin red: bytes locales -> File -> input type=file
+      const base64 = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==";
+      const bytes = Uint8Array.from(atob(base64), (c) => c.charCodeAt(0));
+      const archivo = new File([bytes], "foto de prueba.png", { type: "image/png" });
+      const dt = new DataTransfer();
+      dt.items.add(archivo);
+      const entrada = document.getElementById("previa-imagen-archivo");
+      entrada.files = dt.files;
+      entrada.dispatchEvent(new Event("change", { bubbles: true }));
+      await nav(2200);
+      const nodoImagen = PREVIA_PANEL.modeloVivo().raiz.hijos[0];
+      const bytesOpfs = await hospedador.bytes("/proyecto/res/drawable/foto_de_prueba.png");
+      const importada = {
+        xml: /android:src="@drawable\\/foto_de_prueba"/.test(area.value),
+        recurso: nodoImagen ? nodoImagen.recurso : "",
+        bytes: bytesOpfs ? bytesOpfs.length : 0,
+        esperados: bytes.length,
+        bitmap: !!(nodoImagen && nodoImagen.imagen),
+        anchoBitmap: nodoImagen && nodoImagen.imagen ? nodoImagen.imagen.width : 0,
+        canvas: { ancho: canvas.clientWidth, alto: canvas.clientHeight },
+      };
+      // contentDescription editable, escapado
+      PREVIA_PANEL.seleccionar([0]);
+      await nav(300);
+      const campoDesc = document.querySelector(
+        '#previa-propiedades-campos [data-propiedad="android:contentDescription"]');
+      if (campoDesc) {
+        campoDesc.value = "Retrato & fondo";
+        campoDesc.dispatchEvent(new Event("change", { bubbles: true }));
+      }
+      await nav(800);
+      const descripcion = { existe: !!campoDesc,
+        xml: /android:contentDescription="Retrato &amp; fondo"/.test(area.value) };
+      // icono del sistema: se escribe y el modelo lo conserva (se dibuja como marcador)
+      PREVIA_PANEL.seleccionar([0]);
+      await nav(300);
+      const selIconos = document.querySelector("[data-icono-sistema]");
+      let icono = { escrito: false, recurso: "", bitmap: true };
+      if (selIconos) {
+        selIconos.value = "@android:drawable/ic_delete";
+        selIconos.dispatchEvent(new Event("change", { bubbles: true }));
+        await nav(900);
+        const nodoIcono = PREVIA_PANEL.modeloVivo().raiz.hijos[0];
+        icono = { escrito: /android:src="@android:drawable\\/ic_delete"/.test(area.value),
+          recurso: nodoIcono ? nodoIcono.recurso : "",
+          bitmap: !!(nodoIcono && nodoIcono.imagen) };
+      }
+      canvas.focus();
+      canvas.dispatchEvent(new KeyboardEvent("keydown", { key: "z", ctrlKey: true,
+        bubbles: true, cancelable: true }));
+      await nav(900);
+      const iconoDeshecho = /android:src="@drawable\\/foto_de_prueba"/.test(area.value);
+      // limpieza: fuera el fichero importado, el layout original y el modo editar
+      try { await hospedador.limpiar("/proyecto/res/drawable/foto_de_prueba.png"); } catch (e) { /* nada */ }
+      if (PREVIA_PANEL.estado().editando) { editar.click(); await nav(200); }
+      marcarSucio(false);
+      EDITOR.cambiar(0, area.value.length, original, [0, 0]);
+      await nav(900);
+      marcarSucio(false);
+      return { medidasAntes, jerarquia, seleccionFila, padre, raizPorHueco, jerarquiaViva,
+        medidasImagen, campoImagen, importada, descripcion, icono, iconoDeshecho,
+        restaurado: area.value === original };
+    })()`);
+    comprueba("el visor de jerarquía lista los nodos, selecciona una fila, sube al padre y no mueve el canvas",
+      editorCapas.jerarquia.visible === true && editorCapas.jerarquia.boton === "true" &&
+      editorCapas.jerarquia.filas.length === 4 &&
+      editorCapas.jerarquia.filas.some((f) => /LinearLayout · id\/interno/.test(f.texto)) &&
+      editorCapas.jerarquia.filas.some((f) => /TextView · id\/fuera/.test(f.texto)) &&
+      editorCapas.jerarquia.canvas.ancho === editorCapas.medidasAntes.ancho &&
+      editorCapas.jerarquia.canvas.alto === editorCapas.medidasAntes.alto &&
+      JSON.stringify(editorCapas.seleccionFila.seleccion) === "[1]" &&
+      /id\/fuera/.test(editorCapas.seleccionFila.titulo) &&
+      editorCapas.seleccionFila.activa === true &&
+      JSON.stringify(editorCapas.padre.seleccion) === "[]" &&
+      /layout raíz/.test(editorCapas.padre.titulo) &&
+      editorCapas.padre.tipo === "LinearLayout" && editorCapas.padre.orientacion === "vertical" &&
+      editorCapas.padre.padding === true && editorCapas.padre.fondo === true &&
+      editorCapas.padre.padreDeshabilitado === true &&
+      JSON.stringify(editorCapas.raizPorHueco.seleccion) === "[]" &&
+      editorCapas.raizPorHueco.botonViejo === null &&
+      editorCapas.jerarquiaViva.xml === true &&
+      editorCapas.jerarquiaViva.filas.some((t) => /id\/renombrado/.test(t)),
+      JSON.stringify(editorCapas).slice(0, 520));
+    comprueba("el ImageView tiene campo de imagen, guarda el fichero en OPFS, dibuja el PNG y edita contentDescription",
+      editorCapas.campoImagen.campo === true &&
+      /Arrastra una imagen o pulsa Elegir fichero/.test(editorCapas.campoImagen.aria) &&
+      editorCapas.campoImagen.elegir === true && editorCapas.campoImagen.elegirRol === "button" &&
+      /Arrastra una imagen o pulsa Elegir fichero/.test(editorCapas.campoImagen.elegirAria) &&
+      editorCapas.campoImagen.iconos === 11 && editorCapas.campoImagen.iconoDelete === true &&
+      /Arrastra una imagen o pulsa Elegir fichero/.test(editorCapas.campoImagen.canvasAria) &&
+      editorCapas.campoImagen.canvasRol === "button" && editorCapas.campoImagen.archivo === true &&
+      editorCapas.importada.xml === true &&
+      editorCapas.importada.recurso === "@drawable/foto_de_prueba" &&
+      editorCapas.importada.bytes === editorCapas.importada.esperados &&
+      editorCapas.importada.bitmap === true && editorCapas.importada.anchoBitmap === 1 &&
+      editorCapas.importada.canvas.ancho === editorCapas.medidasImagen.ancho &&
+      editorCapas.importada.canvas.alto === editorCapas.medidasImagen.alto &&
+      editorCapas.descripcion.existe === true && editorCapas.descripcion.xml === true &&
+      editorCapas.icono.escrito === true &&
+      editorCapas.icono.recurso === "@android:drawable/ic_delete" &&
+      editorCapas.icono.bitmap === false && editorCapas.iconoDeshecho === true &&
+      editorCapas.restaurado === true,
+      JSON.stringify({ campo: editorCapas.campoImagen, importada: editorCapas.importada,
+        medidasImagen: editorCapas.medidasImagen, descripcion: editorCapas.descripcion,
+        icono: editorCapas.icono, iconoDeshecho: editorCapas.iconoDeshecho,
+        restaurado: editorCapas.restaurado }).slice(0, 1400));
 
 
     // 12a-octies. el separador: se arrastra con puntero, se mueve con el teclado y guarda el ancho

@@ -705,7 +705,7 @@ body.separando-previa[data-eje="suroeste"] { cursor: nesw-resize; }
   padding: 6px;
 }
 .previa-paleta-scroll:focus-visible { outline: 2px solid var(--foco); outline-offset: -2px; }
-.previa-paleta[data-plegada="1"] { bottom: auto; width: 106px; }
+.previa-paleta[data-plegada="1"] { bottom: auto; width: 116px; }
 .previa-paleta[data-plegada="1"] .previa-paleta-scroll { display: none; }
 .previa-paleta[data-plegada="1"] .previa-paleta-plegar svg,
 .previa-propiedades[data-plegada="1"] .previa-propiedades-plegar svg { transform: rotate(-90deg); }
@@ -737,6 +737,128 @@ body.separando-previa[data-eje="suroeste"] { cursor: nesw-resize; }
 /* el elemento de la paleta se arrastra al dibujo: sin selección de texto y con cursor de agarre */
 .previa-paleta-elemento { touch-action: none; cursor: grab; }
 .previa-paleta-elemento.arrastrando { opacity: .45; cursor: grabbing; }
+/* la barra de acciones del modo editar: deshacer, rehacer, basura y jerarquía, siempre a mano */
+.previa-paleta-acciones {
+  display: flex;
+  gap: 2px;
+  padding: 2px 4px;
+  border-bottom: 1px solid var(--borde);
+}
+.previa-accion { flex: 1 1 0; width: auto; }
+.previa-accion:disabled { opacity: .45; cursor: not-allowed; }
+.previa-accion.activa { background: var(--acento); color: var(--blanco); }
+/* ↑ Padre: sube la selección al contenedor, como la barra de Android Studio */
+.previa-propiedades-padre {
+  flex: 0 0 auto;
+  padding: 2px 6px;
+  text-align: center;
+}
+.previa-propiedades-padre:disabled { opacity: .45; cursor: not-allowed; }
+/* la jerarquía es otra capa: no entra en el reparto ni mueve el canvas */
+.previa-jerarquia {
+  position: absolute;
+  z-index: 4;
+  right: 2px;
+  bottom: 2px;
+  width: min(238px, calc(100% - 8px));
+  max-height: 46%;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  background: var(--superficie2);
+  background: color-mix(in srgb, var(--superficie2) 94%, transparent);
+  border: 1px solid var(--borde2);
+  border-radius: 6px;
+  box-shadow: 0 8px 22px rgba(0, 0, 0, .38);
+  overflow: hidden;
+}
+.previa-jerarquia[hidden] { display: none; }
+.previa-jerarquia-cab {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 2px 2px 2px 8px;
+  border-bottom: 1px solid var(--borde);
+}
+.previa-jerarquia-lista {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  margin: 0;
+  padding: 4px;
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+}
+.previa-jerarquia-fila { display: flex; align-items: center; gap: 2px; min-width: 0; }
+.previa-jerarquia-flecha {
+  flex: 0 0 auto;
+  width: 16px;
+  height: 16px;
+  padding: 0;
+  border: 0;
+  border-radius: 3px;
+  background: transparent;
+  color: var(--texto-medio);
+  font: inherit;
+  font-size: 10px;
+  line-height: 1;
+  cursor: pointer;
+}
+.previa-jerarquia-flecha:hover { background: var(--boton); color: var(--blanco); }
+.previa-jerarquia-hueco { flex: 0 0 16px; }
+.previa-jerarquia-nodo {
+  flex: 1 1 auto;
+  min-width: 0;
+  background: transparent;
+  border: 0;
+  border-radius: 3px;
+  color: var(--texto);
+  font: inherit;
+  font-size: 10.5px;
+  text-align: left;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  padding: 2px 4px;
+  cursor: pointer;
+}
+.previa-jerarquia-nodo:hover { background: var(--boton); color: var(--blanco); }
+.previa-jerarquia-nodo.activa { background: var(--acento); color: var(--blanco); }
+.previa-jerarquia-flecha:focus-visible,
+.previa-jerarquia-nodo:focus-visible { outline: 2px solid var(--foco); outline-offset: -2px; }
+/* el destino del arrastre: una línea en un lineal o un hueco discontinuo en un marco */
+.previa-destino { position: absolute; z-index: 3; pointer-events: none; }
+.previa-destino[hidden] { display: none; }
+.previa-destino-linea {
+  background: var(--acento);
+  border-radius: 2px;
+  box-shadow: 0 0 0 1px rgba(0, 0, 0, .35);
+}
+.previa-destino-hueco {
+  border: 2px dashed var(--acento);
+  border-radius: 4px;
+  background: color-mix(in srgb, var(--acento) 14%, transparent);
+}
+/* el campo de imagen: texto con `android:src`, botón de fichero y selector de iconos del sistema */
+.previa-imagen {
+  margin: 0;
+  padding: 0;
+  border: 0;
+  min-width: 0;
+}
+.previa-imagen legend { padding: 0; }
+.previa-imagen-fila { display: flex; gap: 4px; align-items: center; min-width: 0; }
+.previa-imagen-fila .previa-propiedad-campo { flex: 1 1 auto; min-width: 0; }
+.previa-imagen-fila .previa-paleta-boton { flex: 0 0 auto; white-space: nowrap; }
+.previa-imagen-nota {
+  font-size: 9.5px;
+  color: var(--texto-medio);
+  line-height: 1.3;
+  margin-top: 2px;
+}
 /* el fantasma que sigue al puntero mientras se arrastra un tipo (lo crea previa-panel.js) */
 .previa-arrastre-fantasma {
   position: fixed;

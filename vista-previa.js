@@ -150,6 +150,9 @@ export function rectsEscalados(modelo, ancho, alto) {
       // colores del layout, ya normalizados por `vista-xml.js`; vacío significa «el del tema»
       fondo: typeof nodo.fondo === "string" ? nodo.fondo : "",
       colorTexto: typeof nodo.colorTexto === "string" ? nodo.colorTexto : "",
+      // `src` y, si el panel ya lo decodificó, el mapa de bits del PNG del proyecto
+      recurso: typeof nodo.recurso === "string" ? nodo.recurso : "",
+      imagen: nodo.imagen || null,
       profundidad,
     };
     if (![escalado.x, escalado.y, escalado.ancho, escalado.alto].every(Number.isFinite)) continue;
@@ -292,6 +295,27 @@ export function pintarModelo(canvas, modelo, medir) {
     ctx.beginPath();
     ctx.rect(r.x + 1, r.y + 1, Math.max(1, r.ancho - 2), Math.max(1, r.alto - 2));
     ctx.clip();
+    // Una vista con `android:src` pinta su imagen si el panel pudo decodificar el PNG del proyecto
+    // (`r.imagen`); si es un recurso del framework o no se pudo leer, deja un marcador con el nombre
+    // del recurso. Nunca es una URL: los bytes salen del OPFS del propio proyecto.
+    if (r.imagen && typeof ctx.drawImage === "function") {
+      const iw = r.imagen.width || 1;
+      const ih = r.imagen.height || 1;
+      const escalaImagen = Math.min(r.ancho / iw, r.alto / ih);
+      const w = Math.max(1, iw * escalaImagen);
+      const h = Math.max(1, ih * escalaImagen);
+      ctx.drawImage(r.imagen, r.x + (r.ancho - w) / 2, r.y + (r.alto - h) / 2, w, h);
+    } else if (r.recurso && r.alto >= 10) {
+      ctx.setLineDash([4, 3]);
+      ctx.strokeStyle = bordeFuerte;
+      ctx.lineWidth = 1;
+      ctx.strokeRect(r.x + 2.5, r.y + 2.5, Math.max(1, r.ancho - 5), Math.max(1, r.alto - 5));
+      ctx.setLineDash([]);
+      const nombre = String(r.recurso).replace(/^@/, "");
+      ctx.font = "9px ui-monospace, SFMono-Regular, Menlo, Consolas, monospace";
+      ctx.fillStyle = r.colorTexto || tinta;
+      ctx.fillText(nombre, r.x + 4, r.y + 3, Math.max(0, r.ancho - 8));
+    }
     // El nodo pinta **solo su texto**. Antes se dibujaba encima una etiqueta con el tipo y el id
     // (`Button · id/pulsar`); sobre un botón parecía un diálogo pegado y el usuario pidió quitarlo.
     // El tipo y el id no se pierden: siguen en el modelo, en `rectsEscalados`, en el `resumen` que

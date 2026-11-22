@@ -762,6 +762,65 @@ if (desconocida.ok || !/propiedad desconocida/.test(desconocida.error)) {
   mal("escribirPropiedad no rechaza por nombre una propiedad desconocida");
 }
 
+// 6b-septies. la imagen de un ImageView: `android:src` se valida (proyecto o framework),
+// `contentDescription` se escribe escapado y la lista de iconos es la de API 34.
+const conImagen = `<?xml version="1.0" encoding="utf-8"?>
+<FrameLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent">
+
+    <ImageView
+        android:id="@+id/foto"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:src="@drawable/retrato"/>
+</FrameLayout>
+`;
+const propsImg = layoutEditor.leerPropiedades(conImagen, [0]);
+if (!propsImg.ok || propsImg.valores["android:src"] !== "@drawable/retrato") {
+  mal("leerPropiedades no lee android:src: " + JSON.stringify(propsImg.valores || propsImg));
+}
+const nombresImg = (propsImg.propiedades || []).map((p) => p.nombre);
+if (nombresImg.indexOf("android:src") < 0 || nombresImg.indexOf("android:contentDescription") < 0) {
+  mal("la ficha de una imagen no ofrece src y contentDescription: " + nombresImg.join(","));
+}
+if ((layoutEditor.leerPropiedades(conProps, [0]).propiedades || [])
+  .some((p) => p.nombre === "android:src")) {
+  mal("la ficha de un TextView ofrece android:src");
+}
+const srcSistema = layoutEditor.escribirPropiedad(conImagen, [0], "android:src",
+  "@android:drawable/ic_delete");
+if (!srcSistema.ok || !/android:src="@android:drawable\/ic_delete"/.test(srcSistema.xml)) {
+  mal("escribirPropiedad no escribe un icono del sistema: " + (srcSistema.error || srcSistema.xml));
+}
+const srcProyecto = layoutEditor.escribirPropiedad(conImagen, [0], "android:src", "@drawable/otra");
+if (!srcProyecto.ok || !/android:src="@drawable\/otra"/.test(srcProyecto.xml)) {
+  mal("escribirPropiedad no escribe un drawable del proyecto: " + (srcProyecto.error || srcProyecto.xml));
+}
+if (layoutEditor.escribirPropiedad(conImagen, [0], "android:src", "foto.png").ok) {
+  mal("escribirPropiedad acepta un nombre suelto como android:src");
+}
+const descImagen = layoutEditor.escribirPropiedad(conImagen, [0], "android:contentDescription",
+  "Retrato & fondo");
+if (!descImagen.ok || !/android:contentDescription="Retrato &amp; fondo"/.test(descImagen.xml)) {
+  mal("escribirPropiedad no escribe contentDescription escapado: " +
+    (descImagen.error || descImagen.xml));
+}
+const modeloImagen = vistaXml.modeloDeLayout(conImagen);
+const imgModelo = modeloImagen.ok ? modeloImagen.modelo.raiz.hijos[0] : null;
+if (!imgModelo || imgModelo.recurso !== "@drawable/retrato") {
+  mal("el modelo en vivo no conserva android:src: " +
+    JSON.stringify(imgModelo && imgModelo.recurso));
+}
+const iconos = layoutEditor.iconosSistema();
+if (iconos.join(",") !== "ic_delete,ic_info,ic_menu_add,ic_menu_camera,ic_menu_delete," +
+    "ic_menu_edit,ic_menu_gallery,ic_menu_help,ic_menu_search,ic_menu_share") {
+  mal("la lista de iconos del sistema cambió sin volver a medirla contra API 34: " + iconos.join(","));
+}
+if (!iconos.every((n) => /^ic_[a-z0-9_]+$/.test(n))) {
+  mal("la lista de iconos del sistema tiene un nombre que no es un recurso de framework");
+}
+
 // el tipo del layout raíz: se conservan atributos e hijos; RelativeLayout se rechaza por nombre
 const aMarco = layoutEditor.cambiarTipoRaiz(conProps, "FrameLayout");
 if (!aMarco.ok || !/<FrameLayout\b/.test(aMarco.xml) || /<LinearLayout\b/.test(aMarco.xml) ||
@@ -977,9 +1036,20 @@ for (const [id, donde] of [
   ["previa-propiedades-vacio", "el aviso de que no hay nada seleccionado"],
   ["previa-propiedades-plegar", "el botón que pliega la ficha de propiedades"],
   ["previa-propiedades-cerrar", "el botón que cierra la ficha de propiedades"],
+  ["previa-propiedades-padre", "el botón que sube la selección al padre"],
+  ["previa-propiedades-eliminar", "el botón de basura de la ficha"],
   ["previa-paleta-plegar", "el botón que pliega la paleta"],
   ["previa-paleta-scroll", "la lista con scroll de la paleta"],
-  ["previa-seleccionar-raiz", "el botón que selecciona el layout raíz"],
+  ["previa-editar-deshacer", "el botón que deshace el último cambio del diseño"],
+  ["previa-editar-rehacer", "el botón que rehace el último cambio del diseño"],
+  ["previa-editar-eliminar", "el botón de basura de la barra del modo editar"],
+  ["previa-jerarquia-alternar", "el botón que abre y cierra la jerarquía"],
+  ["previa-jerarquia", "la capa del visor de jerarquía"],
+  ["previa-jerarquia-lista", "las filas del visor de jerarquía"],
+  ["previa-jerarquia-cerrar", "el botón que cierra la jerarquía"],
+  ["previa-destino-linea", "la línea de inserción del arrastre"],
+  ["previa-destino-hueco", "el hueco discontinuo del arrastre"],
+  ["previa-imagen-archivo", "el selector de fichero de imagen de la ficha"],
   ["previa-editar-estado", "la línea de estado del modo editar"],
   ["vista-modo-previa", "la pestaña Vista previa de la vista Pantalla"],
   ["vista-modo-emulador", "la pestaña Emulador de la vista Pantalla"],
@@ -1094,6 +1164,43 @@ if (tiposEnElHtml.join(",") !== tiposAgrupados.join(",")) {
 }
 if (!/id="previa-paleta-scroll"[^>]*aria-label=/.test(html)) {
   mal("la lista de la paleta no se anuncia para lectores de pantalla");
+}
+// la raíz se selecciona con un clic en el hueco del dibujo, no con un botón
+if (ids.has("previa-seleccionar-raiz")) {
+  mal("el botón «Layout raíz» sigue en index.html: la raíz se selecciona con el clic en el hueco");
+}
+// las capas del modo editar: acciones, visor de jerarquía, indicador de destino y selector de imagen
+for (const [id, donde] of [
+  ["previa-editar-deshacer", "el botón de deshacer del diseñador"],
+  ["previa-editar-rehacer", "el botón de rehacer del diseñador"],
+  ["previa-editar-eliminar", "la basura de la barra del modo editar"],
+  ["previa-propiedades-eliminar", "la basura de la ficha"],
+  ["previa-propiedades-padre", "el botón «↑ Padre» de la ficha"],
+  ["previa-jerarquia-alternar", "el interruptor del visor de jerarquía"],
+  ["previa-jerarquia", "la capa del visor de jerarquía"],
+  ["previa-jerarquia-lista", "la lista del visor de jerarquía"],
+  ["previa-jerarquia-cerrar", "el botón que cierra la jerarquía"],
+  ["previa-destino-linea", "la línea de destino del arrastre"],
+  ["previa-destino-hueco", "el hueco de destino del arrastre"],
+  ["previa-imagen-archivo", "el selector de fichero de imagen"],
+]) {
+  if (!ids.has(id)) mal(`falta ${donde} (${id}) en index.html`);
+}
+if (!/id="previa-editar-eliminar"[^>]*aria-label="Eliminar elemento"/.test(html)) {
+  mal("la basura del modo editar no se llama «Eliminar elemento»");
+}
+if (!/id="previa-propiedades-eliminar"[^>]*aria-label="Eliminar elemento"/.test(html)) {
+  mal("la basura de la ficha no se llama «Eliminar elemento»");
+}
+if (!/id="previa-jerarquia"[^>]*hidden/.test(html)) {
+  mal("el visor de jerarquía no empieza cerrado");
+}
+if (!/id="previa-destino-linea"[^>]*hidden/.test(html) ||
+    !/id="previa-destino-hueco"[^>]*hidden/.test(html)) {
+  mal("los indicadores de destino no empiezan ocultos");
+}
+if (!/id="previa-imagen-archivo"[^>]*accept="image\/\*"/.test(html)) {
+  mal("el selector de imagen no acepta image/*");
 }
 // el modo «en vivo» dibuja el layout: no puede quedar ni un visor de código XML en el panel
 for (const idViejo of ["previa-xml", "previa-xml-codigo", "previa-xml-estado", "previa-modo-xml"]) {

@@ -266,6 +266,9 @@ function crearNodo(elemento, resolucion, strings, colores) {
     texto: resolverTexto(local(elemento.atributos, "text"), strings, resolucion),
     fondo: colorDeCanvas(local(elemento.atributos, "background"), colores),
     colorTexto: colorDeCanvas(local(elemento.atributos, "textColor"), colores),
+    // `android:src` tal cual (`@drawable/foto`, `@android:drawable/ic_delete`): el panel lee el PNG
+    // del proyecto para pintarlo; el modelo de `apkc preview` no trae esta clave.
+    recurso: String(local(elemento.atributos, "src") || "").trim(),
     atributos: elemento.atributos,
     hijos: [],
     rect: { x: 0, y: 0, ancho: 0, alto: 0 },

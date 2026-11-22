@@ -22,10 +22,12 @@
 // cambia el ancho y uno vertical el alto; las esquinas cambian los dos. Es preferencia de ventana.
 //
 // Sobre la lectura «Vista previa» hay un modo **editar** (lápiz): añade nodos, los reordena en un
-// LinearLayout o les fija márgenes en un marco, escribiendo el XML del editor con
-// `layout-editor.js` (puro). La paleta y la ficha de propiedades son capas flotantes sobre el
-// dibujo: no comprimen el canvas. Un tipo se puede arrastrar desde la paleta al punto donde se
-// suelta. El panel sigue sin tocar el documento: se lo pide a `EDITOR.cambiar`.
+// LinearLayout o les fija márgenes en un marco, los borra y edita sus propiedades, escribiendo el
+// XML del editor con `layout-editor.js` (puro). La paleta, la ficha de propiedades y el visor de
+// jerarquía son capas flotantes sobre el dibujo: no comprimen el canvas. Un tipo se puede arrastrar
+// desde la paleta al punto donde se suelta (con indicador de destino) y un ImageView puede recibir
+// un PNG del disco. El modo editar tiene su propio historial (Ctrl+Z/Ctrl+Mayús+Z) y el panel sigue
+// sin tocar el documento: se lo pide a `EDITOR.cambiar`.
 //
 // Funciones puras, probadas en node (`prueba.js`): `medidaValida`, `anchoValido`,
 // `cajaRedimensionada`, `esRutaDeLayout`, `candidatosDeLayout`, `resumenEjecucion`,
@@ -39,7 +41,7 @@ import { modeloDeLayout, decodificarEntidades, paddingDe, esLineal, atributoLoca
 import {
   insertarElemento, moverEnMarco, reordenarHijo, borrarElemento,
   leerPropiedades, escribirPropiedad, tiposRaizDisponibles, cambiarTipoRaiz,
-  infoTipo,
+  infoTipo, iconosSistema,
 } from "./layout-editor.js";
 
 // Persistencia de la vista dividida. Son preferencias de esta ventana, no del proyecto.
@@ -389,6 +391,22 @@ export function crearPreviaPanel({ hospedador, proyecto, estadoPestana, editor }
   // La ficha de propiedades se reconstruye solo cuando cambia el nodo; mientras se teclea se
   // actualizan los valores de los campos que no tienen el foco.
   let clavePropiedades = "";
+  // Historial PROPIO del diseñador: una pila de operaciones del modo editar (añadir, mover, borrar,
+  // propiedades). Es independiente del undo tree de texto; se aplica con `EDITOR.cambiar` solo como
+  // mecanismo de escritura, así que deshacer aquí no depende de lo que hiciera el editor de código.
+  let pilaDeshacer = [];
+  let pilaRehacer = [];
+  // el XML que dejó la última operación del diseñador: un `input` con este texto es nuestro y no
+  // invalida el historial; cualquier otro es una edición manual y lo tira
+  let textoDiseno = null;
+  let rutaHistorial = null;
+  // el visor de jerarquía es otra capa plegable; se recuerda qué ramas están cerradas
+  let jerarquiaVisible = false;
+  let jerarquiaPlegada = new Set();
+  let claveJerarquia = "";
+  // Los PNG importados, ya decodificados: la clave es `@drawable/nombre`. `null` = no se pudo leer
+  // (se pinta el marcador con el nombre) y se reintenta al volver a importar.
+  const imagenes = new Map();
 
   const conDocumento = () => typeof document !== "undefined" && !!document.getElementById;
   const el = (id) => (conDocumento() ? document.getElementById(id) : null);
@@ -1063,6 +1081,7 @@ export function crearPreviaPanel({ hospedador, proyecto, estadoPestana, editor }
     actualizarPaleta();
     actualizarEstadoEdicion();
     actualizarPropiedades();
+    actualizarJerarquia();
     return primero;
   }
 
@@ -1270,6 +1289,7 @@ export function crearPreviaPanel({ hospedador, proyecto, estadoPestana, editor }
     rutaViva = ruta;
     modeloVivo = resultado.modelo;
     estadoVivo(modeloVivo, ruta);
+    await cargarImagenes(modeloVivo);
     pintarVivo();
   }
 
@@ -1285,6 +1305,15 @@ export function crearPreviaPanel({ hospedador, proyecto, estadoPestana, editor }
     const codigo = el("codigo");
     if (codigo) {
       codigo.addEventListener("input", () => {
+        // un `input` que no dejó el diseñador es una edición a mano del XML: su pila deja de valer
+        // (el texto que esperaba ya no está). La comparación con el texto esperado no depende de
+        // que el evento llegue antes o después de `EDITOR.cambiar`.
+        if (editando && codigo.value !== textoDiseno) {
+          pilaDeshacer = [];
+          pilaRehacer = [];
+          rutaHistorial = null;
+          actualizarHistorialDiseno();
+        }
         if (!visible && !vistaActiva()) return;
         // si el layout mostrado es el documento que se escribe, basta el buffer; si no, no hay nada
         // que releer por teclear en otro fichero
@@ -1407,7 +1436,8 @@ export function crearPreviaPanel({ hospedador, proyecto, estadoPestana, editor }
   // Aplica el XML nuevo al buffer. `editor.cambiar` devuelve el foco al textarea: en modo editar
   // se lo devolvemos al canvas para que Supr y Esc sigan funcionando sin volver a pulsar el nodo.
   // La ficha de propiedades pasa `enfocar: false`: el foco se queda en el campo que se está
-  // editando y el canvas se repinta igual.
+  // editando y el canvas se repinta igual. Cada cambio del diseñador entra en su propia pila
+  // (`pilaDeshacer`); `historial: false` lo usa el deshacer/rehacer para no apilar lo que revive.
   function aplicarXml(nuevo, mensaje, opciones) {
     if (!editor || typeof editor.texto !== "function") return false;
     const antes = String(editor.texto());
@@ -1416,13 +1446,97 @@ export function crearPreviaPanel({ hospedador, proyecto, estadoPestana, editor }
       return false;
     }
     const d = diferencia(antes, nuevo);
-    editor.cambiar(d.ini, d.fin, d.medio, [d.ini + d.medio.length, d.ini + d.medio.length]);
+    const registrar = !opciones || opciones.historial !== false;
+    const seleccionAplicada = seleccion ? seleccion.slice() : null;
+    // el texto esperado se pone ANTES de escribir: el `input` de `execCommand` llega de forma
+    // sincrónica y, si el valor todavía fuera el viejo, la pila se limpiaría a sí misma
+    const textoPrevio = textoDiseno;
+    textoDiseno = nuevo;
+    try {
+      editor.cambiar(d.ini, d.fin, d.medio, [d.ini + d.medio.length, d.ini + d.medio.length]);
+    } catch (e) {
+      textoDiseno = textoPrevio;
+      throw e;
+    }
+    if (registrar) {
+      pilaDeshacer.push({ antes, despues: nuevo, seleccion: seleccionAplicada });
+      pilaRehacer.length = 0;
+      rutaHistorial = estadoPestana ? estadoPestana.ruta : null;
+      actualizarHistorialDiseno();
+    }
     if (!opciones || opciones.enfocar !== false) {
       const canvas = canvasVivo();
       if (canvas && typeof canvas.focus === "function") canvas.focus();
     }
     refrescarVivo().catch(() => {});
     if (mensaje) avisarEdicion(mensaje);
+    return true;
+  }
+
+  function limpiarHistorialDiseno() {
+    pilaDeshacer = [];
+    pilaRehacer = [];
+    textoDiseno = null;
+    rutaHistorial = null;
+    actualizarHistorialDiseno();
+  }
+
+  function actualizarHistorialDiseno() {
+    if (!conDocumento()) return;
+    const deshacerBoton = document.getElementById("previa-editar-deshacer");
+    const rehacerBoton = document.getElementById("previa-editar-rehacer");
+    if (deshacerBoton) deshacerBoton.disabled = !editando || !pilaDeshacer.length;
+    if (rehacerBoton) rehacerBoton.disabled = !editando || !pilaRehacer.length;
+    const eliminar = document.getElementById("previa-editar-eliminar");
+    if (eliminar) eliminar.disabled = !editando;
+  }
+
+  // El historial solo vale mientras se edite el mismo fichero y nadie haya tocado el texto a mano;
+  // si el fichero cambió, se avisa y se empieza de cero en vez de aplicar un XML de otro layout.
+  function historialVigente() {
+    if (!pilaDeshacer.length && !pilaRehacer.length) return true;
+    if (!estadoPestana || !rutaHistorial || estadoPestana.ruta === rutaHistorial) return true;
+    limpiarHistorialDiseno();
+    avisarEdicion("El historial del diseño era de otro fichero: empieza de nuevo.");
+    return false;
+  }
+
+  function focoDeDiseno() {
+    const activo = document.activeElement;
+    if (activo && activo !== document.body && document.contains(activo) &&
+        typeof activo.focus === "function") return activo;
+    return canvasVivo();
+  }
+
+  function deshacerDiseno() {
+    if (!editando || !historialVigente()) return false;
+    const paso = pilaDeshacer.pop();
+    if (!paso) { avisarEdicion("No hay cambios del diseño que deshacer."); return false; }
+    const foco = focoDeDiseno();
+    pilaRehacer.push(paso);
+    const previa = seleccion;
+    seleccion = previa && (previa.length === 0 || leerPropiedades(paso.antes, previa).ok)
+      ? previa.slice() : null;
+    aplicarXml(paso.antes, "Deshecho el último cambio del diseño.",
+      { enfocar: false, historial: false });
+    actualizarHistorialDiseno();
+    if (foco && document.contains(foco)) foco.focus();
+    return true;
+  }
+
+  function rehacerDiseno() {
+    if (!editando || !historialVigente()) return false;
+    const paso = pilaRehacer.pop();
+    if (!paso) { avisarEdicion("No hay cambios del diseño que rehacer."); return false; }
+    const foco = focoDeDiseno();
+    pilaDeshacer.push(paso);
+    const objetivo = paso.seleccion;
+    seleccion = objetivo && (objetivo.length === 0 || leerPropiedades(paso.despues, objetivo).ok)
+      ? objetivo.slice() : null;
+    aplicarXml(paso.despues, "Rehecho el último cambio del diseño.",
+      { enfocar: false, historial: false });
+    actualizarHistorialDiseno();
+    if (foco && document.contains(foco)) foco.focus();
     return true;
   }
 
@@ -1433,7 +1547,7 @@ export function crearPreviaPanel({ hospedador, proyecto, estadoPestana, editor }
     seleccion = limpia;
     if (!igual) { notaEdicion = ""; clavePropiedades = ""; }
     if (visible && modo === "vivo") pintarVivo();
-    else { actualizarPaleta(); actualizarEstadoEdicion(); actualizarPropiedades(); }
+    else { actualizarPaleta(); actualizarEstadoEdicion(); actualizarPropiedades(); actualizarJerarquia(); }
   }
 
   function anadir(tipo) {
@@ -1474,13 +1588,14 @@ export function crearPreviaPanel({ hospedador, proyecto, estadoPestana, editor }
     return esContenedorNodo(modelo.raiz) ? { ruta: [], nodo: modelo.raiz } : null;
   }
 
-  function anadirEn(tipo, x, y) {
-    const motivo = motivoNoEditable();
-    if (motivo) { avisarEdicion(motivo); return false; }
+  // Calcula el destino de un tipo soltado en (x, y) del modelo, con la MISMA lógica que usa el
+  // soltar y la que pinta el indicador: contenedor, índice y márgenes. `forma` es "linea" para un
+  // lineal o "marco" para el resto.
+  function destinoDeSoltar(tipo, x, y) {
     const modelo = modeloVivo;
-    if (!modelo) { avisarEdicion("No hay un layout dibujado sobre el que soltar."); return false; }
+    if (!modelo) return { ok: false, motivo: "No hay un layout dibujado sobre el que soltar." };
     const destino = contenedorEn(modelo, x, y);
-    if (!destino) { avisarEdicion("La raíz no admite hijos: elige un contenedor."); return false; }
+    if (!destino) return { ok: false, motivo: "La raíz no admite hijos: elige un contenedor." };
     const padre = destino.nodo;
     const opciones = { tipo, padre: destino.ruta };
     if (esLineal(padre.tipo)) {
@@ -1495,21 +1610,120 @@ export function crearPreviaPanel({ hospedador, proyecto, estadoPestana, editor }
         if (centro < pos) indice++;
       }
       opciones.indice = indice;
-    } else {
-      // un marco coloca con márgenes: el punto donde se suelta, respecto al contenido del padre
-      const pad = paddingDe(padre);
-      opciones.indice = hijosDelModelo(padre).length;
-      opciones.margen = {
-        izquierda: Math.max(0, x - (padre.rect.x + pad.izq)),
-        arriba: Math.max(0, y - (padre.rect.y + pad.arriba)),
+      return {
+        ok: true, padre, padreRuta: destino.ruta, opciones, indice, forma: "linea", vertical,
+        padding: paddingDe(padre), x, y,
       };
     }
-    const r = insertarElemento(String(editor.texto()), opciones);
+    // un marco coloca con márgenes: el punto donde se suelta, respecto al contenido del padre
+    const pad = paddingDe(padre);
+    opciones.indice = hijosDelModelo(padre).length;
+    opciones.margen = {
+      izquierda: Math.max(0, x - (padre.rect.x + pad.izq)),
+      arriba: Math.max(0, y - (padre.rect.y + pad.arriba)),
+    };
+    return {
+      ok: true, padre, padreRuta: destino.ruta, opciones, indice: opciones.indice,
+      forma: "marco", margen: opciones.margen, padding: pad, x, y,
+    };
+  }
+
+  function anadirEn(tipo, x, y) {
+    const motivo = motivoNoEditable();
+    if (motivo) { avisarEdicion(motivo); return false; }
+    const destino = destinoDeSoltar(tipo, x, y);
+    if (!destino.ok) { avisarEdicion(destino.motivo); return false; }
+    const r = insertarElemento(String(editor.texto()), destino.opciones);
     if (!r.ok) { avisarEdicion("No se pudo añadir: " + r.error); return false; }
     seleccion = r.ruta;
     notaEdicion = "";
     return aplicarXml(r.xml, "Añadido " + tipo + (r.id ? " (id/" + r.id + ")" : "") +
-      (destino.ruta.length ? " dentro de " + etiquetaDe(padre) : "") + ".");
+      (destino.padreRuta.length ? " dentro de " + etiquetaDe(destino.padre) : "") + ".");
+  }
+
+  // --- el indicador de destino mientras se arrastra ------------------------------------------
+  // Es una capa DOM (no se pinta en el canvas): así no se mezcla con el modelo y se apaga sin
+  // repintar. Una línea en un lineal, o un hueco discontinuo con el tamaño aproximado del tipo en
+  // un marco; se recalcula en cada `pointermove` con `destinoDeSoltar`.
+  const TAMANO_DESTINO = {
+    TextView: [96, 40], Button: [96, 48], EditText: [140, 48], ImageButton: [64, 64],
+    ImageView: [80, 80], CheckBox: [120, 40], RadioButton: [120, 40], Switch: [120, 40],
+    ProgressBar: [120, 16], SeekBar: [140, 24], View: [48, 24], Space: [48, 24],
+    LinearLayout: [160, 96], FrameLayout: [160, 96], RelativeLayout: [160, 96],
+    ScrollView: [160, 96], TableLayout: [160, 96], GridLayout: [160, 96],
+  };
+
+  function ocultarDestino() {
+    const linea = document.getElementById("previa-destino-linea");
+    const hueco = document.getElementById("previa-destino-hueco");
+    if (linea) linea.hidden = true;
+    if (hueco) hueco.hidden = true;
+  }
+
+  function pintarDestino(tipo, x, y) {
+    const canvas = canvasVivo();
+    const modelo = modeloVivo;
+    const linea = document.getElementById("previa-destino-linea");
+    const hueco = document.getElementById("previa-destino-hueco");
+    if (!canvas || !modelo || !linea || !hueco) { ocultarDestino(); return null; }
+    const caja = cajaDeCanvas(canvas, modelo);
+    if (!caja.valida) { ocultarDestino(); return null; }
+    const destino = destinoDeSoltar(tipo, x, y);
+    if (!destino.ok) { ocultarDestino(); return destino; }
+    // el canvas puede tener borde: su caja de cliente empieza en `clientLeft/clientTop`
+    const ox = canvas.offsetLeft + canvas.clientLeft;
+    const oy = canvas.offsetTop + canvas.clientTop;
+    const aPx = (mx, my) => ({
+      x: ox + caja.x + mx * caja.escala,
+      y: oy + caja.y + my * caja.escala,
+    });
+    if (destino.forma === "linea") {
+      const padre = destino.padre;
+      const pad = destino.padding;
+      const hijos = hijosDelModelo(padre);
+      const r = padre.rect;
+      if (destino.vertical) {
+        const yModelo = destino.indice < hijos.length && hijos[destino.indice].rect
+          ? hijos[destino.indice].rect.y
+          : (hijos.length && hijos[hijos.length - 1].rect
+            ? hijos[hijos.length - 1].rect.y + hijos[hijos.length - 1].rect.alto
+            : r.y + pad.arriba);
+        const desde = aPx(r.x + pad.izq, yModelo);
+        const hasta = aPx(r.x + r.ancho - pad.der, yModelo);
+        linea.style.left = Math.round(desde.x) + "px";
+        linea.style.top = Math.round(desde.y - 1) + "px";
+        linea.style.width = Math.max(2, Math.round(hasta.x - desde.x)) + "px";
+        linea.style.height = "2px";
+      } else {
+        const xModelo = destino.indice < hijos.length && hijos[destino.indice].rect
+          ? hijos[destino.indice].rect.x
+          : (hijos.length && hijos[hijos.length - 1].rect
+            ? hijos[hijos.length - 1].rect.x + hijos[hijos.length - 1].rect.ancho
+            : r.x + pad.izq);
+        const desde = aPx(xModelo, r.y + pad.arriba);
+        const hasta = aPx(xModelo, r.y + r.alto - pad.abajo);
+        linea.style.left = Math.round(desde.x - 1) + "px";
+        linea.style.top = Math.round(desde.y) + "px";
+        linea.style.width = "2px";
+        linea.style.height = Math.max(2, Math.round(hasta.y - desde.y)) + "px";
+      }
+      linea.hidden = false;
+      hueco.hidden = true;
+      return destino;
+    }
+    const padre = destino.padre;
+    const pad = destino.padding;
+    const tamano = TAMANO_DESTINO[tipo] || [96, 48];
+    const mx = padre.rect.x + pad.izq + destino.margen.izquierda;
+    const my = padre.rect.y + pad.arriba + destino.margen.arriba;
+    const p = aPx(mx, my);
+    hueco.style.left = Math.round(p.x) + "px";
+    hueco.style.top = Math.round(p.y) + "px";
+    hueco.style.width = Math.max(8, Math.round(tamano[0] * caja.escala)) + "px";
+    hueco.style.height = Math.max(8, Math.round(tamano[1] * caja.escala)) + "px";
+    hueco.hidden = false;
+    linea.hidden = true;
+    return destino;
   }
 
   function fantasmaDePaleta(tipo) {
@@ -1541,6 +1755,7 @@ export function crearPreviaPanel({ hospedador, proyecto, estadoPestana, editor }
     if (conDocumento()) document.body.classList.remove("arrastrando-paleta");
     const canvas = canvasVivo();
     if (canvas) canvas.classList.remove("previa-canvas-recibiendo");
+    ocultarDestino();
   }
 
   function soltarPaleta(tipo, clientX, clientY) {
@@ -1595,7 +1810,16 @@ export function crearPreviaPanel({ hospedador, proyecto, estadoPestana, editor }
       }
       moverFantasma(arrastrePaleta.fantasma, e.clientX, e.clientY);
       const canvas = canvasVivo();
-      if (canvas) canvas.classList.toggle("previa-canvas-recibiendo", estaSobreCanvas(e.clientX, e.clientY));
+      const dentroCanvas = estaSobreCanvas(e.clientX, e.clientY);
+      if (canvas) canvas.classList.toggle("previa-canvas-recibiendo", dentroCanvas);
+      // el indicador usa las mismas coordenadas del modelo y la misma lógica que el soltar
+      if (dentroCanvas && canvas && modeloVivo) {
+        const p = puntoModelo(canvas, modeloVivo, { clientX: e.clientX, clientY: e.clientY });
+        if (p) pintarDestino(arrastrePaleta.tipo, p.x, p.y);
+        else ocultarDestino();
+      } else {
+        ocultarDestino();
+      }
       e.preventDefault();
     });
     document.addEventListener("pointerup", (e) => {
@@ -1615,7 +1839,10 @@ export function crearPreviaPanel({ hospedador, proyecto, estadoPestana, editor }
   }
 
   function borrarSeleccion() {
-    if (!seleccion) return false;
+    if (!seleccion) {
+      avisarEdicion("Selecciona un elemento del dibujo para borrarlo.");
+      return false;
+    }
     const motivo = motivoNoEditable();
     if (motivo) { avisarEdicion(motivo); return false; }
     if (!seleccion.length) {
@@ -1638,6 +1865,7 @@ export function crearPreviaPanel({ hospedador, proyecto, estadoPestana, editor }
   // mismo `aplicarXml` del resto del modo editar, así que entra en el undo tree y el canvas se
   // repinta sin compilar y sin tocar `#ultimo-codigo`.
   function campoDePropiedad(def, valor) {
+    if (def.tipo === "imagen") return campoImagen(def, valor);
     const caja = document.createElement("label");
     caja.className = "previa-propiedad" +
       (def.tipo === "texto" || def.tipo === "gravedad" ? " previa-propiedad-ancha" : "");
@@ -1755,6 +1983,302 @@ export function crearPreviaPanel({ hospedador, proyecto, estadoPestana, editor }
     return cambiado;
   }
 
+  // --- imágenes de un ImageView / ImageButton --------------------------------------------------
+  // El fichero viaja del usuario al OPFS del propio proyecto: no hay red. Se guarda en
+  // `res/drawable/<nombre>.<ext>` y el XML recibe `@drawable/<nombre>` con el mismo
+  // `escribirPropiedad` que el resto de campos, así que el cambio es mínimo y entra en el historial
+  // del diseñador.
+  const EXTENSIONES_IMAGEN = [".png", ".jpg", ".jpeg", ".webp"];
+  // La lista viaja en `layout-editor.js` (datos puros, probados en `prueba.js`); aquí solo se pinta.
+  const ICONOS_SISTEMA = iconosSistema();
+  let campoImagenActivo = null;
+
+  function nodoImagen(nodo) {
+    return !!nodo && /^Image/.test(String(nodo.tipo || ""));
+  }
+
+  // Los nodos con `android:src`. Para un `@drawable/…` del proyecto se lee el PNG del OPFS y se
+  // decodifica con `createImageBitmap`; `@android:drawable/…` vive en el jar, no en el proyecto, y
+  // se queda como marcador con su nombre (frontera escrita en la ficha).
+  function nodosConRecurso(modelo) {
+    const salida = [];
+    const recorrer = (nodo) => {
+      if (!nodo || typeof nodo !== "object") return;
+      if (typeof nodo.recurso === "string" && nodo.recurso) salida.push(nodo);
+      for (const hijo of Array.isArray(nodo.hijos) ? nodo.hijos : []) recorrer(hijo);
+    };
+    if (modelo && modelo.raiz) recorrer(modelo.raiz);
+    return salida;
+  }
+
+  async function cargarImagenes(modelo) {
+    if (!modelo || typeof createImageBitmap !== "function" || !hospedador || !hospedador.bytes) return;
+    for (const nodo of nodosConRecurso(modelo)) {
+      const m = /^@drawable\/([A-Za-z_][A-Za-z0-9_]*)$/.exec(String(nodo.recurso || ""));
+      if (!m) continue;
+      const clave = "@drawable/" + m[1];
+      if (!imagenes.has(clave)) {
+        let bitmap = null;
+        for (const ext of EXTENSIONES_IMAGEN) {
+          try {
+            const bytes = await hospedador.bytes(carpeta + "/res/drawable/" + m[1] + ext);
+            if (bytes && bytes.length) {
+              bitmap = await createImageBitmap(new Blob([bytes]));
+              break;
+            }
+          } catch (e) { /* sin fichero o formato que el navegador no lee */ }
+        }
+        imagenes.set(clave, bitmap || null);
+      }
+      nodo.imagen = imagenes.get(clave);
+    }
+  }
+
+  function extensionDeImagen(nombre, tipo) {
+    const m = /\.(png|jpe?g|webp)$/i.exec(String(nombre || ""));
+    if (m) return "." + m[1].toLowerCase().replace("jpeg", "jpg");
+    const t = String(tipo || "");
+    if (/jpeg/.test(t)) return ".jpg";
+    if (/webp/.test(t)) return ".webp";
+    return ".png";
+  }
+
+  function nombreDeDrawable(nombre) {
+    let base = String(nombre || "imagen").replace(/\.[^.]+$/, "").toLowerCase()
+      .replace(/[^a-z0-9_]+/g, "_").replace(/^_+|_+$/g, "");
+    if (!/^[a-z_]/.test(base)) base = "imagen_" + base;
+    return base.slice(0, 48) || "imagen";
+  }
+
+  async function nombreDrawableLibre(base, extension) {
+    for (let n = 0; n < 100; n++) {
+      const nombre = n ? base + "_" + (n + 1) : base;
+      let ocupado = false;
+      // un `drawable/<nombre>.xml` (vector) ocupa el mismo nombre de recurso que el PNG nuevo
+      for (const ext of EXTENSIONES_IMAGEN.concat([".xml"])) {
+        try {
+          const bytes = await hospedador.bytes(carpeta + "/res/drawable/" + nombre + ext);
+          if (bytes && bytes.length) { ocupado = true; break; }
+        } catch (e) { /* no existe */ }
+      }
+      if (!ocupado) return { nombre, ruta: carpeta + "/res/drawable/" + nombre + extension };
+    }
+    return { nombre: base, ruta: carpeta + "/res/drawable/" + base + extension };
+  }
+
+  async function importarImagen(archivo, campo) {
+    const motivo = motivoNoEditable();
+    if (motivo) { avisarEdicion(motivo); return false; }
+    const nodo = modeloVivo && seleccion ? nodoPorRuta(modeloVivo.raiz, seleccion) : null;
+    if (!nodoImagen(nodo)) {
+      avisarEdicion("Selecciona un ImageView o un ImageButton para darle una imagen.");
+      return false;
+    }
+    if (!archivo || !/^image\//.test(String(archivo.type || ""))) {
+      avisarEdicion("El fichero tiene que ser una imagen (PNG, JPG o WebP).");
+      return false;
+    }
+    let bytes;
+    try {
+      bytes = new Uint8Array(await archivo.arrayBuffer());
+    } catch (e) {
+      avisarEdicion("No se pudo leer la imagen.");
+      return false;
+    }
+    if (!bytes.length) { avisarEdicion("La imagen está vacía."); return false; }
+    const extension = extensionDeImagen(archivo.name, archivo.type);
+    const libre = await nombreDrawableLibre(nombreDeDrawable(archivo.name), extension);
+    const escrito = await hospedador.escribir(libre.ruta, bytes);
+    if (escrito && escrito.tipo === "error") {
+      avisarEdicion("No se pudo guardar la imagen: " + escrito.error);
+      return false;
+    }
+    const valor = "@drawable/" + libre.nombre;
+    imagenes.delete(valor);
+    try { await hospedador.refrescar(carpeta + "/res"); } catch (e) { /* el árbol se refresca al compilar */ }
+    return aplicarPropiedad("android:src", valor, campo);
+  }
+
+  function abrirSelectorImagen(campo) {
+    const archivo = document.getElementById("previa-imagen-archivo");
+    if (!archivo) return;
+    campoImagenActivo = campo;
+    archivo.value = "";
+    archivo.click();
+  }
+
+  // El campo de imagen: el texto con `android:src`, el botón de fichero, el selector de iconos del
+  // sistema y una nota que dice qué se dibuja de verdad y qué es un marcador.
+  function campoImagen(def, valor) {
+    const caja = document.createElement("fieldset");
+    caja.className = "previa-propiedad previa-propiedad-ancha previa-imagen";
+    const leyenda = document.createElement("legend");
+    leyenda.className = "previa-propiedad-etiqueta";
+    leyenda.textContent = def.etiqueta;
+    const fila = document.createElement("div");
+    fila.className = "previa-imagen-fila";
+    const campo = document.createElement("input");
+    campo.type = "text";
+    campo.className = "previa-propiedad-campo";
+    campo.value = valor == null ? "" : String(valor);
+    campo.setAttribute("data-propiedad", def.nombre);
+    campo.setAttribute("aria-label", "Arrastra una imagen o pulsa Elegir fichero");
+    campo.setAttribute("title", def.ayuda);
+    campo.setAttribute("placeholder", "@drawable/foto o @android:drawable/ic_delete");
+    campo.setAttribute("autocomplete", "off");
+    campo.setAttribute("spellcheck", "false");
+    campo.addEventListener("change", () => aplicarPropiedad(def.nombre, campo.value, campo));
+    campo.addEventListener("keydown", (e) => {
+      if (e.key !== "Enter") return;
+      e.preventDefault();
+      campo.blur();
+    });
+    const elegir = document.createElement("button");
+    elegir.type = "button";
+    elegir.className = "previa-paleta-boton";
+    elegir.textContent = "Elegir fichero";
+    elegir.setAttribute("role", "button");
+    elegir.setAttribute("aria-label", "Arrastra una imagen o pulsa Elegir fichero");
+    elegir.setAttribute("title", "Importa una imagen al proyecto y la usa en este nodo");
+    elegir.addEventListener("click", (e) => {
+      e.preventDefault();
+      abrirSelectorImagen(campo);
+    });
+    fila.appendChild(campo);
+    fila.appendChild(elegir);
+    const iconos = document.createElement("select");
+    iconos.className = "previa-propiedad-campo";
+    iconos.setAttribute("data-icono-sistema", "1");
+    iconos.setAttribute("aria-label", "Iconos del sistema disponibles en API 34");
+    const vacio = document.createElement("option");
+    vacio.value = "";
+    vacio.textContent = "Icono del sistema…";
+    iconos.appendChild(vacio);
+    for (const nombre of ICONOS_SISTEMA) {
+      const opcion = document.createElement("option");
+      opcion.value = "@android:drawable/" + nombre;
+      opcion.textContent = nombre;
+      iconos.appendChild(opcion);
+    }
+    iconos.value = ICONOS_SISTEMA.some((n) => campo.value === "@android:drawable/" + n)
+      ? campo.value : "";
+    iconos.addEventListener("change", () => {
+      if (!iconos.value) return;
+      campo.value = iconos.value;
+      aplicarPropiedad(def.nombre, iconos.value, campo);
+    });
+    const nota = document.createElement("span");
+    nota.className = "previa-imagen-nota";
+    nota.textContent = "Los PNG importados se dibujan de verdad; los iconos del sistema, como " +
+      "marcador con su nombre (las variantes blancas/negras/grises no existen como recurso " +
+      "público en API 34).";
+    caja.appendChild(leyenda);
+    caja.appendChild(fila);
+    caja.appendChild(iconos);
+    caja.appendChild(nota);
+    return caja;
+  }
+
+  // --- el visor de jerarquía ------------------------------------------------------------------
+  function claveDeRuta(ruta) {
+    return (Array.isArray(ruta) ? ruta : []).join("/");
+  }
+
+  function rutaDeClave(clave) {
+    return String(clave) === "" ? [] : String(clave).split("/").map((n) => Number(n));
+  }
+
+  function actualizarJerarquia(force) {
+    const caja = el("previa-jerarquia");
+    if (!caja) return;
+    const lista = el("previa-jerarquia-lista");
+    if (!lista) return;
+    const boton = el("previa-jerarquia-alternar");
+    const abierta = !!editando && jerarquiaVisible;
+    if (boton) {
+      boton.setAttribute("aria-pressed", abierta ? "true" : "false");
+      boton.classList.toggle("activa", abierta);
+    }
+    caja.hidden = !abierta || !modeloVivo;
+    if (!abierta || !modeloVivo) {
+      lista.replaceChildren();
+      claveJerarquia = "";
+      return;
+    }
+    const filas = [];
+    const recorrer = (nodo, ruta, prof) => {
+      const hijos = hijosDelModelo(nodo);
+      filas.push({ ruta: ruta.slice(), prof, tipo: String(nodo.tipo || "vista"), id: nodo.id || "",
+        hijos: hijos.length });
+      if (jerarquiaPlegada.has(claveDeRuta(ruta))) return;
+      hijos.forEach((hijo, i) => recorrer(hijo, ruta.concat(i), prof + 1));
+    };
+    recorrer(modeloVivo.raiz, [], 0);
+    const clave = JSON.stringify([filas.map((f) => [f.ruta, f.tipo, f.id, f.hijos]),
+      [...jerarquiaPlegada].sort()]);
+    if (force || clave !== claveJerarquia) {
+      claveJerarquia = clave;
+      const fragmento = document.createDocumentFragment();
+      for (const fila of filas) {
+        const li = document.createElement("li");
+        li.className = "previa-jerarquia-fila";
+        li.style.paddingLeft = (6 + fila.prof * 10) + "px";
+        const rotulo = fila.tipo + " · " + (fila.id || "(sin id)");
+        if (fila.hijos) {
+          const plegada = jerarquiaPlegada.has(claveDeRuta(fila.ruta));
+          const flecha = document.createElement("button");
+          flecha.type = "button";
+          flecha.className = "previa-jerarquia-flecha";
+          flecha.textContent = plegada ? "▸" : "▾";
+          flecha.setAttribute("aria-expanded", plegada ? "false" : "true");
+          flecha.setAttribute("aria-label", (plegada ? "Desplegar " : "Plegar ") + rotulo);
+          flecha.addEventListener("click", (e) => {
+            e.preventDefault();
+            const k = claveDeRuta(fila.ruta);
+            if (jerarquiaPlegada.has(k)) jerarquiaPlegada.delete(k);
+            else jerarquiaPlegada.add(k);
+            actualizarJerarquia(true);
+          });
+          li.appendChild(flecha);
+        } else {
+          const hueco = document.createElement("span");
+          hueco.className = "previa-jerarquia-hueco";
+          hueco.setAttribute("aria-hidden", "true");
+          li.appendChild(hueco);
+        }
+        const nodoBoton = document.createElement("button");
+        nodoBoton.type = "button";
+        nodoBoton.className = "previa-jerarquia-nodo";
+        nodoBoton.dataset.ruta = claveDeRuta(fila.ruta);
+        nodoBoton.textContent = rotulo;
+        nodoBoton.setAttribute("aria-label", "Seleccionar " + rotulo);
+        nodoBoton.addEventListener("click", () => {
+          seleccionar(rutaDeClave(nodoBoton.dataset.ruta));
+          const canvas = canvasVivo();
+          if (canvas && typeof canvas.focus === "function") canvas.focus();
+        });
+        li.appendChild(nodoBoton);
+        fragmento.appendChild(li);
+      }
+      lista.replaceChildren(fragmento);
+    }
+    const activa = seleccion ? claveDeRuta(seleccion) : null;
+    for (const nodoBoton of lista.querySelectorAll("button[data-ruta]")) {
+      const esActiva = activa !== null && nodoBoton.dataset.ruta === activa;
+      nodoBoton.classList.toggle("activa", esActiva);
+      nodoBoton.setAttribute("aria-current", esActiva ? "true" : "false");
+    }
+  }
+
+  function seleccionarPadre() {
+    if (!seleccion) return false;
+    if (!seleccion.length) { avisarEdicion("La raíz no tiene padre."); return false; }
+    seleccionar(seleccion.slice(0, -1));
+    const canvas = canvasVivo();
+    if (canvas && typeof canvas.focus === "function") canvas.focus();
+    return true;
+  }
+
   function actualizarPropiedades(force) {
     const seccion = el("previa-propiedades");
     if (!seccion) return;
@@ -1771,9 +2295,28 @@ export function crearPreviaPanel({ hospedador, proyecto, estadoPestana, editor }
       clavePropiedades = "";
       if (vacio) vacio.hidden = true;
       if (titulo) titulo.textContent = "Propiedades";
+      const padreVacio = el("previa-propiedades-padre");
+      if (padreVacio) padreVacio.disabled = true;
+      const canvasSin = canvasVivo();
+      if (canvasSin) {
+        canvasSin.setAttribute("aria-label", "Dibujo del layout del editor, sin compilar");
+        canvasSin.setAttribute("role", "img");
+      }
       return;
     }
     const raiz = seleccion.length === 0;
+    const botonPadre = el("previa-propiedades-padre");
+    if (botonPadre) botonPadre.disabled = raiz;
+    // el canvas se anuncia distinto cuando el nodo seleccionado admite una imagen: ahí también se
+    // puede soltar un fichero, y un lector de pantalla tiene que saberlo
+    const canvasVista = canvasVivo();
+    if (canvasVista) {
+      const imagen = nodoImagen(nodo);
+      canvasVista.setAttribute("aria-label", imagen
+        ? "Arrastra una imagen o pulsa Elegir fichero para el " + String(nodo.tipo)
+        : "Dibujo del layout del editor, sin compilar");
+      canvasVista.setAttribute("role", imagen ? "button" : "img");
+    }
     if (titulo) {
       titulo.textContent = raiz
         ? "Propiedades del layout raíz (" + etiquetaDe(nodo) + ")"
@@ -1805,14 +2348,6 @@ export function crearPreviaPanel({ hospedador, proyecto, estadoPestana, editor }
     }
     const select = campos.querySelector("[data-raiz-tipo]");
     if (select && document.activeElement !== select) select.value = leido.tipo;
-  }
-
-  function seleccionarRaiz() {
-    if (!modeloVivo) { avisarEdicion(motivoNoEditable()); return false; }
-    seleccionar([]);
-    const canvas = canvasVivo();
-    if (canvas && typeof canvas.focus === "function") canvas.focus();
-    return true;
   }
 
   function canvasVivo() {
@@ -1991,6 +2526,30 @@ export function crearPreviaPanel({ hospedador, proyecto, estadoPestana, editor }
     });
     document.addEventListener("pointerup", soltarCanvas);
     document.addEventListener("pointercancel", () => { arrastreNodo = null; });
+    // Soltar una imagen del escritorio sobre el canvas del nodo seleccionado. Solo se acepta si la
+    // selección es un ImageView/ImageButton: el fichero va al OPFS y el XML recibe `@drawable/…`.
+    canvas.addEventListener("dragover", (e) => {
+      if (!editando || !nodoImagen(seleccion ? nodoPorRuta(modeloVivo && modeloVivo.raiz, seleccion) : null)) return;
+      if (!e.dataTransfer) return;
+      const tipos = Array.from(e.dataTransfer.types || []);
+      if (tipos.indexOf("Files") < 0) return;
+      e.preventDefault();
+      e.dataTransfer.dropEffect = "copy";
+      canvas.classList.add("previa-canvas-recibiendo");
+    });
+    canvas.addEventListener("dragleave", () => canvas.classList.remove("previa-canvas-recibiendo"));
+    canvas.addEventListener("drop", (e) => {
+      canvas.classList.remove("previa-canvas-recibiendo");
+      if (!editando) return;
+      const nodo = seleccion && modeloVivo ? nodoPorRuta(modeloVivo.raiz, seleccion) : null;
+      if (!nodoImagen(nodo)) return;
+      const archivo = e.dataTransfer && e.dataTransfer.files ? e.dataTransfer.files[0] : null;
+      if (!archivo) return;
+      e.preventDefault();
+      const campo = document.querySelector(
+        '#previa-propiedades-campos [data-propiedad="android:src"]');
+      importarImagen(archivo, campo).catch(() => {});
+    });
   }
 
   // Supr borra y Esc suelta, solo con el modo editar y una selección. Esc también cierra la ficha
@@ -2041,9 +2600,12 @@ export function crearPreviaPanel({ hospedador, proyecto, estadoPestana, editor }
     }
     const canvas = canvasVivo();
     if (canvas) canvas.classList.toggle("editable", editando);
+    ocultarDestino();
     actualizarPaleta();
     actualizarEstadoEdicion();
     actualizarPropiedades(true);
+    actualizarHistorialDiseno();
+    actualizarJerarquia(true);
     if (visible && modo === "vivo") {
       pintarVivo();
       if (editando) programarVivo(0);
@@ -2071,6 +2633,30 @@ export function crearPreviaPanel({ hospedador, proyecto, estadoPestana, editor }
     }
   }
 
+  // Atajos del DISEÑADOR. Solo con el lápiz encendido y con el foco dentro del panel de la vista
+  // previa (canvas, ficha, paleta) o en el cuerpo: ahí Ctrl+Z no debe llegar al historial de texto
+  // del editor de código (ni al undo nativo del navegador, que reescribía el XML a espaldas del
+  // modelo). Con el foco en el editor de código o en la búsqueda, la combinación es suya.
+  function conectarAtajosDiseno() {
+    document.addEventListener("keydown", (e) => {
+      if (!editando || !(e.ctrlKey || e.metaKey) || e.altKey) return;
+      const tecla = String(e.key || "").toLowerCase();
+      if (tecla !== "z" && tecla !== "y") return;
+      const destino = e.target;
+      const enPanel = destino && typeof destino.closest === "function" &&
+        !!destino.closest("#previa-lateral");
+      const enCuerpo = destino === document.body || destino === document.documentElement;
+      const activo = document.activeElement;
+      const focoEnPanel = activo && typeof activo.closest === "function" &&
+        !!activo.closest("#previa-lateral");
+      if (!enPanel && !enCuerpo && !focoEnPanel) return;
+      e.preventDefault();
+      e.stopPropagation();
+      if (tecla === "y" || (tecla === "z" && e.shiftKey)) rehacerDiseno();
+      else deshacerDiseno();
+    }, true);
+  }
+
   function conectarEditable() {
     const boton = document.getElementById("previa-modo-editar");
     if (boton) boton.addEventListener("click", () => aplicarEditable(!editando));
@@ -2078,8 +2664,34 @@ export function crearPreviaPanel({ hospedador, proyecto, estadoPestana, editor }
       for (const b of document.querySelectorAll("#previa-paleta button[data-tipo]")) {
         b.addEventListener("click", () => anadir(b.dataset.tipo));
       }
-      const raiz = document.getElementById("previa-seleccionar-raiz");
-      if (raiz) raiz.addEventListener("click", seleccionarRaiz);
+      const deshacerBoton = document.getElementById("previa-editar-deshacer");
+      if (deshacerBoton) deshacerBoton.addEventListener("click", () => deshacerDiseno());
+      const rehacerBoton = document.getElementById("previa-editar-rehacer");
+      if (rehacerBoton) rehacerBoton.addEventListener("click", () => rehacerDiseno());
+      for (const idBorrar of ["previa-editar-eliminar", "previa-propiedades-eliminar"]) {
+        const borrar = document.getElementById(idBorrar);
+        if (borrar) borrar.addEventListener("click", () => borrarSeleccion());
+      }
+      const padre = document.getElementById("previa-propiedades-padre");
+      if (padre) padre.addEventListener("click", () => seleccionarPadre());
+      const alternarJerarquia = document.getElementById("previa-jerarquia-alternar");
+      if (alternarJerarquia) alternarJerarquia.addEventListener("click", () => {
+        jerarquiaVisible = !jerarquiaVisible;
+        actualizarJerarquia(true);
+      });
+      const cerrarJerarquia = document.getElementById("previa-jerarquia-cerrar");
+      if (cerrarJerarquia) cerrarJerarquia.addEventListener("click", () => {
+        jerarquiaVisible = false;
+        actualizarJerarquia(true);
+      });
+      const archivoImagen = document.getElementById("previa-imagen-archivo");
+      if (archivoImagen) archivoImagen.addEventListener("change", () => {
+        const f = archivoImagen.files && archivoImagen.files[0];
+        const campo = campoImagenActivo || document.querySelector(
+          '#previa-propiedades-campos [data-propiedad="android:src"]');
+        if (f) importarImagen(f, campo).catch(() => {});
+        archivoImagen.value = "";
+      });
       const cerrarPropiedades = document.getElementById("previa-propiedades-cerrar");
       if (cerrarPropiedades) {
         cerrarPropiedades.addEventListener("click", () => {
@@ -2090,6 +2702,7 @@ export function crearPreviaPanel({ hospedador, proyecto, estadoPestana, editor }
       }
       conectarPlegables();
       conectarPaletaArrastre();
+      conectarAtajosDiseno();
     }
     conectarCanvasEditable();
     conectarTecladoEditable();
@@ -2255,6 +2868,9 @@ export function crearPreviaPanel({ hospedador, proyecto, estadoPestana, editor }
     anadirEn,
     borrarSeleccion,
     seleccionar,
+    // el historial propio del diseñador (los mismos caminos que Ctrl+Z/Ctrl+Mayús+Z)
+    deshacerDiseno,
+    rehacerDiseno,
     // lectura para las pruebas: el modelo dibujado en el modo Vista previa (no el código)
     modeloVivo: () => modeloVivo,
     estado: () => ({
