@@ -656,20 +656,65 @@ body.separando-previa[data-eje="suroeste"] { cursor: nesw-resize; }
   color: var(--blanco);
   box-shadow: none;
 }
+/* ---- modo editar: paleta y ficha ENCIMA del dibujo -------------------------
+   Nada de columnas: la paleta y la ficha de propiedades son capas absolutas dentro del marco del
+   teléfono, así que no entran en el reparto y el canvas conserva el ancho y el alto de «Vista
+   previa». La paleta va pegada al borde izquierdo, con scroll propio por categorías; la ficha,
+   arriba a la derecha, y solo con un nodo seleccionado. Las dos se pliegan. */
 .previa-paleta {
+  position: absolute;
+  z-index: 4;
+  top: 2px;
+  left: 2px;
+  bottom: 2px;
+  width: 148px;
   display: flex;
-  flex-wrap: wrap;
-  gap: 4px;
-  align-items: center;
-  max-height: 88px;
-  overflow-y: auto;
+  flex-direction: column;
+  min-height: 0;
+  background: var(--superficie2);
+  border: 1px solid var(--borde2);
+  border-radius: 6px;
+  box-shadow: 0 8px 22px rgba(0, 0, 0, .38);
+  overflow: hidden;
 }
 .previa-paleta[hidden] { display: none; }
+.previa-paleta-cab {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 2px 2px 2px 8px;
+  border-bottom: 1px solid var(--borde);
+}
 .previa-paleta-titulo {
-  flex-basis: 100%;
+  flex: 1 1 auto;
+  min-width: 0;
   font-size: 11px;
   color: var(--texto-medio);
-  margin-right: 2px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.previa-paleta-scroll {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 6px;
+}
+.previa-paleta-scroll:focus-visible { outline: 2px solid var(--foco); outline-offset: -2px; }
+.previa-paleta[data-plegada="1"] { bottom: auto; width: 106px; }
+.previa-paleta[data-plegada="1"] .previa-paleta-scroll { display: none; }
+.previa-paleta[data-plegada="1"] .previa-paleta-plegar svg,
+.previa-propiedades[data-plegada="1"] .previa-propiedades-plegar svg { transform: rotate(-90deg); }
+.previa-paleta-grupo { display: flex; flex-direction: column; gap: 2px; }
+.previa-paleta-categoria {
+  font-size: 9.5px;
+  text-transform: uppercase;
+  letter-spacing: .06em;
+  color: var(--texto-medio);
 }
 .previa-paleta-boton {
   background: var(--boton);
@@ -680,33 +725,85 @@ body.separando-previa[data-eje="suroeste"] { cursor: nesw-resize; }
   font-size: 11px;
   padding: 2px 6px;
   cursor: pointer;
+  min-width: 0;
+  text-align: left;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 .previa-paleta-boton:hover:not(:disabled) { background: var(--boton-hover); color: var(--blanco); }
 .previa-paleta-boton:disabled { opacity: .5; cursor: not-allowed; }
 .previa-paleta-boton:focus-visible { outline: 2px solid var(--foco); outline-offset: -2px; }
+/* el elemento de la paleta se arrastra al dibujo: sin selección de texto y con cursor de agarre */
+.previa-paleta-elemento { touch-action: none; cursor: grab; }
+.previa-paleta-elemento.arrastrando { opacity: .45; cursor: grabbing; }
+/* el fantasma que sigue al puntero mientras se arrastra un tipo (lo crea previa-panel.js) */
+.previa-arrastre-fantasma {
+  position: fixed;
+  z-index: 60;
+  pointer-events: none;
+  padding: 3px 8px;
+  border: 1px dashed var(--acento);
+  border-radius: 4px;
+  background: var(--superficie2);
+  color: var(--texto-fuerte);
+  font-size: 11px;
+  box-shadow: 0 4px 14px rgba(0, 0, 0, .4);
+  transform: translate(-50%, -130%);
+}
+body.arrastrando-paleta { cursor: grabbing; }
 /* en modo editar el canvas no es una imagen: se arrastra dentro de él */
 .previa-canvas.editable { cursor: grab; touch-action: none; }
 .previa-canvas.editable:active { cursor: grabbing; }
+.previa-canvas.previa-canvas-recibiendo { outline: 2px dashed var(--acento); outline-offset: 1px; }
 .previa-canvas:focus-visible { outline: 2px solid var(--foco); outline-offset: 2px; }
 .previa-editar-estado[hidden] { display: none; }
-/* la ficha del nodo seleccionado: solo en modo editar, con los campos en dos columnas */
+/* el aviso del modo editar vive al pie de la paleta: es una capa, no una fila que le robe alto al
+   dibujo, y no tapa la línea de estado de la vista previa */
+.previa-editar-estado {
+  flex: 0 0 auto;
+  margin: 0;
+  padding: 4px 6px;
+  max-height: 4.6em;
+  overflow-y: auto;
+  border-top: 1px solid var(--borde);
+  font-size: 10.5px;
+  line-height: 1.3;
+}
+/* la ficha del nodo seleccionado: capa superpuesta, no una columna de la vista */
 .previa-propiedades {
+  position: absolute;
+  z-index: 5;
+  top: 2px;
+  right: 2px;
+  width: min(252px, calc(100% - 8px));
+  max-height: calc(100% - 4px);
+  overflow-y: auto;
+  overscroll-behavior: contain;
   display: flex;
   flex-direction: column;
   gap: 6px;
-  max-height: 42%;
-  overflow-y: auto;
-  border-top: 1px solid var(--borde);
-  padding-top: 6px;
+  padding: 6px 8px 8px;
+  background: var(--superficie2);
+  background: color-mix(in srgb, var(--superficie2) 94%, transparent);
+  border: 1px solid var(--borde2);
+  border-radius: 6px;
+  box-shadow: 0 8px 22px rgba(0, 0, 0, .38);
 }
 .previa-propiedades[hidden] { display: none; }
+.previa-propiedades[data-plegada="1"] { max-height: none; }
+.previa-propiedades[data-plegada="1"] .previa-propiedades-campos,
+.previa-propiedades[data-plegada="1"] .previa-propiedades-vacio { display: none; }
 .previa-propiedades-cab {
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
-  justify-content: space-between;
-  gap: 6px;
+  gap: 4px;
 }
+.previa-propiedades-cab .previa-paleta-boton { text-align: center; flex: 0 0 auto; }
 .previa-propiedades-titulo {
+  flex: 1 1 100%;
+  min-width: 0;
   font-size: 11px;
   color: var(--texto-fuerte);
   overflow: hidden;
@@ -760,6 +857,9 @@ body.separando-previa[data-eje="suroeste"] { cursor: nesw-resize; }
   font-size: 11px;
   line-height: 1.35;
 }
+/* La línea de estado no puede cambiar el alto del dibujo cuando se alarga (al añadir vistas): su
+   caja se reserva a dos líneas y el canvas conserva la misma medida en Vista previa y en editar. */
+#previa-vivo-estado { min-height: 2.8em; }
 .previa-estado.con-aviso { color: var(--aviso); }
 .previa-marco-lateral {
   flex: 1 1 56%;
@@ -767,6 +867,8 @@ body.separando-previa[data-eje="suroeste"] { cursor: nesw-resize; }
   justify-content: center;
   min-height: 0;
   padding: 6px;
+  /* las capas del modo editar (paleta y ficha) se colocan sobre el marco, no dentro del reparto */
+  position: relative;
 }
 .previa-canvas-lateral {
   width: 100%;
@@ -1862,6 +1964,9 @@ pre {
     border-top: 1px solid var(--borde2);
   }
   .previa-marco-lateral { flex: 0 1 46%; }
+  /* las capas del modo editar también caben en una pantalla estrecha: siguen siendo capas */
+  .previa-paleta { width: 128px; }
+  .previa-propiedades { width: min(216px, calc(100% - 8px)); }
   .previa-cuerpo-vista { flex-direction: column; height: auto; }
   .marco-vista-lado,
   .marco-vista-lado[data-alto="propio"] {

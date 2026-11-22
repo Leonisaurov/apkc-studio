@@ -6,7 +6,8 @@
 // (así el cambio entra en el undo tree y el documento queda sucio una sola vez).
 //
 // Lo que sabe hacer, y nada más:
-//   - añadir un elemento de la paleta como último hijo de la raíz;
+//   - añadir un elemento de la paleta: como último hijo de la raíz o, si se suelta sobre un
+//     contenedor, dentro de él, en una posición y con los márgenes del punto donde se soltó;
 //   - mover un hijo de un marco (`FrameLayout` y cualquier contenedor que no sea lineal) con
 //     `layout_marginLeft`/`layout_marginTop` —la gravedad se quita para que el margen mande—;
 //   - reordenar un hijo de un `LinearLayout` (un layout lineal no tiene posición libre: mover es
@@ -51,6 +52,22 @@ const ORDEN_PALETA = [
   "CheckBox", "RadioButton", "Switch",
   "ProgressBar", "SeekBar", "View", "Space",
   "LinearLayout", "FrameLayout", "RelativeLayout", "ScrollView", "TableLayout", "GridLayout",
+];
+
+// La paleta agrupada por categorías, en el orden en que se pintan. Un grupo por necesidad (dónde
+// metes la vista, qué escribes, qué pulsas…): con 18 tipos, una lista corrida no se recorre.
+// Cada tipo de `TIPOS` aparece exactamente una vez; `prueba.js` lo comprueba.
+const GRUPOS_PALETA = [
+  {
+    titulo: "Contenedores",
+    tipos: ["LinearLayout", "FrameLayout", "RelativeLayout", "ScrollView", "TableLayout", "GridLayout"],
+  },
+  { titulo: "Texto", tipos: ["TextView"] },
+  { titulo: "Botones", tipos: ["Button", "ImageButton"] },
+  { titulo: "Entradas", tipos: ["EditText", "CheckBox", "RadioButton", "Switch"] },
+  { titulo: "Imágenes", tipos: ["ImageView"] },
+  { titulo: "Indicadores", tipos: ["ProgressBar", "SeekBar"] },
+  { titulo: "Espaciadores", tipos: ["View", "Space"] },
 ];
 
 // Cada tipo entra con atributos válidos para el render en vivo. `id` es la base del
@@ -120,6 +137,12 @@ const MOTIVO_RELATIVE = "RelativeLayout usa reglas (layout_toRightOf, layout_ali
 
 export function tiposDisponibles() {
   return ORDEN_PALETA.slice();
+}
+
+// La paleta por grupos, para pintarla en columnas con encabezado. Devuelve copias: el panel no
+// puede cambiar el orden de la herramienta por accidente.
+export function gruposPaleta() {
+  return GRUPOS_PALETA.map((grupo) => ({ titulo: grupo.titulo, tipos: grupo.tipos.slice() }));
 }
 
 export function infoTipo(tipo) {
@@ -195,12 +218,12 @@ function conSangria(texto, sangria) {
 // contenedores llevan dentro un `TextView` para que se puedan arrastrar en cuanto se añaden (un
 // contenedor vacío no da nada que mover); un `TableLayout` lo lleva dentro de un `TableRow`, que es
 // lo que Android espera de una tabla.
-function elementoDe(tipo, id, hijoId) {
+function elementoDe(tipo, id, hijoId, extras) {
   const t = TIPOS[tipo];
   const medida = tipo === "View" || tipo === "Space"
     ? ["    android:layout_width=\"48dp\"", "    android:layout_height=\"24dp\""]
     : ["    android:layout_width=\"wrap_content\"", "    android:layout_height=\"wrap_content\""];
-  const comun = ["    android:id=\"@+id/" + id + "\"", ...medida];
+  const comun = ["    android:id=\"@+id/" + id + "\"", ...medida, ...(extras || [])];
   if (!t.contenedor) {
     const lineas = ["<" + tipo, ...comun];
     if (t.texto) lineas.push("    android:text=\"" + t.texto + "\"");
@@ -283,8 +306,10 @@ function analizar(fuente) {
   }
 }
 
-// Añade un elemento como último hijo de la raíz. Devuelve la ruta del nodo nuevo (`[n]`) para que
-// el panel pueda dejarlo seleccionado.
+// Añade un elemento. Sin `padre` entra como último hijo de la raíz; con `padre` (ruta de índices,
+// `[]` es la raíz) entra en ese contenedor, en la posición `indice` entre sus hijos. `margen`
+// escribe `layout_marginLeft`/`layout_marginTop`: es como un marco coloca un hijo donde se soltó.
+// Devuelve la ruta del nodo nuevo (`[n]`, o `[...padre, n]`) para que el panel lo deje seleccionado.
 export function insertarElemento(xml, opciones) {
   const fuente = String(xml == null ? "" : xml);
   const tipo = opciones && opciones.tipo;
@@ -292,29 +317,60 @@ export function insertarElemento(xml, opciones) {
   const leido = analizar(fuente);
   if (!leido.ok) return leido;
   const raiz = leido.raiz;
+  const rutaPadre = Array.isArray(opciones && opciones.padre) ? opciones.padre.slice() : [];
+  const padre = rutaPadre.length ? nodoEnRuta(raiz, rutaPadre) : raiz;
+  if (!padre) return { ok: false, error: "el contenedor de destino no está en el layout" };
+  const tipoPadre = String(padre.nombre || "").replace(/^.*\./, "");
+  if (!(TIPOS[tipoPadre] && TIPOS[tipoPadre].contenedor)) {
+    return { ok: false, error: tipoPadre + " no es un contenedor: no admite hijos" };
+  }
   const id = idLibre(fuente, TIPOS[tipo].id);
   const hijoId = TIPOS[tipo].contenedor ? idLibre(fuente, "texto") : "";
-  const elemento = elementoDe(tipo, id, hijoId);
-  const ruta = [hijosElemento(raiz).length];
+  const extras = [];
+  const margen = opciones && opciones.margen;
+  if (margen) {
+    const izquierda = Math.max(0, Math.round(Number(margen.izquierda) || 0));
+    const arriba = Math.max(0, Math.round(Number(margen.arriba) || 0));
+    if (izquierda > 0) extras.push("    android:layout_marginLeft=\"" + izquierda + "dp\"");
+    if (arriba > 0) extras.push("    android:layout_marginTop=\"" + arriba + "dp\"");
+  }
+  const elemento = elementoDe(tipo, id, hijoId, extras);
+  const hijos = hijosElemento(padre);
+  const pedido = Number(opciones && opciones.indice);
+  const indice = Math.max(0, Math.min(hijos.length, Number.isFinite(pedido) ? Math.round(pedido) : hijos.length));
 
-  // `<FrameLayout .../>` no tiene dónde meter un hijo: se abre y se cierra alrededor del nuevo.
-  if (/\/>\s*$/.test(fuente.slice(raiz.desde, raiz.hasta))) {
-    const cierre = raiz.hasta - 2;
-    const sangria = sangriaDe(fuente, raiz.desde) + "    ";
-    const bloque = "\n" + conSangria(elemento, sangria) + "\n" + sangriaDe(fuente, raiz.desde);
-    const nuevo = fuente.slice(0, cierre) + ">" + bloque + "</" + raiz.nombre + ">" +
-      fuente.slice(raiz.hasta);
-    return { ok: true, xml: nuevo, ruta, id, cambio: true };
+  // Un contenedor autocerrado (`<FrameLayout .../>`) no tiene dónde meter un hijo: se abre y se
+  // cierra alrededor del nuevo.
+  if (/\/>\s*$/.test(fuente.slice(padre.desde, padre.hasta))) {
+    const cierre = padre.hasta - 2;
+    const sangria = sangriaDe(fuente, padre.desde) + "    ";
+    const bloque = "\n" + conSangria(elemento, sangria) + "\n" + sangriaDe(fuente, padre.desde);
+    const nuevo = fuente.slice(0, cierre) + ">" + bloque + "</" + tipoPadre + ">" +
+      fuente.slice(padre.hasta);
+    return { ok: true, xml: nuevo, ruta: rutaPadre.concat([0]), id, cambio: true };
   }
 
-  const cierre = inicioCierre(fuente, raiz);
-  if (cierre.pos < 0) return { ok: false, error: "la raíz no cierra con una etiqueta" };
-  const primero = hijosElemento(raiz)[0];
-  const sangriaHijo = primero ? sangriaDe(fuente, primero.desde) : cierre.sangria + "    ";
+  const cierre = inicioCierre(fuente, padre);
+  if (cierre.pos < 0) return { ok: false, error: "el contenedor no cierra con una etiqueta" };
+  // Al final del contenedor se conserva el hueco de la raíz: después del último hijo y antes de su
+  // cierre. En medio, se copia la sangría del hermano que queda detrás.
+  let pos = cierre.pos;
+  let sangriaHijo = "";
+  if (indice >= hijos.length) {
+    const primero = hijos[0];
+    sangriaHijo = primero ? sangriaDe(fuente, primero.desde) : cierre.sangria + "    ";
+  } else {
+    const destino = hijos[indice];
+    const bloqueDestino = bloqueDe(fuente, destino);
+    pos = bloqueDestino.desde;
+    sangriaHijo = sangriaDe(fuente, destino.desde);
+  }
   const bloque = conSangria(elemento, sangriaHijo);
-  const insertar = cierre.suLinea ? bloque + "\n" : "\n" + bloque + "\n" + cierre.sangria;
-  const nuevo = fuente.slice(0, cierre.pos) + insertar + fuente.slice(cierre.pos);
-  return { ok: true, xml: nuevo, ruta, id, cambio: true };
+  const insertar = indice >= hijos.length && !cierre.suLinea
+    ? "\n" + bloque + "\n" + cierre.sangria
+    : bloque + "\n";
+  const nuevo = fuente.slice(0, pos) + insertar + fuente.slice(pos);
+  return { ok: true, xml: nuevo, ruta: rutaPadre.concat([indice]), id, cambio: true };
 }
 
 // Mueve un nodo dentro de un contenedor de marco: fija su margen izquierdo y superior respecto al

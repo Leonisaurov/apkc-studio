@@ -360,115 +360,173 @@
                 <div class="previa-marco previa-marco-lateral">
                   <canvas id="previa-vivo-canvas" class="previa-canvas previa-canvas-lateral" width="360" height="640"
                           role="img" tabindex="0" aria-label="Dibujo del layout del editor, sin compilar"></canvas>
-                </div>
-                <div id="previa-paleta" class="previa-paleta" role="toolbar" aria-label="Añadir elementos al layout" hidden>
-                  <span class="previa-paleta-titulo">Añadir</span>
-                  <button id="previa-anadir-textview" class="previa-paleta-boton" type="button" data-tipo="TextView"
-                          title="Añadir un TextView" aria-label="Añadir un TextView">TextView</button>
-                  <button id="previa-anadir-edittext" class="previa-paleta-boton" type="button" data-tipo="EditText"
-                          title="Añadir un EditText" aria-label="Añadir un EditText">EditText</button>
-                  <button id="previa-anadir-button" class="previa-paleta-boton" type="button" data-tipo="Button"
-                          title="Añadir un Button" aria-label="Añadir un Button">Button</button>
-                  <button id="previa-anadir-imagebutton" class="previa-paleta-boton" type="button" data-tipo="ImageButton"
-                          title="Añadir un ImageButton (se dibuja como bloque, sin imagen)"
-                          aria-label="Añadir un ImageButton; se dibuja como bloque, sin imagen">ImageButton *</button>
-                  <button id="previa-anadir-imageview" class="previa-paleta-boton" type="button" data-tipo="ImageView"
-                          title="Añadir un ImageView" aria-label="Añadir un ImageView">ImageView</button>
-                  <button id="previa-anadir-checkbox" class="previa-paleta-boton" type="button" data-tipo="CheckBox"
-                          title="Añadir un CheckBox (se dibuja como bloque, sin la casilla)"
-                          aria-label="Añadir un CheckBox; se dibuja como bloque, sin la casilla">CheckBox *</button>
-                  <button id="previa-anadir-radiobutton" class="previa-paleta-boton" type="button" data-tipo="RadioButton"
-                          title="Añadir un RadioButton (se dibuja como bloque, sin el círculo)"
-                          aria-label="Añadir un RadioButton; se dibuja como bloque, sin el círculo">RadioButton *</button>
-                  <button id="previa-anadir-switch" class="previa-paleta-boton" type="button" data-tipo="Switch"
-                          title="Añadir un Switch (se dibuja como bloque, sin el interruptor)"
-                          aria-label="Añadir un Switch; se dibuja como bloque, sin el interruptor">Switch *</button>
-                  <button id="previa-anadir-progressbar" class="previa-paleta-boton" type="button" data-tipo="ProgressBar"
-                          title="Añadir un ProgressBar (se dibuja como bloque, sin progreso)"
-                          aria-label="Añadir un ProgressBar; se dibuja como bloque, sin progreso">ProgressBar *</button>
-                  <button id="previa-anadir-seekbar" class="previa-paleta-boton" type="button" data-tipo="SeekBar"
-                          title="Añadir un SeekBar (se dibuja como bloque, sin el deslizador)"
-                          aria-label="Añadir un SeekBar; se dibuja como bloque, sin el deslizador">SeekBar *</button>
-                  <button id="previa-anadir-view" class="previa-paleta-boton" type="button" data-tipo="View"
-                          title="Añadir un View espaciador (se dibuja como bloque)"
-                          aria-label="Añadir un View espaciador; se dibuja como bloque">View *</button>
-                  <button id="previa-anadir-space" class="previa-paleta-boton" type="button" data-tipo="Space"
-                          title="Añadir un Space (se dibuja como bloque)"
-                          aria-label="Añadir un Space; se dibuja como bloque">Space *</button>
-                  <button id="previa-anadir-linearlayout" class="previa-paleta-boton" type="button" data-tipo="LinearLayout"
-                          title="Añadir un LinearLayout" aria-label="Añadir un LinearLayout">LinearLayout</button>
-                  <button id="previa-anadir-framelayout" class="previa-paleta-boton" type="button" data-tipo="FrameLayout"
-                          title="Añadir un FrameLayout" aria-label="Añadir un FrameLayout">FrameLayout</button>
-                  <button id="previa-anadir-relativelayout" class="previa-paleta-boton" type="button" data-tipo="RelativeLayout"
-                          title="Añadir un RelativeLayout (se dibuja como marco; sus reglas no se editan)"
-                          aria-label="Añadir un RelativeLayout; se dibuja como marco y sus reglas no se editan">RelativeLayout *</button>
-                  <button id="previa-anadir-scrollview" class="previa-paleta-boton" type="button" data-tipo="ScrollView"
-                          title="Añadir un ScrollView (se dibuja como marco; no desplaza)"
-                          aria-label="Añadir un ScrollView; se dibuja como marco y no desplaza">ScrollView *</button>
-                  <button id="previa-anadir-tablelayout" class="previa-paleta-boton" type="button" data-tipo="TableLayout"
-                          title="Añadir un TableLayout (se dibuja como lineal; sin columnas)"
-                          aria-label="Añadir un TableLayout; se dibuja como lineal, sin columnas">TableLayout *</button>
-                  <button id="previa-anadir-gridlayout" class="previa-paleta-boton" type="button" data-tipo="GridLayout"
-                          title="Añadir un GridLayout (se dibuja como marco; sin cuadrícula)"
-                          aria-label="Añadir un GridLayout; se dibuja como marco, sin cuadrícula">GridLayout *</button>
-                </div>
-                <section id="previa-propiedades" class="previa-propiedades"
-                         aria-label="Propiedades del elemento seleccionado" hidden>
-                  <div class="previa-propiedades-cab">
-                    <span id="previa-propiedades-titulo" class="previa-propiedades-titulo">Propiedades</span>
-                    <button id="previa-seleccionar-raiz" class="previa-paleta-boton" type="button"
-                            title="Seleccionar el layout raíz para cambiar su tipo, orientación, padding y fondo"
-                            aria-label="Seleccionar el layout raíz">Layout raíz</button>
+                  <div id="previa-paleta" class="previa-paleta" role="toolbar" aria-label="Añadir elementos al layout" hidden>
+                    <div class="previa-paleta-cab">
+                      <span id="previa-paleta-titulo" class="previa-paleta-titulo">Añadir</span>
+                      <button id="previa-paleta-plegar" class="icono-boton previa-paleta-plegar" type="button"
+                              title="Plegar la paleta" aria-label="Plegar la paleta" aria-expanded="true"
+                              aria-controls="previa-paleta-scroll">
+                        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M8 10l4 4 4-4"/></svg>
+                      </button>
+                    </div>
+                    <div id="previa-paleta-scroll" class="previa-paleta-scroll" tabindex="0"
+                         aria-label="Elementos para añadir, por categorías">
+                      <div class="previa-paleta-grupo">
+                        <span class="previa-paleta-categoria">Contenedores</span>
+                        <button id="previa-anadir-linearlayout" class="previa-paleta-boton previa-paleta-elemento"
+                                type="button" data-tipo="LinearLayout" draggable="false"
+                                title="Arrastra un LinearLayout al dibujo" aria-label="Añadir un LinearLayout">LinearLayout</button>
+                        <button id="previa-anadir-framelayout" class="previa-paleta-boton previa-paleta-elemento"
+                                type="button" data-tipo="FrameLayout" draggable="false"
+                                title="Arrastra un FrameLayout al dibujo" aria-label="Añadir un FrameLayout">FrameLayout</button>
+                        <button id="previa-anadir-relativelayout" class="previa-paleta-boton previa-paleta-elemento"
+                                type="button" data-tipo="RelativeLayout" draggable="false"
+                                title="Añadir un RelativeLayout (se dibuja como marco; sus reglas no se editan)"
+                                aria-label="Añadir un RelativeLayout; se dibuja como marco y sus reglas no se editan">RelativeLayout *</button>
+                        <button id="previa-anadir-scrollview" class="previa-paleta-boton previa-paleta-elemento"
+                                type="button" data-tipo="ScrollView" draggable="false"
+                                title="Añadir un ScrollView (se dibuja como marco; no desplaza)"
+                                aria-label="Añadir un ScrollView; se dibuja como marco y no desplaza">ScrollView *</button>
+                        <button id="previa-anadir-tablelayout" class="previa-paleta-boton previa-paleta-elemento"
+                                type="button" data-tipo="TableLayout" draggable="false"
+                                title="Añadir un TableLayout (se dibuja como lineal; sin columnas)"
+                                aria-label="Añadir un TableLayout; se dibuja como lineal, sin columnas">TableLayout *</button>
+                        <button id="previa-anadir-gridlayout" class="previa-paleta-boton previa-paleta-elemento"
+                                type="button" data-tipo="GridLayout" draggable="false"
+                                title="Añadir un GridLayout (se dibuja como marco; sin cuadrícula)"
+                                aria-label="Añadir un GridLayout; se dibuja como marco, sin cuadrícula">GridLayout *</button>
+                      </div>
+                      <div class="previa-paleta-grupo">
+                        <span class="previa-paleta-categoria">Texto</span>
+                        <button id="previa-anadir-textview" class="previa-paleta-boton previa-paleta-elemento"
+                                type="button" data-tipo="TextView" draggable="false"
+                                title="Arrastra un TextView al dibujo" aria-label="Añadir un TextView">TextView</button>
+                      </div>
+                      <div class="previa-paleta-grupo">
+                        <span class="previa-paleta-categoria">Botones</span>
+                        <button id="previa-anadir-button" class="previa-paleta-boton previa-paleta-elemento"
+                                type="button" data-tipo="Button" draggable="false"
+                                title="Arrastra un Button al dibujo" aria-label="Añadir un Button">Button</button>
+                        <button id="previa-anadir-imagebutton" class="previa-paleta-boton previa-paleta-elemento"
+                                type="button" data-tipo="ImageButton" draggable="false"
+                                title="Añadir un ImageButton (se dibuja como bloque, sin imagen)"
+                                aria-label="Añadir un ImageButton; se dibuja como bloque, sin imagen">ImageButton *</button>
+                      </div>
+                      <div class="previa-paleta-grupo">
+                        <span class="previa-paleta-categoria">Entradas</span>
+                        <button id="previa-anadir-edittext" class="previa-paleta-boton previa-paleta-elemento"
+                                type="button" data-tipo="EditText" draggable="false"
+                                title="Arrastra un EditText al dibujo" aria-label="Añadir un EditText">EditText</button>
+                        <button id="previa-anadir-checkbox" class="previa-paleta-boton previa-paleta-elemento"
+                                type="button" data-tipo="CheckBox" draggable="false"
+                                title="Añadir un CheckBox (se dibuja como bloque, sin la casilla)"
+                                aria-label="Añadir un CheckBox; se dibuja como bloque, sin la casilla">CheckBox *</button>
+                        <button id="previa-anadir-radiobutton" class="previa-paleta-boton previa-paleta-elemento"
+                                type="button" data-tipo="RadioButton" draggable="false"
+                                title="Añadir un RadioButton (se dibuja como bloque, sin el círculo)"
+                                aria-label="Añadir un RadioButton; se dibuja como bloque, sin el círculo">RadioButton *</button>
+                        <button id="previa-anadir-switch" class="previa-paleta-boton previa-paleta-elemento"
+                                type="button" data-tipo="Switch" draggable="false"
+                                title="Añadir un Switch (se dibuja como bloque, sin el interruptor)"
+                                aria-label="Añadir un Switch; se dibuja como bloque, sin el interruptor">Switch *</button>
+                      </div>
+                      <div class="previa-paleta-grupo">
+                        <span class="previa-paleta-categoria">Imágenes</span>
+                        <button id="previa-anadir-imageview" class="previa-paleta-boton previa-paleta-elemento"
+                                type="button" data-tipo="ImageView" draggable="false"
+                                title="Arrastra un ImageView al dibujo" aria-label="Añadir un ImageView">ImageView</button>
+                      </div>
+                      <div class="previa-paleta-grupo">
+                        <span class="previa-paleta-categoria">Indicadores</span>
+                        <button id="previa-anadir-progressbar" class="previa-paleta-boton previa-paleta-elemento"
+                                type="button" data-tipo="ProgressBar" draggable="false"
+                                title="Añadir un ProgressBar (se dibuja como bloque, sin progreso)"
+                                aria-label="Añadir un ProgressBar; se dibuja como bloque, sin progreso">ProgressBar *</button>
+                        <button id="previa-anadir-seekbar" class="previa-paleta-boton previa-paleta-elemento"
+                                type="button" data-tipo="SeekBar" draggable="false"
+                                title="Añadir un SeekBar (se dibuja como bloque, sin el deslizador)"
+                                aria-label="Añadir un SeekBar; se dibuja como bloque, sin el deslizador">SeekBar *</button>
+                      </div>
+                      <div class="previa-paleta-grupo">
+                        <span class="previa-paleta-categoria">Espaciadores</span>
+                        <button id="previa-anadir-view" class="previa-paleta-boton previa-paleta-elemento"
+                                type="button" data-tipo="View" draggable="false"
+                                title="Añadir un View espaciador (se dibuja como bloque)"
+                                aria-label="Añadir un View espaciador; se dibuja como bloque">View *</button>
+                        <button id="previa-anadir-space" class="previa-paleta-boton previa-paleta-elemento"
+                                type="button" data-tipo="Space" draggable="false"
+                                title="Añadir un Space (se dibuja como bloque)"
+                                aria-label="Añadir un Space; se dibuja como bloque">Space *</button>
+                      </div>
+                    </div>
+                    <p id="previa-editar-estado" class="previa-estado previa-editar-estado" role="status"
+                       aria-live="polite" hidden></p>
                   </div>
-                  <div id="previa-propiedades-campos" class="previa-propiedades-campos"></div>
-                  <p id="previa-propiedades-vacio" class="nota">Clic en un elemento del dibujo —o en el hueco
-                    del layout— para editar sus propiedades.</p>
-                  <datalist id="previa-valores-dimension">
-                    <option value="match_parent"></option>
-                    <option value="wrap_content"></option>
-                    <option value="8dp"></option>
-                    <option value="16dp"></option>
-                    <option value="24dp"></option>
-                    <option value="48dp"></option>
-                    <option value="120dp"></option>
-                  </datalist>
-                  <datalist id="previa-valores-medida">
-                    <option value="4dp"></option>
-                    <option value="8dp"></option>
-                    <option value="12dp"></option>
-                    <option value="16dp"></option>
-                    <option value="24dp"></option>
-                  </datalist>
-                  <datalist id="previa-valores-color">
-                    <option value="#000000"></option>
-                    <option value="#ffffff"></option>
-                    <option value="#ff0000"></option>
-                    <option value="#00ff00"></option>
-                    <option value="#0000ff"></option>
-                    <option value="@color/"></option>
-                  </datalist>
-                  <datalist id="previa-valores-gravedad">
-                    <option value="center"></option>
-                    <option value="center_horizontal"></option>
-                    <option value="center_vertical"></option>
-                    <option value="top"></option>
-                    <option value="bottom"></option>
-                    <option value="left"></option>
-                    <option value="right"></option>
-                    <option value="top|left"></option>
-                    <option value="bottom|right"></option>
-                  </datalist>
-                  <datalist id="previa-valores-booleano">
-                    <option value="true"></option>
-                    <option value="false"></option>
-                  </datalist>
-                  <datalist id="previa-valores-orientacion">
-                    <option value="vertical"></option>
-                    <option value="horizontal"></option>
-                  </datalist>
-                </section>
-                <p id="previa-editar-estado" class="previa-estado previa-editar-estado" role="status"
-                   aria-live="polite" hidden></p>
+                  <section id="previa-propiedades" class="previa-propiedades"
+                           aria-label="Propiedades del elemento seleccionado" hidden>
+                    <div class="previa-propiedades-cab">
+                      <span id="previa-propiedades-titulo" class="previa-propiedades-titulo">Propiedades</span>
+                      <button id="previa-seleccionar-raiz" class="previa-paleta-boton" type="button"
+                              title="Seleccionar el layout raíz para cambiar su tipo, orientación, padding y fondo"
+                              aria-label="Seleccionar el layout raíz">Layout raíz</button>
+                      <button id="previa-propiedades-plegar" class="icono-boton previa-propiedades-plegar" type="button"
+                              title="Plegar las propiedades" aria-label="Plegar las propiedades" aria-expanded="true"
+                              aria-controls="previa-propiedades-campos">
+                        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M8 10l4 4 4-4"/></svg>
+                      </button>
+                      <button id="previa-propiedades-cerrar" class="icono-boton previa-propiedades-cerrar" type="button"
+                              title="Cerrar las propiedades (Esc)" aria-label="Cerrar las propiedades">
+                        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18"/></svg>
+                      </button>
+                    </div>
+                    <div id="previa-propiedades-campos" class="previa-propiedades-campos"></div>
+                    <p id="previa-propiedades-vacio" class="nota">Clic en un elemento del dibujo —o en el hueco
+                      del layout— para editar sus propiedades.</p>
+                    <datalist id="previa-valores-dimension">
+                      <option value="match_parent"></option>
+                      <option value="wrap_content"></option>
+                      <option value="8dp"></option>
+                      <option value="16dp"></option>
+                      <option value="24dp"></option>
+                      <option value="48dp"></option>
+                      <option value="120dp"></option>
+                    </datalist>
+                    <datalist id="previa-valores-medida">
+                      <option value="4dp"></option>
+                      <option value="8dp"></option>
+                      <option value="12dp"></option>
+                      <option value="16dp"></option>
+                      <option value="24dp"></option>
+                    </datalist>
+                    <datalist id="previa-valores-color">
+                      <option value="#000000"></option>
+                      <option value="#ffffff"></option>
+                      <option value="#ff0000"></option>
+                      <option value="#00ff00"></option>
+                      <option value="#0000ff"></option>
+                      <option value="@color/"></option>
+                    </datalist>
+                    <datalist id="previa-valores-gravedad">
+                      <option value="center"></option>
+                      <option value="center_horizontal"></option>
+                      <option value="center_vertical"></option>
+                      <option value="top"></option>
+                      <option value="bottom"></option>
+                      <option value="left"></option>
+                      <option value="right"></option>
+                      <option value="top|left"></option>
+                      <option value="bottom|right"></option>
+                    </datalist>
+                    <datalist id="previa-valores-booleano">
+                      <option value="true"></option>
+                      <option value="false"></option>
+                    </datalist>
+                    <datalist id="previa-valores-orientacion">
+                      <option value="vertical"></option>
+                      <option value="horizontal"></option>
+                    </datalist>
+                  </section>
+                </div>
                 <p id="previa-vivo-estado" class="previa-estado" role="status" aria-live="polite">Abre un
                   res/layout/*.xml en el editor para verlo dibujado aquí, sin compilar.</p>
               </div>
