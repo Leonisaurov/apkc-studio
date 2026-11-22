@@ -1666,6 +1666,244 @@ async function conductor() {
         /pulso 2/.test(String(segundoClic.consola[3])) && /2 clics/.test(String(segundoClic.cuentaPulsos)),
         JSON.stringify({ texto: segundoClic.texto, interacciones: segundoClic.interacciones,
           consola: segundoClic.consola, cuenta: segundoClic.cuentaPulsos }).slice(0, 400));
+
+      // 12a-ter-septies-bis. las tres secciones del emulador (Pulsar, Registro y Consola) alternan
+      // como las del panel de compilación: una visible cada vez y el contenido de la que se oculta
+      // sigue en el DOM, sin volver a compilar ni perder líneas.
+      const secciones = await evaluar(`(() => {
+        const visible = (id) => { const e = document.getElementById(id); return e ? !e.hidden : null; };
+        const estado = () => ({
+          pulsos: visible("previa-pulsos"), registro: visible("previa-log"),
+          consola: visible("previa-consola"),
+          activa: [...document.querySelectorAll(".previa-secciones [role=tab]")]
+            .filter((b) => b.id.startsWith("previa-seccion-") && b.getAttribute("aria-selected") === "true")
+            .map((b) => b.id),
+          pulsosBotones: document.querySelectorAll("#previa-oyentes .previa-oyente").length,
+          logLineas: document.getElementById("previa-log-lista").children.length,
+          consolaLineas: document.getElementById("previa-consola-lista").children.length,
+        });
+        const antes = estado();
+        document.getElementById("previa-seccion-registro").click();
+        const registro = estado();
+        document.getElementById("previa-seccion-consola").click();
+        const consola = estado();
+        document.getElementById("previa-seccion-pulsos").click();
+        return { antes, registro, consola, vuelta: estado(),
+          guardada: (() => { try { return localStorage.getItem("apkc-studio/previa-seccion"); } catch (e) { return null; } })() };
+      })()`);
+      comprueba("las secciones del emulador alternan sin perder lo que tenían dentro",
+        secciones.antes.pulsos === true && secciones.antes.registro === false &&
+        secciones.antes.consola === false && secciones.antes.activa.join() === "previa-seccion-pulsos" &&
+        secciones.registro.pulsos === false && secciones.registro.registro === true &&
+        secciones.registro.consola === false && secciones.registro.activa.join() === "previa-seccion-registro" &&
+        secciones.consola.consola === true && secciones.consola.registro === false &&
+        secciones.consola.activa.join() === "previa-seccion-consola" &&
+        secciones.vuelta.pulsos === true && secciones.vuelta.activa.join() === "previa-seccion-pulsos" &&
+        secciones.vuelta.pulsosBotones === secciones.antes.pulsosBotones &&
+        secciones.vuelta.logLineas === secciones.antes.logLineas &&
+        secciones.vuelta.consolaLineas === secciones.antes.consolaLineas &&
+        secciones.guardada === "pulsos",
+        JSON.stringify(secciones).slice(0, 600));
+
+      // 12a-ter-septies-ter. la vista Pantalla tiene las mismas tres secciones y su canvas también
+      // entrega el clic: el dedo sobre el teléfono grande ejecuta el mismo `--pulsar`.
+      await evaluar(`(() => {
+        document.querySelector('nav.actividad [data-vista="vista"]').click();
+        document.getElementById("vista-modo-emulador").click();
+      })()`);
+      await esperar(500);
+      const puntoVista = await evaluar(`(async () => {
+        const vp = await import("/vista-previa.js");
+        const modelo = vp.modeloActual();
+        const canvas = document.getElementById("vista-previa");
+        const espacio = canvas.__espacio || { ancho: canvas.clientWidth, alto: canvas.clientHeight };
+        const rect = modelo ? vp.rectsEscalados(modelo, espacio.ancho, espacio.alto).find((r) => r.id === "id/pulsar") : null;
+        const caja = canvas.getBoundingClientRect();
+        if (!rect || !(espacio.ancho > 0) || !(caja.width > 0)) return { punto: null, espacio, caja: null };
+        return { punto: {
+          x: caja.left + (rect.x + rect.ancho / 2) * (caja.width / espacio.ancho),
+          y: caja.top + (rect.y + rect.alto / 2) * (caja.height / espacio.alto),
+        }, espacio, caja: { width: caja.width, height: caja.height },
+        encima: (() => { const el = document.elementFromPoint(
+          caja.left + (rect.x + rect.ancho / 2) * (caja.width / espacio.ancho),
+          caja.top + (rect.y + rect.alto / 2) * (caja.height / espacio.alto));
+          return el ? (el.id || el.tagName) : null; })(),
+        secciones: ["vista-pulsos", "vista-log", "vista-consola"]
+          .map((id) => (document.getElementById(id) ? !document.getElementById(id).hidden : null)) };
+      })()`);
+      const seccionesVista = await evaluar(`(() => {
+        const visible = (id) => { const e = document.getElementById(id); return e ? !e.hidden : null; };
+        const antes = { pulsos: visible("vista-pulsos"), registro: visible("vista-log"), consola: visible("vista-consola"),
+          activa: [...document.querySelectorAll("#vista-lado .previa-secciones [role=tab]")]
+            .filter((b) => b.getAttribute("aria-selected") === "true").map((b) => b.id) };
+        document.getElementById("vista-seccion-registro").click();
+        const registro = { pulsos: visible("vista-pulsos"), registro: visible("vista-log"),
+          consola: visible("vista-consola"),
+          lineas: document.getElementById("vista-log-lista").children.length };
+        document.getElementById("vista-seccion-pulsos").click();
+        return { antes, registro, vuelta: visible("vista-pulsos") };
+      })()`);
+      comprueba("la vista Pantalla tiene las mismas tres secciones y alterna igual",
+        seccionesVista.antes.pulsos === true && seccionesVista.antes.registro === false &&
+        seccionesVista.antes.consola === false &&
+        seccionesVista.antes.activa.join() === "vista-seccion-pulsos" &&
+        seccionesVista.registro.registro === true && seccionesVista.registro.pulsos === false &&
+        seccionesVista.registro.lineas > 0 && seccionesVista.vuelta === true,
+        JSON.stringify(seccionesVista).slice(0, 400));
+      if (!puntoVista.punto) {
+        comprueba("el canvas de Pantalla tiene un rectángulo pulsable para id/pulsar", false,
+          JSON.stringify(puntoVista).slice(0, 300));
+      } else {
+        await exec("Input.dispatchMouseEvent",
+          { type: "mousePressed", x: puntoVista.punto.x, y: puntoVista.punto.y, button: "left", clickCount: 1 });
+        await exec("Input.dispatchMouseEvent",
+          { type: "mouseReleased", x: puntoVista.punto.x, y: puntoVista.punto.y, button: "left", clickCount: 1 });
+        const clicVista = await evaluar(`(async () => {
+          const vp = await import("/vista-previa.js");
+          const leer = () => {
+            const m = vp.modeloActual();
+            const t = m && m.raiz ? (m.raiz.hijos || []).find((h) => h.id === "id/total") : null;
+            return t ? (t.textoDinamico || "") : null;
+          };
+          let texto = leer();
+          for (let i = 0; i < 150 && texto !== "Pulsos: 1"; i++) {
+            await new Promise((ok) => setTimeout(ok, 100));
+            texto = leer();
+          }
+          const m = vp.modeloActual();
+          return { texto, pulsaciones: m && m.ejecucion ? (m.ejecucion.pulsaciones || []).length : -1,
+            cuenta: document.getElementById("vista-pulsos-cuenta").textContent,
+            pares: document.querySelectorAll("#vista-oyentes .previa-oyente").length };
+        })()`);
+        // entrar en Pantalla repinta el último modelo, y un modelo que no viene de un clic reinicia
+        // la lista de clics: este primer toque en el teléfono grande arranca de cero y deja el 1
+        comprueba("un clic real en el canvas de Pantalla ejecuta su onClick y actualiza el texto",
+          clicVista.texto === "Pulsos: 1" && clicVista.pulsaciones === 1 &&
+          /1 clic/.test(String(clicVista.cuenta)) && clicVista.pares === 1,
+          JSON.stringify({ texto: clicVista.texto, pulsaciones: clicVista.pulsaciones,
+            cuenta: clicVista.cuenta, encima: puntoVista.encima }).slice(0, 400));
+      }
+      await evaluar(`document.querySelector('nav.actividad [data-vista="pestana"]').click()`);
+      await esperar(300);
+    }
+
+    // 12a-ter-septies-quater. el caso del usuario, «Clicker» de tutorial: el clic se declara en el
+    // layout con android:onClick y la actividad solo tiene el método. Sin esto, la ejecución no
+    // registraba ningún oyente y la pestaña decía «Esta ejecución no registró ningún
+    // OnClickListener sobre una vista con id» y no había nada que pulsar.
+    const layoutDeclarativo = [
+      '<?xml version="1.0" encoding="utf-8"?>',
+      '<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"',
+      '    android:orientation="vertical"',
+      '    android:layout_width="match_parent"',
+      '    android:layout_height="match_parent"',
+      '    android:gravity="center">',
+      '    <TextView',
+      '        android:id="@+id/total"',
+      '        android:layout_width="wrap_content"',
+      '        android:layout_height="wrap_content"',
+      '        android:text="Pulsos: 0"/>',
+      '    <Button',
+      '        android:id="@+id/pulsar"',
+      '        android:layout_width="wrap_content"',
+      '        android:layout_height="wrap_content"',
+      '        android:onClick="sumar"',
+      '        android:text="Pulsar"/>',
+      '</LinearLayout>',
+      "",
+    ].join("\n");
+    const fuenteDeclarativa = [
+      "package com.myapp;",
+      "",
+      "import android.app.*;",
+      "import android.os.*;",
+      "import android.view.*;",
+      "import android.widget.*;",
+      "",
+      "public class MainActivity extends Activity {",
+      "    int pulsos = 0;",
+      "    TextView total;",
+      "",
+      "    @Override",
+      "    public void onCreate(Bundle savedInstanceState) {",
+      "        super.onCreate(savedInstanceState);",
+      "        setContentView(R.layout.main);",
+      "        total = (TextView) findViewById(R.id.total);",
+      "    }",
+      "",
+      "    public void sumar(View v) {",
+      "        pulsos = pulsos + 1;",
+      "        total.setText(\"Pulsos: \" + pulsos);",
+      "    }",
+      "}",
+      "",
+    ].join("\n");
+    const declarativo = await evaluar(`(async () => {
+      await hospedador.escribir("/proyecto/res/layout/main.xml", new TextEncoder().encode(${JSON.stringify(layoutDeclarativo)}));
+      await hospedador.escribir("/proyecto/src/com/myapp/MainActivity.java", new TextEncoder().encode(${JSON.stringify(fuenteDeclarativa)}));
+      await hospedador.limpiar("/proyecto/build");
+      document.getElementById("storepass-compilar").value = "android";
+      document.getElementById("previa-modo-render").click();
+      await compilarDelTodo();
+      await new Promise((ok) => setTimeout(ok, 200));
+      const vp = await import("/vista-previa.js");
+      const m = vp.modeloActual();
+      const canvas = document.getElementById("previa-lateral-canvas");
+      const espacio = (canvas && canvas.__espacio) || { ancho: 0, alto: 0 };
+      const rect = m ? vp.rectsEscalados(m, espacio.ancho, espacio.alto).find((r) => r.id === "id/pulsar") : null;
+      const caja = canvas ? canvas.getBoundingClientRect() : null;
+      const punto = rect && caja && caja.width > 0
+        ? { x: caja.left + (rect.x + rect.ancho / 2) * (caja.width / espacio.ancho),
+          y: caja.top + (rect.y + rect.alto / 2) * (caja.height / espacio.alto) }
+        : null;
+      return {
+        modelo: !!m,
+        oyentes: m && m.ejecucion ? (m.ejecucion.oyentes || []).map((o) => o.id) : [],
+        avisos: m && m.ejecucion ? (m.ejecucion.avisos || []) : null,
+        botones: [...document.querySelectorAll("#previa-oyentes .previa-oyente")].map((b) => b.dataset.idref),
+        nota: document.getElementById("previa-pulsos-nota").hidden,
+        texto: m && m.raiz ? ((m.raiz.hijos || []).find((h) => h.id === "id/total") || {}).textoDinamico || "" : null,
+        punto,
+        encima: punto ? (() => {
+          const el = document.elementFromPoint(punto.x, punto.y);
+          return el ? (el.id || el.tagName) : null;
+        })() : null,
+      };
+    })()`);
+    comprueba("apkc preview publica el oyente de android:onClick de la app del Clicker",
+      declarativo.modelo === true && declarativo.oyentes.length === 1 &&
+      declarativo.oyentes[0] === "id/pulsar" && declarativo.botones.length === 1 &&
+      declarativo.botones[0] === "0x7f010000" && declarativo.nota === true &&
+      declarativo.texto === "" && (declarativo.avisos || []).length === 0 &&
+      declarativo.punto !== null && declarativo.encima === "previa-lateral-canvas",
+      JSON.stringify(declarativo).slice(0, 400));
+    if (declarativo.punto) {
+      await exec("Input.dispatchMouseEvent",
+        { type: "mousePressed", x: declarativo.punto.x, y: declarativo.punto.y, button: "left", clickCount: 1 });
+      await exec("Input.dispatchMouseEvent",
+        { type: "mouseReleased", x: declarativo.punto.x, y: declarativo.punto.y, button: "left", clickCount: 1 });
+      const clicDeclarativo = await evaluar(`(async () => {
+        const vp = await import("/vista-previa.js");
+        const leer = () => {
+          const m = vp.modeloActual();
+          const t = m && m.raiz ? (m.raiz.hijos || []).find((h) => h.id === "id/total") : null;
+          return t ? (t.textoDinamico || "") : null;
+        };
+        let texto = leer();
+        for (let i = 0; i < 150 && texto !== "Pulsos: 1"; i++) {
+          await new Promise((ok) => setTimeout(ok, 100));
+          texto = leer();
+        }
+        const m = vp.modeloActual();
+        return { texto, interacciones: m && m.ejecucion ? (m.ejecucion.interacciones || 0) : -1,
+          cuenta: document.getElementById("previa-pulsos-cuenta").textContent };
+      })()`);
+      comprueba("un clic real por CDP en el oyente declarativo deja «Pulsos: 1»",
+        clicDeclarativo.texto === "Pulsos: 1" && clicDeclarativo.interacciones === 1 &&
+        /1 clic/.test(String(clicDeclarativo.cuenta)),
+        JSON.stringify(clicDeclarativo).slice(0, 300));
+    } else {
+      comprueba("el botón del oyente declarativo se puede pulsar por CDP", false, "sin botón en #previa-oyentes");
     }
 
     // 12a-ter-sexies. el texto del intérprete es dato: un `<script>` en un `texto` sale escapado y

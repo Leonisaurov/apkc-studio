@@ -167,6 +167,15 @@ los imports y no debe depender de ese puente.
 - **El canvas no rotula los nodos.** `pintarModelo` dibuja solo el texto del nodo; el tipo y el id
   van en el modelo, en `rectsEscalados`, en el `resumen` devuelto y en `data-nodos` del canvas.
   No vuelvas a pintar `Button · id/pulsar` encima: la prueba cuenta tinta y exige cero sin texto.
+- **El emulador tiene tres secciones, no tres bloques.** Pulsar, Registro y Consola son pestañas
+  (`#previa-seccion-*` en el panel y `#vista-seccion-*` en Pantalla; paneles `previa-pulsos`/`-log`/
+  `-consola` y `vista-*`). Alternar solo cambia `hidden`: el contenido y el scroll se conservan y no
+  se relanza ningún comando; la activa se guarda en `apkc-studio/previa-seccion` y
+  `apkc-studio/vista-seccion`. Los **dos** canvas entregan el clic (`#previa-lateral-canvas` y
+  `#vista-previa`) y la nota de Pulsar distingue «sin ejecución» de «la ejecución no registró
+  oyentes»: no vuelvas a decir lo segundo antes de ejecutar `onCreate`. `apkc preview` enlaza los
+  `android:onClick` del layout; si tocas ese enlace, su prueba es
+  `TestElPreviewEnlazaElOnClickDeclarativoDelLayout`.
 - **La barra separa consola de compilación.** El botón `#alternar-panel` se llama **Compilar** y
   abre la pestaña Compilar; la pestaña de salida se llama **Consola** y lleva el icono de terminal.
   No vuelvas a poner «Salida» ni un botón de build clásico: ese build no corre en wasm.

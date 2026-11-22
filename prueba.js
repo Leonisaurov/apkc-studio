@@ -754,8 +754,56 @@ for (const [id, donde] of [
   ["vista-tirador-suroeste", "la esquina inferior izquierda del panel de la vista Pantalla"],
   ["vista-tirador-sureste", "la esquina inferior derecha del panel de la vista Pantalla"],
   ["vista-lado", "la columna de estado y consola de la vista Pantalla"],
+  ["previa-seccion-pulsos", "la pestaña Pulsar del emulador"],
+  ["previa-seccion-registro", "la pestaña Registro del emulador"],
+  ["previa-seccion-consola", "la pestaña Consola de la app del emulador"],
+  ["vista-seccion-pulsos", "la pestaña Pulsar del emulador en la vista Pantalla"],
+  ["vista-seccion-registro", "la pestaña Registro del emulador en la vista Pantalla"],
+  ["vista-seccion-consola", "la pestaña Consola de la app en la vista Pantalla"],
+  ["vista-pulsos", "los controles de clic en la vista Pantalla"],
+  ["vista-oyentes", "los botones de las vistas que responden a un clic en la vista Pantalla"],
+  ["vista-pulsos-cuenta", "la cuenta de clics entregados en la vista Pantalla"],
+  ["vista-pulsos-nota", "el aviso de que no hay vistas que pulsar en la vista Pantalla"],
+  ["vista-consola", "la consola de la app en la vista Pantalla"],
+  ["vista-consola-lista", "las líneas de la consola de la app en la vista Pantalla"],
+  ["vista-consola-cabecera", "el resumen de la consola de la app en la vista Pantalla"],
+  ["vista-consola-vacio", "el mensaje de «sin salida» en la vista Pantalla"],
+  ["previa-pulsos-nota", "la nota de las vistas que responden a un clic"],
 ]) {
   if (!ids.has(id)) mal(`${donde} (${id}) no está en index.html`);
+}
+
+// Las secciones del emulador son contrato: tres pestañas por superficie, cada una apuntando a su
+// panel con aria-controls, y exactamente una activa. Así alternar no esconde contenido perdido: los
+// tres paneles siguen en el DOM y solo cambia `hidden`.
+for (const [nombre, botones, paneles] of [
+  ["panel", ["previa-seccion-pulsos", "previa-seccion-registro", "previa-seccion-consola"],
+    { pulsos: "previa-pulsos", registro: "previa-log", consola: "previa-consola" }],
+  ["Pantalla", ["vista-seccion-pulsos", "vista-seccion-registro", "vista-seccion-consola"],
+    { pulsos: "vista-pulsos", registro: "vista-log", consola: "vista-consola" }],
+]) {
+  let activos = 0;
+  for (const id of botones) {
+    const etiqueta = new RegExp(`<button id="${id}"[^>]*>`).exec(html);
+    if (!etiqueta) { mal(`la pestaña ${id} de las secciones del emulador no está en index.html`); continue; }
+    const control = /aria-controls="([^"]+)"/.exec(etiqueta[0]);
+    if (!control) { mal(`la pestaña ${id} no declara aria-controls`); continue; }
+    if (!ids.has(control[1])) mal(`la pestaña ${id} apunta a ${control[1]}, que no existe`);
+    if (!/role="tab"/.test(etiqueta[0])) mal(`la pestaña ${id} no declara role="tab"`);
+    if (/aria-selected="true"/.test(etiqueta[0])) activos++;
+  }
+  if (activos !== 1) mal(`las secciones del emulador (${nombre}) tienen ${activos} pestañas activas y debe haber una`);
+  for (const [clave, idPanel] of Object.entries(paneles)) {
+    const etiqueta = new RegExp(`<(section|div) id="${idPanel}"[^>]*>`).exec(html);
+    if (!etiqueta) { mal(`el panel ${idPanel} de las secciones del emulador no está en index.html`); continue; }
+    if (!new RegExp(`data-seccion="${clave}"`).test(etiqueta[0])) {
+      mal(`el panel ${idPanel} no declara data-seccion="${clave}"`);
+    }
+    const oculto = /hidden/.test(etiqueta[0]);
+    if (clave !== "pulsos" && !oculto) mal(`el panel ${idPanel} no empieza oculto`);
+    if (clave === "pulsos" && oculto) mal(`el panel ${idPanel} es la sección por defecto y empieza oculto`);
+    if (!/previa-seccion/.test(etiqueta[0])) mal(`el panel ${idPanel} no lleva la clase previa-seccion`);
+  }
 }
 if (!/id="previa-modo-editar"[^>]*aria-label="Editar layout"/.test(html)) {
   mal("el lápiz del modo editar no se llama «Editar layout»");

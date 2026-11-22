@@ -388,7 +388,16 @@
                 </div>
                 <p id="previa-render-estado" class="previa-estado" role="status" aria-live="polite">Compila el
                   proyecto para ver aquí la pantalla del emulador.</p>
-                <section id="previa-pulsos" class="previa-pulsos" aria-label="Controles del emulador">
+                <div class="previa-secciones" role="tablist" aria-label="Secciones del emulador">
+                  <button id="previa-seccion-pulsos" class="previa-modo activo" type="button" role="tab"
+                          aria-selected="true" aria-controls="previa-pulsos" data-seccion="pulsos">Pulsar</button>
+                  <button id="previa-seccion-registro" class="previa-modo" type="button" role="tab"
+                          aria-selected="false" aria-controls="previa-log" data-seccion="registro">Registro</button>
+                  <button id="previa-seccion-consola" class="previa-modo" type="button" role="tab"
+                          aria-selected="false" aria-controls="previa-consola" data-seccion="consola">Consola</button>
+                </div>
+                <section id="previa-pulsos" class="previa-pulsos previa-seccion" role="tabpanel"
+                         aria-label="Controles del emulador" data-seccion="pulsos">
                   <div class="previa-log-cab">
                     <span class="previa-log-titulo">Pulsar en la app</span>
                     <span id="previa-pulsos-cuenta" class="nota">sin clics</span>
@@ -397,7 +406,8 @@
                   <p id="previa-pulsos-nota" class="nota">Compila el proyecto para ver las vistas que
                     responden a un clic. También puedes pulsar directamente sobre el dibujo.</p>
                 </section>
-                <section id="previa-log" class="previa-log" role="log" aria-label="Registro del emulador">
+                <section id="previa-log" class="previa-log previa-seccion" role="log"
+                         aria-label="Registro del emulador" data-seccion="registro" hidden>
                   <div class="previa-log-cab">
                     <span class="previa-log-titulo">Registro del emulador</span>
                     <span id="previa-log-cabecera" class="nota">sin ejecución</span>
@@ -406,7 +416,8 @@
                   <p id="previa-log-vacio" class="nota">Compila el proyecto para ver las capturas y los avisos
                     del intérprete.</p>
                 </section>
-                <section id="previa-consola" class="previa-log previa-consola" role="log" aria-label="Consola de la app">
+                <section id="previa-consola" class="previa-log previa-consola previa-seccion" role="log"
+                         aria-label="Consola de la app" data-seccion="consola" hidden>
                   <div class="previa-log-cab">
                     <span class="previa-log-titulo">Consola de la app</span>
                     <span id="previa-consola-cabecera" class="nota">sin salida</span>
@@ -627,7 +638,8 @@
                    aria-labelledby="vista-modo-emulador" hidden>
                 <div class="previa-marco previa-marco-vista">
                   <canvas id="vista-previa" class="previa-canvas previa-canvas-vista" width="360" height="640"
-                          role="img" aria-label="Emulador: pantalla del apk con los eventos de la app"></canvas>
+                          tabindex="0" role="img" aria-label="Emulador: pantalla del apk con los eventos de la app; se puede pulsar sobre las vistas que responden a un clic"
+                          aria-describedby="vista-previa-estado"></canvas>
                 </div>
                 <p class="nota">Se actualiza al compilar. Fuentes, imágenes, márgenes finos y estilos
                   fieles quedan fuera de esta fase: el modelo lo dice con <code>"aproximado": true</code>.</p>
@@ -666,14 +678,43 @@
                 <p class="nota" id="vista-previa-estado" role="status" aria-live="polite">Emulador: compila
                   el proyecto (Editor → Compilar → Compilar debug) para ver aquí la pantalla que ejecuta
                   la app.</p>
-                <section id="vista-log" class="previa-log" role="log" aria-label="Consola del intérprete">
+                <div class="previa-secciones" role="tablist" aria-label="Secciones del emulador">
+                  <button id="vista-seccion-pulsos" class="previa-modo activo" type="button" role="tab"
+                          aria-selected="true" aria-controls="vista-pulsos" data-seccion="pulsos">Pulsar</button>
+                  <button id="vista-seccion-registro" class="previa-modo" type="button" role="tab"
+                          aria-selected="false" aria-controls="vista-log" data-seccion="registro">Registro</button>
+                  <button id="vista-seccion-consola" class="previa-modo" type="button" role="tab"
+                          aria-selected="false" aria-controls="vista-consola" data-seccion="consola">Consola</button>
+                </div>
+                <section id="vista-pulsos" class="previa-pulsos previa-seccion" role="tabpanel"
+                         aria-label="Pulsar en la app" data-seccion="pulsos">
                   <div class="previa-log-cab">
-                    <span class="previa-log-titulo">Consola de la ejecución</span>
+                    <span class="previa-log-titulo">Pulsar en la app</span>
+                    <span id="vista-pulsos-cuenta" class="nota">sin clics</span>
+                  </div>
+                  <div id="vista-oyentes" class="previa-oyentes"></div>
+                  <p id="vista-pulsos-nota" class="nota">Compila el proyecto para ver las vistas que
+                    responden a un clic. También puedes pulsar sobre el dibujo del teléfono.</p>
+                </section>
+                <section id="vista-log" class="previa-log previa-seccion" role="log"
+                         aria-label="Registro del emulador" data-seccion="registro" hidden>
+                  <div class="previa-log-cab">
+                    <span class="previa-log-titulo">Registro del emulador</span>
                     <span id="vista-log-cabecera" class="nota">sin ejecución</span>
                   </div>
                   <ol id="vista-log-lista" class="previa-log-lista"></ol>
                   <p id="vista-log-vacio" class="nota">Compila el proyecto para ver las capturas y los avisos
                     del intérprete.</p>
+                </section>
+                <section id="vista-consola" class="previa-log previa-consola previa-seccion" role="log"
+                         aria-label="Consola de la app" data-seccion="consola" hidden>
+                  <div class="previa-log-cab">
+                    <span class="previa-log-titulo">Consola de la app</span>
+                    <span id="vista-consola-cabecera" class="nota">sin salida</span>
+                  </div>
+                  <ol id="vista-consola-lista" class="previa-log-lista previa-consola-lista"></ol>
+                  <p id="vista-consola-vacio" class="nota">Aquí sale lo que la app imprime:
+                    <code>System.out.println</code> y <code>Log.*</code>.</p>
                 </section>
               </div>
             </div>

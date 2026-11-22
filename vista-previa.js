@@ -293,6 +293,9 @@ export function pintarModelo(canvas, modelo, medir) {
   // del canvas y en el objeto que devuelve esta función.
   const resumen = rects.slice(0, 40).filter((r) => r.tipo).map((r) => (r.id ? r.tipo + " · " + r.id : r.tipo)).join(", ");
   if (canvas.dataset) canvas.dataset.nodos = resumen;
+  // el espacio con el que se pintó queda en el canvas: el manejador del clic mide con él y no con
+  // el clientWidth del momento, que puede haber cambiado entre pintar y pulsar
+  canvas.__espacio = { ancho, alto };
   return { ancho, alto, nodos: rects.length, escala: marcoRect.escala, valida: true, modelo, resumen };
 }
 
