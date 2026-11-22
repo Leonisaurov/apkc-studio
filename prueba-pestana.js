@@ -2287,6 +2287,27 @@ async function conductor() {
       editorLayout.cambioTexto.ultimo === true && editorLayout.cambioTexto.sucio === true &&
       editorLayout.cambioTexto.campo === "Hola & adiós",
       JSON.stringify(editorLayout.cambioTexto).slice(0, 360));
+    // el texto del layout es dato: un `<script>` en android:text no puede convertirse en marcado
+    const txtHostil = await evaluar(`(async () => {
+      const campo = document.querySelector('[data-propiedad="android:text"]');
+      const area = document.getElementById("codigo");
+      const antes = area.value;
+      campo.value = 'A &amp; B <script>alert(1)</script>';
+      campo.dispatchEvent(new Event("change", { bubbles: true }));
+      await new Promise((ok) => setTimeout(ok, 750));
+      const inyectados = document.querySelectorAll('[data-propiedad] script').length;
+      // el XML correcto NO lleva la etiqueta literal: la ha escapado como &lt;script&gt;
+      const xmlEscapado = /&lt;script&gt;/.test(area.value) && !/<script>/i.test(area.value);
+      document.dispatchEvent(new KeyboardEvent("keydown",
+        { key: "z", ctrlKey: true, bubbles: true, cancelable: true }));
+      await new Promise((ok) => setTimeout(ok, 300));
+      return { inyectados, xmlEscapado, deshecho: area.value === antes };
+    })()`);
+    comprueba("un <script> en android:text se escapa, no se inyecta y el cambio se deshace",
+      txtHostil.inyectados === 0 && txtHostil.xmlEscapado === true &&
+      txtHostil.deshecho === true,
+      JSON.stringify(txtHostil).slice(0, 280));
+
     comprueba("cambiar android:id normaliza a @+id y el modelo conserva el nodo seleccionado",
       editorLayout.cambioId.xml === true && editorLayout.cambioId.id === "id/saludo" &&
       JSON.stringify(editorLayout.cambioId.seleccion) !== "null",
