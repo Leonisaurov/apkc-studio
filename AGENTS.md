@@ -56,6 +56,8 @@ dar el editor por probado, comprueba en la salida `pestaña: N comprobaciones` y
 | `pestana.js` | editor, pestañas, árbol de OPFS, comandos y el puente `hospedador`; `export` de lo que consumen `vistas.js`, `main.js` y las pruebas. |
 | `consola.js` | salida ANSI, enlaces `ruta:línea`, buffer de la consola y velo de carga. |
 | `editor.js` | `resaltar()` y `esXml()`: puros, sin DOM, probados en node. |
+| `autocompletado.js` | la lista de sugerencias del editor (recursos y APIs del `android.jar`), sus atajos y la lectura por trozos de `/sdk/android.jar` en OPFS. |
+| `autocompletado-datos.js` | datos puros del autocompletado: recursos de `res/` y `R.java`, contexto de tecleo, EOCD/directorio central del zip y nombres de método de un `.class`. |
 | `busqueda.js` | barra de buscar/reemplazar y `Ctrl+G`; se monta con `EDITOR` e `irALinea`. |
 | `ajustes.js` | ajustes del proyecto leídos y escritos en el manifiesto. |
 | `historial.js` | undo tree por documento: deltas, checkpoints, poda, IndexedDB por ventana. |

@@ -487,6 +487,25 @@ export function crearFs(carpeta) {
       sh.write(n.data, { at: 0 }); sh.truncate(n.data.length); sh.flush(); sh.close();
       return n.data.length;
     },
+    // Leer un trozo de un fichero sin copiarlo entero. Lo usa el autocompletado para mirar el
+    // directorio central del android.jar (50 MB que ya están en OPFS): `extraer` devolvería los
+    // 50 MB y los clonaría por postMessage en cada sugerencia. Devuelve también el tamaño total,
+    // que es lo que permite pedir el final del fichero sin conocerlo antes.
+    async rango(rutaSimulada, desde, largo) {
+      const a = absoluta(String(rutaSimulada));
+      const ini = Math.max(0, Number(desde) || 0);
+      const cuantos = Math.max(0, Number(largo) || 0);
+      const n = raiz.get(a);
+      if (n && !n.dir && !n.descubierto) {
+        return { bytes: n.data.slice(ini, ini + cuantos), tamano: n.data.length };
+      }
+      const fh = await ficheroOPFS(a, false);
+      if (!fh) return { ok: false, error: "ENOENT " + a };
+      // getFile() no pide el acceso exclusivo, igual que en extraer: otra pestaña puede tenerlo
+      const copia = await fh.getFile();
+      const trozo = copia.slice(ini, ini + cuantos);
+      return { bytes: new Uint8Array(await trozo.arrayBuffer()), tamano: copia.size };
+    },
     // sacar del árbol (el apk firmado, para descargarlo)
     async extraer(rutaSimulada) {
       const a = absoluta(String(rutaSimulada));

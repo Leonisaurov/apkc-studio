@@ -1689,6 +1689,297 @@ async function conductor() {
     console.log("  --- el apk de la app del contador, compilado en la pestaña, es " +
       path.join(fuera, "pestanera-contador.apk"));
 
+    // 12a-quinquies (D3). autocompletado: recursos del proyecto y APIs del android.jar, sin red.
+    // La lista se abre al teclear `R.`, Tab acepta, Esc cierra y las flechas recorren; el jar se
+    // lee por trozos de OPFS (su directorio central) y no se pide nada a la red. Primero se
+    // aparta el jar para probar el aviso: los recursos tienen que seguir funcionando sin él.
+    const autoSinJar = await evaluar(`(async () => {
+      if (!window.AUTOCOMPLETADO) return { error: "sin AUTOCOMPLETADO" };
+      await hospedador.escribir("/proyecto/res/values/auto.xml", new TextEncoder().encode(
+        '<resources><string name="auto_titulo">Auto</string>' +
+        '<color name="auto_color">#fff</color><item type="id" name="auto_suelto"/></resources>'));
+      await hospedador.escribir("/proyecto/res/layout/auto.xml", new TextEncoder().encode(
+        '<LinearLayout><Button android:id="@+id/auto_boton"/></LinearLayout>'));
+      await hospedador.escribir("/proyecto/Auto.java",
+        new TextEncoder().encode("package p;\\nclass Auto { int x = 0; }\\n"));
+      await hospedador.renombrar("/sdk/android.jar", "/sdk/android.jar.prueba");
+      AUTOCOMPLETADO.olvidarJar();
+      marcarSucio(false);
+      await abrir("/proyecto/Auto.java");
+      document.querySelector('[data-vista="pestana"]').click();
+      const area = document.getElementById("codigo");
+      EDITOR.poner("class Auto { void f() { View. } }");
+      area.focus();
+      const at = area.value.indexOf("View.") + "View.".length;
+      area.setSelectionRange(at, at);
+      area.dispatchEvent(new Event("input", { bubbles: true }));
+      return { apartado: true };
+    })()`);
+    await esperar(900);
+    const avisoSinJar = await evaluar(`({
+      visible: !document.getElementById("autocompletado").hidden,
+      estado: document.getElementById("autocompletado-estado").textContent
+    })`);
+    comprueba("sin android.jar la lista de APIs lo dice y no inventa clases",
+      autoSinJar.apartado === true && avisoSinJar.visible === true &&
+      /android\.jar/.test(String(avisoSinJar.estado)) && /OPFS/.test(String(avisoSinJar.estado)),
+      JSON.stringify(avisoSinJar).slice(0, 260));
+
+    const autoPrep = await evaluar(`(async () => {
+      await AUTOCOMPLETADO.refrescar();
+      const recursos = AUTOCOMPLETADO.recursos();
+      const area = document.getElementById("codigo");
+      EDITOR.poner("class Auto { int x = R.; }");
+      area.focus();
+      const at = area.value.indexOf("R.") + 2;
+      area.setSelectionRange(at, at);
+      area.dispatchEvent(new Event("input", { bubbles: true }));
+      return { recursos };
+    })()`);
+    await esperar(900);
+    const listaR = await evaluar(`({
+      visible: !document.getElementById("autocompletado").hidden,
+      opciones: [...document.querySelectorAll("#autocompletado-lista .autocompletado-opcion")]
+        .map((b) => b.firstChild ? b.firstChild.textContent : b.textContent),
+      activa: (document.querySelector("#autocompletado-lista .autocompletado-opcion.activa") || {}).id || "",
+      estado: document.getElementById("autocompletado-estado").textContent
+    })`);
+    comprueba("sin jar, R. sigue abriendo los tipos declarados y la primera opción resaltada",
+      !!(autoPrep.recursos && autoPrep.recursos.nombres >= 5) && listaR.visible === true &&
+      listaR.opciones.includes("R.layout") && listaR.opciones.includes("R.string") &&
+      listaR.opciones.includes("R.id") && listaR.opciones.includes("R.color") &&
+      listaR.activa === "autocompletado-opcion-0",
+      JSON.stringify({ recursos: autoPrep.recursos, lista: listaR.opciones.slice(0, 8),
+        activa: listaR.activa }).slice(0, 320));
+
+    // se devuelve el jar y se olvida el fallo: el resto de la prueba sí lo necesita
+    await evaluar(`(async () => {
+      await hospedador.renombrar("/sdk/android.jar.prueba", "/sdk/android.jar");
+      AUTOCOMPLETADO.olvidarJar();
+      return true;
+    })()`);
+
+    // El jar no se descarga ni se copia entero: se piden el final del fichero (EOCD) y su
+    // directorio central. Aquí se mide cuánto se leyó de verdad y se comprueba que no hubo ni una
+    // petición en ese tramo.
+    const antesJar = peticiones.length;
+    const jarAuto = await evaluar(`(async () => {
+      const t = performance.now();
+      const r = await AUTOCOMPLETADO.cargarJar();
+      return { ...r, msTotal: Math.round(performance.now() - t), sinJar: AUTOCOMPLETADO.textoSinJar() };
+    })()`);
+    await esperar(200);
+    const peticionesJar = peticiones.slice(antesJar);
+    const medidaJar = jarAuto.medida || {};
+    comprueba("el índice del android.jar se lee de OPFS por trozos y sin una sola petición",
+      medidaJar.clases > 1000 && medidaJar.bytes > 0 &&
+      medidaJar.bytes < medidaJar.tamanoArchivo / 4 && jarAuto.leidos === medidaJar.bytes &&
+      peticionesJar.length === 0 && /android\.jar/.test(String(jarAuto.sinJar)) &&
+      /OPFS/.test(String(jarAuto.sinJar)) && /recursos/.test(String(jarAuto.sinJar)),
+      JSON.stringify({ clases: medidaJar.clases, bytes: medidaJar.bytes,
+        archivo: medidaJar.tamanoArchivo, ms: medidaJar.ms,
+        peticiones: peticionesJar.length }).slice(0, 300));
+
+    await evaluar(`(() => {
+      const area = document.getElementById("codigo");
+      EDITOR.poner("class Auto { int x = R.la; }");
+      area.focus();
+      const at = area.value.indexOf("R.la") + 4;
+      area.setSelectionRange(at, at);
+      area.dispatchEvent(new Event("input", { bubbles: true }));
+      return true;
+    })()`);
+    await esperar(800);
+    const antesTab = await evaluar(`({
+      visible: !document.getElementById("autocompletado").hidden,
+      primera: (document.querySelector("#autocompletado-lista .autocompletado-opcion") || {}).textContent || ""
+    })`);
+    await evaluar(`document.getElementById("codigo").dispatchEvent(
+      new KeyboardEvent("keydown", { key: "Tab", bubbles: true, cancelable: true }))`);
+    const trasTab = await evaluar(`(() => {
+      const area = document.getElementById("codigo");
+      const texto = area.value;
+      const deshacer = document.execCommand("undo");
+      return { texto, deshacer, trasDeshacer: area.value,
+        popup: document.getElementById("autocompletado").hidden };
+    })()`);
+    comprueba("Tab acepta la sugerencia resaltada, entra en el deshacer y cierra la lista",
+      antesTab.visible === true && /^R\.layout/.test(antesTab.primera) &&
+      trasTab.texto === "class Auto { int x = R.layout; }" && trasTab.deshacer === true &&
+      trasTab.trasDeshacer === "class Auto { int x = R.la; }" && trasTab.popup === true,
+      JSON.stringify(trasTab).slice(0, 240));
+
+    await evaluar(`(() => {
+      const area = document.getElementById("codigo");
+      EDITOR.poner("class Auto { int x = R.; }");
+      area.focus();
+      const at = area.value.indexOf("R.") + 2;
+      area.setSelectionRange(at, at);
+      area.dispatchEvent(new Event("input", { bubbles: true }));
+      return true;
+    })()`);
+    await esperar(800);
+    const antesEsc = await evaluar(`({
+      visible: !document.getElementById("autocompletado").hidden,
+      valor: document.getElementById("codigo").value
+    })`);
+    await evaluar(`document.getElementById("codigo").dispatchEvent(
+      new KeyboardEvent("keydown", { key: "Escape", bubbles: true, cancelable: true }))`);
+    const trasEsc = await evaluar(`({
+      visible: !document.getElementById("autocompletado").hidden,
+      valor: document.getElementById("codigo").value
+    })`);
+    comprueba("Esc cierra la lista sin tocar el texto",
+      antesEsc.visible === true && trasEsc.visible === false && trasEsc.valor === antesEsc.valor,
+      JSON.stringify({ antes: antesEsc.visible, despues: trasEsc.visible }).slice(0, 160));
+
+    // flechas + Tab: la resaltada se acepta. Se espera a que el diagnóstico en vivo termine su
+    // pasada para demostrar que mover la lista no dispara otro check.
+    await evaluar(`(() => {
+      const area = document.getElementById("codigo");
+      EDITOR.poner("class Auto { int x = R.layout.; }");
+      area.focus();
+      const at = area.value.indexOf("R.layout.") + "R.layout.".length;
+      area.setSelectionRange(at, at);
+      area.dispatchEvent(new Event("input", { bubbles: true }));
+      marcarSucio(false);
+      return true;
+    })()`);
+    // el input programa un check a 350 ms y la pasada tarda ~1,6 s: se espera a que el estado se
+    // quede quieto para que la comparación de después mida las flechas, no el check pendiente
+    let estable = null;
+    for (let i = 0; i < 20; i++) {
+      const ahora = await evaluar(`document.getElementById("diagnostico-vivo-estado").textContent`);
+      if (ahora && ahora === estable) break;
+      estable = ahora;
+      await esperar(400);
+    }
+    const antesFlecha = await evaluar(`({
+      visible: !document.getElementById("autocompletado").hidden,
+      valor: document.getElementById("codigo").value,
+      estadoDx: document.getElementById("diagnostico-vivo-estado").textContent,
+      opciones: [...document.querySelectorAll("#autocompletado-lista .autocompletado-opcion")]
+        .map((b) => b.firstChild ? b.firstChild.textContent : b.textContent)
+    })`);
+    const trasFlecha = await evaluar(`(() => {
+      const area = document.getElementById("codigo");
+      const tecla = (key) => area.dispatchEvent(
+        new KeyboardEvent("keydown", { key, bubbles: true, cancelable: true }));
+      tecla("ArrowDown");
+      const segunda = (document.querySelector("#autocompletado-lista .autocompletado-opcion.activa") || {}).id || "";
+      tecla("ArrowUp");
+      tecla("ArrowDown");
+      return { segunda,
+        activaFinal: (document.querySelector("#autocompletado-lista .autocompletado-opcion.activa") || {}).id || "" };
+    })()`);
+    await esperar(700);
+    const despuesFlecha = await evaluar(`({
+      estadoDx: document.getElementById("diagnostico-vivo-estado").textContent,
+      valor: document.getElementById("codigo").value,
+      visible: !document.getElementById("autocompletado").hidden
+    })`);
+    const segundaOpcion = antesFlecha.opciones[1] || "";
+    await evaluar(`document.getElementById("codigo").dispatchEvent(
+      new KeyboardEvent("keydown", { key: "Tab", bubbles: true, cancelable: true }))`);
+    const insertada = await evaluar(`({
+      texto: document.getElementById("codigo").value,
+      popup: document.getElementById("autocompletado").hidden
+    })`);
+    comprueba("las flechas recorren la lista sin escribir ni lanzar otro check",
+      antesFlecha.visible === true && antesFlecha.opciones.length >= 2 &&
+      trasFlecha.segunda === "autocompletado-opcion-1" &&
+      trasFlecha.activaFinal === "autocompletado-opcion-1" &&
+      despuesFlecha.valor === antesFlecha.valor &&
+      despuesFlecha.estadoDx === antesFlecha.estadoDx && despuesFlecha.visible === true,
+      JSON.stringify({ segunda: trasFlecha.segunda, igual: despuesFlecha.valor === antesFlecha.valor,
+        dx: despuesFlecha.estadoDx === antesFlecha.estadoDx }).slice(0, 240));
+    comprueba("Tab acepta la opción resaltada por las flechas",
+      segundaOpcion !== "" && insertada.texto === "class Auto { int x = R.layout." + segundaOpcion + "; }" &&
+      insertada.popup === true,
+      JSON.stringify({ segundaOpcion, texto: insertada.texto }).slice(0, 200));
+
+    // clases y métodos del jar: el nombre se completa y `View.` abre sus métodos públicos, leídos
+    // del propio .class (el descriptor viaja en la pista de cada opción).
+    await evaluar(`(() => {
+      const area = document.getElementById("codigo");
+      EDITOR.poner("class Auto { Acti }");
+      area.focus();
+      const at = area.value.indexOf("Acti") + 4;
+      area.setSelectionRange(at, at);
+      area.dispatchEvent(new Event("input", { bubbles: true }));
+      return true;
+    })()`);
+    await esperar(1200);
+    const clasesAuto = await evaluar(`({
+      visible: !document.getElementById("autocompletado").hidden,
+      opciones: [...document.querySelectorAll("#autocompletado-lista .autocompletado-opcion")]
+        .map((b) => b.firstChild ? b.firstChild.textContent : b.textContent),
+      estado: document.getElementById("autocompletado-estado").textContent
+    })`);
+    comprueba("las clases del android.jar completan en el editor",
+      clasesAuto.visible === true && clasesAuto.opciones.includes("Activity") &&
+      /clases del android\.jar/.test(String(clasesAuto.estado)),
+      JSON.stringify({ primeras: clasesAuto.opciones.slice(0, 4), estado: clasesAuto.estado }).slice(0, 220));
+
+    await evaluar(`(() => {
+      const area = document.getElementById("codigo");
+      EDITOR.poner("class Auto { void f() { View. } }");
+      area.focus();
+      const at = area.value.indexOf("View.") + "View.".length;
+      area.setSelectionRange(at, at);
+      area.dispatchEvent(new Event("input", { bubbles: true }));
+      return true;
+    })()`);
+    await esperar(1200);
+    const metodosView = await evaluar(`({
+      visible: !document.getElementById("autocompletado").hidden,
+      opciones: [...document.querySelectorAll("#autocompletado-lista .autocompletado-opcion")]
+        .map((b) => b.firstChild ? b.firstChild.textContent : b.textContent),
+      estado: document.getElementById("autocompletado-estado").textContent
+    })`);
+    comprueba("los método públicos de una clase del jar se leen de su .class",
+      metodosView.visible === true && metodosView.opciones.includes("animate") &&
+      /métodos de android\.view\.View/.test(String(metodosView.estado)),
+      JSON.stringify({ opciones: metodosView.opciones.slice(0, 5), estado: metodosView.estado }).slice(0, 240));
+
+    // la lista abierta no roba los atajos de la página: Ctrl+Mayús+P abre la paleta y Ctrl+G pide
+    // la línea; después Escape cierra solo la lista.
+    await evaluar(`document.dispatchEvent(new KeyboardEvent("keydown",
+      { key: "P", code: "KeyP", ctrlKey: true, shiftKey: true, bubbles: true }))`);
+    await esperar(250);
+    const paletaConAuto = await evaluar(`({
+      abierta: !document.getElementById("paleta").hidden,
+      foco: document.activeElement.id
+    })`);
+    await evaluar(`document.getElementById("paleta").click()`);
+    const irConAuto = await evaluar(`(() => {
+      const original = window.prompt;
+      window.prompt = () => "1";
+      document.dispatchEvent(new KeyboardEvent("keydown", { key: "g", ctrlKey: true, bubbles: true }));
+      window.prompt = original;
+      const area = document.getElementById("codigo");
+      return { linea: area.value.slice(0, area.selectionStart).split("\\n").length };
+    })()`);
+    await evaluar(`document.getElementById("codigo").dispatchEvent(
+      new KeyboardEvent("keydown", { key: "Escape", bubbles: true, cancelable: true }))`);
+    const escapeFinal = await evaluar(`document.getElementById("autocompletado").hidden`);
+    comprueba("el autocompletado no roba Ctrl+Mayús+P ni Ctrl+G",
+      paletaConAuto.abierta === true && paletaConAuto.foco === "paleta-buscar" &&
+      irConAuto.linea === 1 && escapeFinal === true,
+      JSON.stringify({ paletaConAuto, irConAuto, escapeFinal }).slice(0, 240));
+
+    // limpieza: los recursos y el fuente de la prueba no se quedan en el proyecto que compilan
+    await evaluar(`(async () => {
+      marcarSucio(false);
+      await hospedador.limpiar("/proyecto/Auto.java");
+      await hospedador.limpiar("/proyecto/res/layout/auto.xml");
+      await hospedador.limpiar("/proyecto/res/values/auto.xml");
+      await abrir("/proyecto/vivo.java");
+      EDITOR.poner("package p;\\npublic class Vivo {}\\n");
+      marcarSucio(false);
+      return true;
+    })()`);
+
     // 12b. compilar debug no pide keystore: genera la clave típica en OPFS y firma con ella.
     const debug = await evaluar(`(async () => {
       await hospedador.limpiar("/sdk/debug.keystore");

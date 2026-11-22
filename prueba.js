@@ -11,6 +11,7 @@ import { leerZip, zipDelArbol, paqueteDelManifiesto, nombreDeZip, rutaSegura,
   ajustesDelManifiesto, conAjustes } from "./proyecto.js";
 import * as vistaPrevia from "./vista-previa.js";
 import * as previaPanel from "./previa-panel.js";
+import * as autocompletado from "./autocompletado-datos.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const a = { buildProject, makeZip, analyze, RULES, crc32 };
@@ -169,7 +170,8 @@ for (const m of js.matchAll(/getElementById\("([^"]+)"\)/g))
 const pestana = fs.readFileSync(path.join(__dirname, "pestana.js"), "utf8");
 for (const m of pestana.matchAll(/getElementById\("([^"]+)"\)/g))
   if (!ids.has(m[1])) mal(`pestana.js pide #${m[1]} y index.html no lo tiene`);
-for (const fichero of ["diagnostico.js", "temas.js", "historial.js", "vista-previa.js", "previa-panel.js"]) {
+for (const fichero of ["diagnostico.js", "temas.js", "historial.js", "vista-previa.js",
+  "previa-panel.js", "autocompletado.js"]) {
   const fuente = fs.readFileSync(path.join(__dirname, fichero), "utf8");
   for (const m of fuente.matchAll(/getElementById\("([^"]+)"\)/g))
     if (!ids.has(m[1])) mal(`${fichero} pide #${m[1]} y index.html no lo tiene`);
@@ -576,6 +578,117 @@ if (fusionar(baseFusion, "uno\nDOS\ntres\n", baseFusion).estado !== "nuestro") m
   }
   if (argv[4] !== "saludo" || argv[7] !== "--old-storepass=anterior") {
     mal("redactarArgv cambia el argv real que se ejecuta");
+  }
+
+
+  // 11. autocompletado: la parte que no necesita DOM. Los recursos salen del árbol y de los XML,
+  // y el jar se parte por su directorio central; si esto se rompe, la lista sugiere basura.
+  {
+    const tipos = autocompletado.recursosDeRutas([
+      "/proyecto/res/layout/main.xml",
+      "/proyecto/res/layout-land/main.xml",
+      "/proyecto/res/drawable-hdpi/icono.9.png",
+      "/proyecto/res/mipmap/ic_launcher.webp",
+      "/proyecto/res/values/strings.xml",
+      "/proyecto/src/com/x/R.java",
+    ]);
+    if (!tipos.layout || !tipos.layout.has("main")) mal("recursosDeRutas pierde res/layout/main.xml");
+    if (!tipos.drawable || !tipos.drawable.has("icono")) mal("recursosDeRutas no quita el .9.png");
+    if (!tipos.mipmap || !tipos.mipmap.has("ic_launcher")) mal("recursosDeRutas pierde el mipmap");
+    if (tipos.values || tipos.java) mal("recursosDeRutas mete values o src como si fueran recursos");
+
+    const valores = autocompletado.agregarValores(`<resources>
+      <string name="hola">Hola</string>
+      <string-array name="dias"><item>lun</item></string-array>
+      <style name="AppTheme" parent="@android:style/Theme"/>
+      <item type="id" name="suelto"/>
+      <declare-styleable name="Propia"><attr name="modo" format="integer"/></declare-styleable>
+    </resources>`, {});
+    if (!valores.string || !valores.string.has("hola")) mal("agregarValores pierde el <string>");
+    if (!valores.array || !valores.array.has("dias")) mal("agregarValores no mapea string-array a array");
+    if (!valores.style || !valores.style.has("AppTheme")) mal("agregarValores pierde el <style>");
+    if (!valores.id || !valores.id.has("suelto")) mal("agregarValores pierde el <item type=\"id\">");
+    if (!valores.styleable || !valores.styleable.has("Propia")) mal("agregarValores pierde el declare-styleable");
+
+    const ids = autocompletado.agregarIdsDeXml(`<LinearLayout><TextView android:id="@+id/total"/></LinearLayout>`, {});
+    if (!ids.id || !ids.id.has("total")) mal("agregarIdsDeXml pierde el @+id/total");
+
+    // con la forma que escriben aapt2 y el enlazador de apkc: una clase por tipo y un campo por línea
+    const deR = autocompletado.recursosDeRJava(`package a;
+public final class R {
+  public static final class layout {
+    public static final int main=0x7f020000;
+  }
+  public static final class styleable {
+    public static final int[] Propia = { 0x7f010000 };
+    public static final int Propia_modo = 0;
+  }
+}`, {});
+    if (!deR.layout || !deR.layout.has("main")) mal("recursosDeRJava pierde R.layout.main");
+    if (!deR.styleable || !deR.styleable.has("Propia")) mal("recursosDeRJava pierde el styleable");
+
+    const casos = [
+      ["R.layout.ma", "valores", "layout", "ma"],
+      ["R.", "tipos", null, ""],
+      ["Toast.", "metodos", null, ""],
+    ];
+    for (const [texto, modo, tipo, prefijo] of casos) {
+      const ctx = autocompletado.contextoDeCompletado(texto, texto.length);
+      if (!ctx || ctx.modo !== modo) mal(`contextoDeCompletado no ve ${modo} en ${JSON.stringify(texto)}`);
+      else if (tipo && ctx.tipo !== tipo) mal(`contextoDeCompletado se equivoca de tipo en ${JSON.stringify(texto)}`);
+      else if (ctx.prefijo !== prefijo) mal(`contextoDeCompletado se equivoca de prefijo en ${JSON.stringify(texto)}`);
+    }
+    if (autocompletado.contextoDeCompletado('String s = "R.layout.";', 21)) {
+      mal("contextoDeCompletado sugiere dentro de una cadena");
+    }
+    if (autocompletado.contextoDeCompletado("// R.layout.", 12)) {
+      mal("contextoDeCompletado sugiere dentro de un comentario");
+    }
+
+    // el zip del jar: el mismo makeZip de la página, leído por el directorio central
+    const zipJar = a.makeZip([["android/app/Activity.class", "PK" + "x".repeat(64)],
+      ["android/widget/Toast.class", "PK" + "x".repeat(64)]]);
+    const fin = autocompletado.buscarFinDirectorio(new Uint8Array(zipJar));
+    if (!fin || fin.entradas !== 2) mal(`buscarFinDirectorio no ve las dos entradas: ${JSON.stringify(fin)}`);
+    else {
+      const central = autocompletado.leerEntradasDirectorio(new Uint8Array(zipJar.subarray(fin.inicioDirectorio)));
+      // el offset del registro central es absoluto: la cabecera local tiene que estar ahí
+      const primera = central[0];
+      const cabeceraLocal = autocompletado.offsetDeDatosLocales(
+        new Uint8Array(zipJar.subarray(primera.local, primera.local + 30)));
+      if (primera.local >= zipJar.length || cabeceraLocal < 30) {
+        mal(`el offset local de ${primera.nombre} no apunta a una cabecera local (${primera.local} de ${zipJar.length})`);
+      }
+      const clases = autocompletado.clasesDelJar(central);
+      if (clases.length !== 2) mal(`clasesDelJar ve ${clases.length} clases y hay dos`);
+      if (!clases.some((c) => c.simple === "Toast" && c.ruta === "android.widget.Toast")) {
+        mal("clasesDelJar no nombra android.widget.Toast");
+      }
+    }
+
+    // un .class mínimo: pool con "hola" y "()V", un método publico estatico y ningún atributo
+    const clase = new Uint8Array(43);
+    const v = new DataView(clase.buffer);
+    v.setUint32(0, 0xcafebabe, false);
+    v.setUint16(4, 0); v.setUint16(6, 52);
+    v.setUint16(8, 3);                       // constant_pool_count = 3 (dos entradas)
+    v.setUint8(10, 1); v.setUint16(11, 4);   // Utf8 "hola"
+    clase.set(new TextEncoder().encode("hola"), 13);
+    v.setUint8(17, 1); v.setUint16(18, 3);   // Utf8 "()V"
+    clase.set(new TextEncoder().encode("()V"), 20);
+    v.setUint16(23, 0x0021);                 // ACC_PUBLIC | ACC_SUPER
+    v.setUint16(25, 0); v.setUint16(27, 0);  // this, super
+    v.setUint16(29, 0);                      // interfaces
+    v.setUint16(31, 0);                      // campos
+    v.setUint16(33, 1);                      // métodos
+    v.setUint16(35, 0x0009);                 // public static
+    v.setUint16(37, 1); v.setUint16(39, 2);  // nombre y descriptor
+    v.setUint16(41, 0);                      // atributos del método
+    const metodos = autocompletado.metodosDeClase(clase);
+    if (metodos.length !== 1 || metodos[0].nombre !== "hola" || metodos[0].descriptor !== "()V" ||
+        !metodos[0].publico || !metodos[0].estatico) {
+      mal(`metodosDeClase no lee el método del .class: ${JSON.stringify(metodos)}`);
+    }
   }
 
   console.log(fallos ? `PRUEBA FALLA: ${fallos} problemas` : "prueba: todo en orden");

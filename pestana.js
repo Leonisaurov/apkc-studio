@@ -65,6 +65,8 @@ const hospedador = (() => {
   return {
     arbol: async () => { await bajarRaiz(); return pedir({ tipo: "arbol" }); },
     leer: async (ruta) => { await bajarRaiz(); return pedir({ tipo: "leer", ruta }); },
+    // un trozo del fichero, sin copiarlo entero: el android.jar del autocompletado
+    rango: async (ruta, desde, largo) => { await bajarRaiz(); return pedir({ tipo: "rango", ruta, desde, largo }); },
     escribir: async (ruta, datos) => { await bajarRaiz(); return pedir({ tipo: "montar", ruta, datos }); },
     ejecutar: async (argv) => { await bajarRaiz(); return pedir({ tipo: "ejecutar", argv }); },
     limpiar: async (ruta) => { await bajarRaiz(); return pedir({ tipo: "limpiar", ruta }); },
