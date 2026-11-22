@@ -285,6 +285,15 @@ if (fusionar(baseFusion, "uno\nDOS\ntres\n", baseFusion).estado !== "nuestro") m
     mal("leerZip no infla una entrada DEFLATE");
   }
 
+  // B4: un central directory que declara 128 MB por entrada se rechaza antes de descomprimir
+  const zipBombo = Buffer.from(zipDeflate);
+  const centralEn = 30 + nombre.length + comprimido.length;
+  zipBombo.writeUInt32LE(128 * 1024 * 1024, centralEn + 24);
+  let rechazoCota = false;
+  try { await leerZip(new Uint8Array(zipBombo)); }
+  catch (e) { rechazoCota = /demasiado grande/.test(String(e && e.message ? e.message : e)); }
+  if (!rechazoCota) mal("leerZip no pone cota al tamaño declarado de una entrada");
+
   if (rutaSegura("../fuera.txt") || rutaSegura("/abs.txt") || rutaSegura("a\\b.txt") || !rutaSegura("a/b.txt")) {
     mal("rutaSegura no filtra las rutas que salen del proyecto");
   }

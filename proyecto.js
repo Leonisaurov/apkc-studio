@@ -107,6 +107,11 @@ function buscaEocd(vista) {
   return -1;
 }
 
+// Un zip ajeno puede declarar tamaños pequeños y expandirse hasta llenar la memoria: se pone una
+// cota por entrada y otra para el conjunto antes de descomprimir (hallazgo B4 del informe).
+const MAX_ENTRADA = 64 * 1024 * 1024;
+const MAX_TOTAL = 256 * 1024 * 1024;
+
 async function inflar(bytes) {
   const flujo = new Blob([bytes]).stream().pipeThrough(new DecompressionStream("deflate-raw"));
   return new Uint8Array(await new Response(flujo).arrayBuffer());
@@ -123,6 +128,7 @@ export async function leerZip(bytes) {
     throw new Error("el zip usa ZIP64, que esta página no lee; vuelve a exportarlo sin ZIP64");
   }
   const salida = [];
+  let totalDescomprimido = 0;
   let at = inicioCentral;
   for (let n = 0; n < total; n++) {
     if (at + 46 > vista.byteLength || vista.getUint32(at, true) !== FIRMA_CENTRAL) {
@@ -142,6 +148,7 @@ export async function leerZip(bytes) {
 
     if (banderas & 0x0001) throw new Error("el zip está cifrado: " + nombre);
     if (!rutaSegura(nombre)) throw new Error("ruta insegura en el zip: " + nombre);
+    if (tamano > MAX_ENTRADA) throw new Error("el fichero " + nombre + " es demasiado grande para importarlo");
     if (nombre.endsWith("/")) {
       salida.push({ ruta: nombre, dir: true, datos: null });
       continue;
@@ -164,6 +171,8 @@ export async function leerZip(bytes) {
       throw new Error("el tamaño de " + nombre + " no cuadra: " + datos.length + " de " + tamano);
     }
     if (crc32(datos) !== crc) throw new Error("el CRC de " + nombre + " no cuadra");
+    totalDescomprimido += datos.length;
+    if (totalDescomprimido > MAX_TOTAL) throw new Error("el zip importado pasaría la cota total de memoria");
 
     salida.push({ ruta: nombre, dir: false, datos });
   }
