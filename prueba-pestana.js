@@ -1254,7 +1254,7 @@ async function conductor() {
       contador.lateralColores > 3 && contador.lateralAncho > 0 &&
       contador.rutaAntes === contador.rutaTras &&
       contador.seleccion[0] === 12 && contador.seleccion[1] === 12 &&
-      /Emulador/.test(String(contador.renderEstado)),
+      /Emulador/.test(String(contador.renderEstado)) && !/compilando/i.test(String(contador.renderEstado)),
       JSON.stringify({ vista: contador.vista, visible: contador.lateralVisible,
         colores: contador.lateralColores, ancho: contador.lateralAncho,
         seleccion: contador.seleccion, estado: contador.renderEstado }).slice(0, 320));
