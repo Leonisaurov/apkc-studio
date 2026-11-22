@@ -1745,6 +1745,58 @@ async function guardar() {
   return true;
 }
 
+// Compilar lee OPFS, no el textarea: con un documento sucio, `apkc build` compilaba la versión
+// guardada y el Emulador seguía enseñando la apk anterior aunque el comando saliera 0. Es el
+// síntoma «compilo y el Emulador no recarga la última APK» con el cambio delante y sin guardar.
+// Antes de compilar se guardan todos los documentos sucios —lo que hace un IDE al construir— y si
+// uno no se puede guardar no se compila a medias: se devuelve -1 y el motivo ya está en la barra.
+async function guardarParaCompilar() {
+  const sucios = DOCUMENTOS.lista.filter((doc) => doc.sucio);
+  if (!sucios.length) {
+    // buffer sin pestaña: la compatibilidad con `estadoPestana.ruta` puesto a mano
+    if (!(estadoPestana.sucio && !documentoActivo())) return 0;
+    return (await guardar()) ? 1 : -1;
+  }
+  let guardados = 0;
+  for (const doc of sucios) {
+    if (DOCUMENTOS.activa === doc.ruta) {
+      // el documento activo vive en el textarea, y `guardar` es la entrada única (revisiones,
+      // historial y aviso a las otras ventanas)
+      if (!await guardar()) return -1;
+      guardados += 1;
+      continue;
+    }
+    // el documento no activo conserva su texto en `doc.texto` mientras está sucio; si no lo
+    // tuviera, guardarlo como vacío borraría el fichero: mejor no compilar y decirlo
+    if (typeof doc.texto !== "string") {
+      nota("no se pudo guardar " + relativa(doc.ruta) + " antes de compilar: el editor no tiene su texto");
+      return -1;
+    }
+    const texto = doc.texto;
+    const revision = nuevaRevision();
+    try {
+      await conBloqueo(async () => {
+        const escrito = await hospedador.escribir(doc.ruta, new TextEncoder().encode(texto));
+        if (escrito && escrito.tipo === "error") throw new Error(escrito.error);
+        try { localStorage.setItem(claveRevision(doc.ruta), revision); } catch (e) { /* sin revisión */ }
+      });
+    } catch (e) {
+      nota("no se pudo guardar " + relativa(doc.ruta) + " antes de compilar: " + (e && e.message ? e.message : e));
+      return -1;
+    }
+    doc.revision = revision;
+    doc.base = texto;
+    doc.sucio = false;
+    doc.texto = null;
+    publicar({ tipo: "guardado", ruta: doc.ruta, revision });
+    guardados += 1;
+  }
+  renderPestanas();
+  renderHistorial();
+  actualizarAccionesFichero();
+  return guardados;
+}
+
 // El nombre por defecto sale del package que la persona escribió en Inicio, y cualquier ruta
 // relativa se ancla a /proyecto: así "Nuevo" no puede escribir fuera del árbol que se ve.
 function paqueteDelFormulario() {
@@ -2594,6 +2646,11 @@ async function compilarCon(k, tipo, opciones = {}) {
   const version = (document.getElementById("sdk-version").value || "34").trim();
   const codename = (document.getElementById("codename").value || "14").trim();
   const inc = opciones.incremental !== false;
+  // lo que se ve en el editor es lo que se compila: el build no lee el textarea (ver
+  // guardarParaCompilar). El motivo de un fallo al guardar ya lo dejó en la barra.
+  const guardados = await guardarParaCompilar();
+  if (guardados < 0) return null;
+  if (guardados > 0) CONSOLA.escribir("guardados " + guardados + " fichero(s) con cambios antes de compilar\n");
   await hospedador.cwd(PROYECTO);
   const argv = ["build"];
   if (inc) argv.push("--inc");
