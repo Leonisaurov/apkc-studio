@@ -84,6 +84,13 @@ se edita el layout y no hay estado de documento.
 - **Pintura** (`pintarModelo`, `pintarVistaPrevia`, `repintarVistaPrevia`,
   `mensajeVistaPrevia`): lee los colores de las variables CSS del tema, nunca de literales, así
   que los tres mundos de `DESIGN.md` se ven sin tocar el pintor.
+- **La medida es una frontera cerrada.** `escalaPara` solo acepta números finitos (o cadenas
+  numéricas): `1e400` llega como `Infinity`, y `NaN`, `null`, `{}` o `""` no son medidas. Si la
+  pantalla no se puede medir se usa el respaldo de 360×640; si aun así la escala no es finita,
+  devuelve `valida: false`, `rectsEscalados` no pinta ningún rectángulo y `pintarVistaPrevia`
+  deja el panel vacío con el motivo en `#vista-previa-estado`. Un `rect` con una medida inválida
+  se omite en vez de dibujarse en `(0,0)`. `prueba.js` cubre `1e400`, `NaN`, `Infinity`, `null`
+  y cadenas.
 
 `pestana.js` llama a `previsualizarLoCompilado()` **después** de un build correcto, con
 `hospedador.ejecutar(["preview", "build/app.apk"])` y no con `correr()`: no es una orden de la

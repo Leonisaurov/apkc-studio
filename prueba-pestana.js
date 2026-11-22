@@ -154,19 +154,29 @@ async function conductor() {
   }
 
   // 0b. la tercera vista, antes de compilar nada: se abre, marca `data-vista` y deja el canvas
-  // vacío con un mensaje. Es lo que ve quien entra sin apk y no puede parecer un fallo.
-  const previaVacia = await evaluar(`(() => {
-    document.querySelector('nav.actividad [data-vista="vista"]').click();
-    const canvas = document.getElementById("vista-previa");
-    return {
-      botones: document.querySelectorAll("nav.actividad [data-vista]").length,
-      activa: document.getElementById("vista").classList.contains("activa"),
-      cuerpo: document.body.dataset.vista,
-      estado: document.getElementById("vista-previa-estado").textContent,
-      rol: canvas.getAttribute("role"),
-      arrastrable: canvas.draggable === true || canvas.hasAttribute("contenteditable"),
-    };
-  })()`);
+  // vacío con un mensaje. Es lo que ve quien entra sin apk y no puede parecer un fallo. Puede
+  // llegar antes de que el parser haya creado la sección (esta es la primera lectura del DOM de
+  // la prueba), así que se reintenta en vez de asumir que la página ya está entera.
+  let previaVacia = null;
+  for (let i = 0; i < 40 && !previaVacia; i++) {
+    previaVacia = await evaluar(`(() => {
+      const boton = document.querySelector('nav.actividad [data-vista="vista"]');
+      const seccion = document.getElementById("vista");
+      const canvas = document.getElementById("vista-previa");
+      if (!boton || !seccion || !canvas || document.readyState === "loading") return null;
+      boton.click();
+      return {
+        botones: document.querySelectorAll("nav.actividad [data-vista]").length,
+        activa: seccion.classList.contains("activa"),
+        cuerpo: document.body.dataset.vista,
+        estado: document.getElementById("vista-previa-estado").textContent,
+        rol: canvas.getAttribute("role"),
+        arrastrable: canvas.draggable === true || canvas.hasAttribute("contenteditable"),
+      };
+    })()`);
+    if (!previaVacia) await esperar(250);
+  }
+  if (!previaVacia) throw new Error("la vista previa no llegó al DOM en 10 s");
   comprueba("la barra de actividad tiene tres vistas y la de vista previa se abre",
     previaVacia.botones === 3 && previaVacia.activa === true && previaVacia.cuerpo === "vista",
     JSON.stringify(previaVacia));
@@ -1049,6 +1059,76 @@ async function conductor() {
     comprueba("la vista previa no ensucia la consola ni el último código del build",
       previa.codigo === "0" && previa.enConsola === false,
       JSON.stringify({ codigo: previa.codigo, enConsola: previa.enConsola }));
+
+    // 12a-ter. un preview forzado a fallar: el apk se corrompe, se llama a la función a pelo y
+    // ni la consola ni el último código del build pueden cambiar; el panel queda con su motivo.
+    const previaRota = await evaluar(`(async () => {
+      const sano = await hospedador.bytes("/proyecto/build/app.apk");
+      const antesCodigo = document.getElementById("ultimo-codigo").textContent;
+      const antesConsola = document.getElementById("consola-pestana").textContent;
+      await hospedador.escribir("/proyecto/build/app.apk",
+        new TextEncoder().encode("esto no es un zip, y preview tiene que decirlo"));
+      const r = await previsualizarLoCompilado();
+      const roto = {
+        antesCodigo,
+        codigo: document.getElementById("ultimo-codigo").textContent,
+        consolaIgual: document.getElementById("consola-pestana").textContent === antesConsola,
+        estado: document.getElementById("vista-previa-estado").textContent,
+        devuelto: r === null,
+        bytes: sano ? sano.length : 0,
+      };
+      await hospedador.escribir("/proyecto/build/app.apk", sano);
+      return roto;
+    })()`);
+    comprueba("un apk corrupto deja el panel con un mensaje y no toca la consola ni el último código",
+      previaRota.devuelto === true && previaRota.bytes > 5000 &&
+      previaRota.codigo === previaRota.antesCodigo && previaRota.consolaIgual === true &&
+      /no devolvió un modelo legible|no hay build/i.test(String(previaRota.estado)),
+      JSON.stringify(previaRota).slice(0, 320));
+
+    // 12a-quater. con la vista previa delante, el diagnóstico en vivo y la paleta siguen vivos:
+    // los dos son document-wide y la tercera vista no puede taparlos ni romper su estado.
+    const conVista = await evaluar(`(async () => {
+      await abrir("/proyecto/vivo.java");
+      const area = document.getElementById("codigo");
+      area.value = "package p;\\n\\npublic class Vivo {\\n  void x() { int y = ; }\\n}\\n";
+      area.dispatchEvent(new Event("input", { bubbles: true }));
+      document.querySelector('nav.actividad [data-vista="vista"]').click();
+      return { cuerpo: document.body.dataset.vista,
+        activa: document.getElementById("vista").classList.contains("activa") };
+    })()`);
+    await esperar(3500);
+    const vivoVista = await evaluar(`({
+      estado: document.getElementById("diagnostico-vivo-estado").textContent,
+      lista: document.getElementById("diagnostico-vivo-lista").textContent,
+      marcas: document.getElementById("diagnostico-marcas").children.length,
+    })`);
+    comprueba("el diagnóstico en vivo marca el error con la vista previa abierta",
+      conVista.cuerpo === "vista" && conVista.activa === true &&
+      /error/i.test(String(vivoVista.estado)) && /linea 4|linea 5/.test(String(vivoVista.lista)) &&
+      vivoVista.marcas >= 1,
+      JSON.stringify({ conVista, vivoVista }).slice(0, 280));
+    await evaluar(`document.dispatchEvent(new KeyboardEvent("keydown",
+      { key: "P", code: "KeyP", ctrlKey: true, shiftKey: true, bubbles: true }))`);
+    await esperar(200);
+    const paletaVista = await evaluar(`(() => {
+      const abierta = !document.getElementById("paleta").hidden;
+      const e = document.getElementById("paleta-buscar");
+      e.value = "guardar"; e.dispatchEvent(new Event("input", { bubbles: true }));
+      return { abierta, filtro: document.getElementById("paleta-lista").textContent,
+        cuerpo: document.body.dataset.vista };
+    })()`);
+    await evaluar(`document.getElementById("paleta").click()`);
+    const paletaVistaCerrada = await evaluar(`document.getElementById("paleta").hidden`);
+    comprueba("la paleta Ctrl+Mayús+P abre, filtra y cierra con la vista previa abierta",
+      paletaVista.abierta === true && /Guardar fichero/.test(String(paletaVista.filtro)) &&
+      paletaVistaCerrada === true,
+      JSON.stringify({ ...paletaVista, paletaVistaCerrada }).slice(0, 280));
+    await evaluar(`(async () => {
+      await hospedador.escribir("/proyecto/vivo.java",
+        new TextEncoder().encode("package p;\\npublic class Vivo {}\\n"));
+      document.querySelector('nav.actividad [data-vista="pestana"]').click();
+    })()`);
     fs.writeFileSync(path.join(fuera, "pestanera-contador.apk"), apkContador);
     console.log("  --- el apk de la app del contador, compilado en la pestaña, es " +
       path.join(fuera, "pestanera-contador.apk"));
@@ -1198,6 +1278,31 @@ async function conductor() {
     await exec("Network.emulateNetworkConditions", {
       offline: true, latency: 0, downloadThroughput: -1, uploadThroughput: -1,
     });
+    // con la red cortada pero la página viva: el módulo de la vista previa tiene que salir de la
+    // caché del SW y el último modelo (en memoria) tiene que repintarse al entrar en la vista.
+    const sinRed = await evaluar(`(async () => {
+      const r = await fetch("/vista-previa.js");
+      const texto = await r.text();
+      document.querySelector('nav.actividad [data-vista="vista"]').click();
+      const canvas = document.getElementById("vista-previa");
+      const ctx = canvas.getContext("2d");
+      const datos = ctx.getImageData(0, 0, canvas.width, canvas.height).data;
+      const colores = new Set();
+      for (let i = 0; i < datos.length; i += 4) colores.add(datos[i] + "," + datos[i + 1] + "," + datos[i + 2]);
+      return {
+        ok: r.ok, bytes: texto.length, modulo: texto.includes("modeloDeSalida"),
+        cuerpo: document.body.dataset.vista,
+        estado: document.getElementById("vista-previa-estado").textContent,
+        colores: colores.size, ancho: canvas.width,
+      };
+    })()`);
+    comprueba("sin red, vista-previa.js se sirve de la caché del service worker",
+      sinRed.ok === true && sinRed.bytes > 1000 && sinRed.modulo === true,
+      JSON.stringify(sinRed).slice(0, 240));
+    comprueba("sin red, entrar en Vista repinta el último modelo en el canvas",
+      sinRed.cuerpo === "vista" && sinRed.ancho > 0 && sinRed.colores > 3 &&
+      /nodos/.test(String(sinRed.estado)),
+      JSON.stringify(sinRed).slice(0, 240));
     await exec("Page.navigate", { url: URL_PAGINA });
     let offline = null;
     for (let i = 0; i < 50; i++) {
@@ -1215,6 +1320,21 @@ async function conductor() {
       offline && offline.listo === true, JSON.stringify(offline));
     comprueba("la recarga offline conserva crossOriginIsolated",
       offline && offline.aislada === true, JSON.stringify(offline));
+    // sin red y tras recargar, la cadena main.js → vistas.js → vista-previa.js tiene que cargar
+    // entera desde el SW: si faltara el módulo, vistas.js no evaluaría y la vista no abriría.
+    const trasOffline = await evaluar(`(() => {
+      document.querySelector('nav.actividad [data-vista="vista"]').click();
+      return {
+        cuerpo: document.body.dataset.vista,
+        activa: document.getElementById("vista").classList.contains("activa"),
+        estado: document.getElementById("vista-previa-estado").textContent,
+        canvas: !!document.getElementById("vista-previa"),
+      };
+    })()`);
+    comprueba("sin red, la página recargada carga vista-previa.js y la vista responde",
+      trasOffline.cuerpo === "vista" && trasOffline.activa === true && trasOffline.canvas === true &&
+      /[Cc]ompila/.test(String(trasOffline.estado)),
+      JSON.stringify(trasOffline).slice(0, 240));
     await exec("Network.emulateNetworkConditions", {
       offline: false, latency: 0, downloadThroughput: -1, uploadThroughput: -1,
     });

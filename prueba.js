@@ -243,6 +243,35 @@ if (botonR.y !== 48 || botonR.ancho !== 128 || botonR.alto !== 96) {
 // un nodo sin rect se omite en vez de pintarse en (0,0); y la cota corta un árbol desmedido
 const sinRect = { pantalla: { ancho: 100, alto: 100 }, raiz: { tipo: "X", hijos: [{ tipo: "Y" }] } };
 if (vistaPrevia.rectsEscalados(sinRect, 100, 100).length !== 0) mal("rectsEscalados pinta un nodo sin rect");
+// la frontera de las medidas: `1e400` es Infinity en JS y `Number(null)` es 0. Ninguno puede
+// acabar en NaN dentro del canvas: la pantalla cae a su respaldo y el rect que no se puede medir
+// se omite. Se prueban también cadenas (un JSON puede traerlas) y valores no numéricos.
+const finitos = (caja) => [caja.escala, caja.x, caja.y, caja.ancho, caja.alto].every(Number.isFinite);
+const fronteras = [
+  ["1e400", { ancho: 1e400, alto: 640 }, 360, 640],
+  ["NaN e Infinity", { ancho: NaN, alto: Infinity }, 360, 640],
+  ["null", null, null, null],
+  ["cadenas", { ancho: "360", alto: "640" }, "360", "640"],
+  ["basura", { ancho: {}, alto: [] }, "", " "],
+];
+for (const [nombre, pantalla, ancho, alto] of fronteras) {
+  const caja = vistaPrevia.escalaPara({ pantalla }, ancho, alto);
+  if (!finitos(caja)) mal(`escalaPara deja NaN con ${nombre}: ${JSON.stringify(caja)}`);
+  if (!(caja.escala > 0) || caja.ancho <= 0 || caja.alto <= 0) mal(`escalaPara no da una caja usable con ${nombre}`);
+}
+const modeloRoto = { pantalla: { ancho: 1e400, alto: 640 },
+  raiz: { tipo: "X", rect: { x: 0, y: 0, ancho: 1e400, alto: 10 } } };
+if (vistaPrevia.rectsEscalados(modeloRoto, 360, 640).length !== 0) {
+  mal("rectsEscalados pinta un rect con 1e400");
+}
+for (const roto of [null, Infinity, NaN, "no", {}]) {
+  const r = vistaPrevia.rectsEscalados(
+    { pantalla: { ancho: 10, alto: 10 }, raiz: { tipo: "X", rect: { x: roto, y: 0, ancho: 1, alto: 1 } } }, 10, 10);
+  if (r.length !== 0) mal("rectsEscalados acepta " + String(roto) + " como coordenada");
+  if (!finitos(vistaPrevia.escalaPara({ pantalla: { ancho: 10, alto: 10, x: roto, y: roto } }, 10, 10))) {
+    mal("escalaPara deja NaN con pantalla.x/y = " + String(roto));
+  }
+}
 let cadena = { tipo: "A", rect: { x: 0, y: 0, ancho: 1, alto: 1 }, hijos: [] };
 let punta = cadena;
 for (let i = 0; i < 600; i++) {

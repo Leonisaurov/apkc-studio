@@ -17,6 +17,25 @@
 const PANTALLA_POR_DEFECTO = { x: 0, y: 0, ancho: 360, alto: 640 };
 const NODOS_MAXIMOS = 512;
 
+// Una medida usable. El JSON de apkc trae números, pero un modelo manipulado o una fase futura
+// puede colar `null`, cadenas, `NaN` o `1e400` (que es `Infinity`): ninguno de esos es una
+// medida. Devolver null deja que el llamante use su respaldo en vez de propagar `NaN` al
+// canvas, que se traga los rectángulos sin lanzar nada.
+function aNumero(valor) {
+  if (typeof valor === "number") return Number.isFinite(valor) ? valor : null;
+  if (typeof valor === "string" && valor.trim() !== "") {
+    const n = Number(valor);
+    return Number.isFinite(n) ? n : null;
+  }
+  return null;
+}
+
+// Caja segura para un modelo que no se puede medir: cero rectángulos y `valida: false`, que es
+// lo que el pintor y la línea de estado usan para no fingir una pantalla.
+function cajaNula() {
+  return { escala: 0, x: 0, y: 0, ancho: 0, alto: 0, valida: false };
+}
+
 // Busca, entre las líneas de la consola del comando, la que es el modelo. apkc manda el JSON a
 // stdout (una sola línea) y la línea de cierre a stderr, así que no vale con tomar la última.
 // Devuelve null si no hay ninguna línea que sea un modelo con `raiz` y `pantalla`.
@@ -67,20 +86,31 @@ export function nodosAplanados(modelo) {
 // rectángulo de la pantalla dentro de la caja.
 export function escalaPara(modelo, ancho, alto) {
   const pantalla = (modelo && modelo.pantalla) || {};
-  const anchoPantalla = Number(pantalla.ancho) > 0 ? Number(pantalla.ancho) : PANTALLA_POR_DEFECTO.ancho;
-  const altoPantalla = Number(pantalla.alto) > 0 ? Number(pantalla.alto) : PANTALLA_POR_DEFECTO.alto;
-  const cajaAncho = Number(ancho) > 0 ? Number(ancho) : anchoPantalla;
-  const cajaAlto = Number(alto) > 0 ? Number(alto) : altoPantalla;
+  const anchoDeclarado = aNumero(pantalla.ancho);
+  const altoDeclarado = aNumero(pantalla.alto);
+  const anchoPantalla = anchoDeclarado !== null && anchoDeclarado > 0
+    ? anchoDeclarado : PANTALLA_POR_DEFECTO.ancho;
+  const altoPantalla = altoDeclarado !== null && altoDeclarado > 0
+    ? altoDeclarado : PANTALLA_POR_DEFECTO.alto;
+  const anchoCaja = aNumero(ancho);
+  const altoCaja = aNumero(alto);
+  const cajaAncho = anchoCaja !== null && anchoCaja > 0 ? anchoCaja : anchoPantalla;
+  const cajaAlto = altoCaja !== null && altoCaja > 0 ? altoCaja : altoPantalla;
   const escala = Math.min(cajaAncho / anchoPantalla, cajaAlto / altoPantalla);
-  const x = (cajaAncho - anchoPantalla * escala) / 2 - (Number(pantalla.x) || 0) * escala;
-  const y = (cajaAlto - altoPantalla * escala) / 2 - (Number(pantalla.y) || 0) * escala;
-  return {
+  // 1e400 llega como Infinity y su división da 0 o NaN: ninguna de las dos es una escala
+  if (!Number.isFinite(escala) || escala <= 0) return cajaNula();
+  const x = (cajaAncho - anchoPantalla * escala) / 2 - (aNumero(pantalla.x) || 0) * escala;
+  const y = (cajaAlto - altoPantalla * escala) / 2 - (aNumero(pantalla.y) || 0) * escala;
+  const caja = {
     escala,
     x,
     y,
     ancho: anchoPantalla * escala,
     alto: altoPantalla * escala,
+    valida: true,
   };
+  if (![caja.escala, caja.x, caja.y, caja.ancho, caja.alto].every(Number.isFinite)) return cajaNula();
+  return caja;
 }
 
 // Los rectángulos ya escalados, en el orden de pintado. Un nodo sin `rect` numérico se omite en
@@ -88,22 +118,27 @@ export function escalaPara(modelo, ancho, alto) {
 // ancho o alto menor que 1 px, para que una view diminuta siga viéndose.
 export function rectsEscalados(modelo, ancho, alto) {
   const caja = escalaPara(modelo, ancho, alto);
+  if (!caja.valida) return [];
   const rects = [];
   for (const { nodo, profundidad } of nodosAplanados(modelo)) {
     const r = nodo.rect;
     if (!r || typeof r !== "object") continue;
-    const valores = [r.x, r.y, r.ancho, r.alto].map(Number);
-    if (!valores.every((v) => Number.isFinite(v))) continue;
-    rects.push({
-      x: caja.x + valores[0] * caja.escala,
-      y: caja.y + valores[1] * caja.escala,
-      ancho: Math.max(1, valores[2] * caja.escala),
-      alto: Math.max(1, valores[3] * caja.escala),
+    // las cuatro medidas se leen con la misma regla que la pantalla: `null` o una cadena vacía
+    // no valen cero, valen «este nodo no se puede situar»
+    const x = aNumero(r.x), y = aNumero(r.y), ancho = aNumero(r.ancho), alto = aNumero(r.alto);
+    if ([x, y, ancho, alto].some((v) => v === null)) continue;
+    const escalado = {
+      x: caja.x + x * caja.escala,
+      y: caja.y + y * caja.escala,
+      ancho: Math.max(1, ancho * caja.escala),
+      alto: Math.max(1, alto * caja.escala),
       tipo: String(nodo.tipo || ""),
       id: String(nodo.id || ""),
       texto: textoDeNodo(nodo),
       profundidad,
-    });
+    };
+    if (![escalado.x, escalado.y, escalado.ancho, escalado.alto].every(Number.isFinite)) continue;
+    rects.push(escalado);
   }
   return rects;
 }
@@ -187,6 +222,10 @@ export function pintarModelo(canvas, modelo, medir) {
   ctx.fillStyle = fondo;
   ctx.fillRect(0, 0, ancho, alto);
   const marcoRect = escalaPara(modelo, ancho, alto);
+  if (!marcoRect.valida) {
+    // un modelo sin pantalla medible deja el fondo y lo dice el estado; no se inventan rectángulos
+    return { ancho, alto, nodos: 0, escala: 0, valida: false, modelo };
+  }
   ctx.fillStyle = marco;
   ctx.fillRect(marcoRect.x, marcoRect.y, marcoRect.ancho, marcoRect.alto);
   ctx.strokeStyle = borde;
@@ -226,7 +265,7 @@ export function pintarModelo(canvas, modelo, medir) {
     }
     ctx.restore();
   }
-  return { ancho, alto, nodos: rects.length, escala: marcoRect.escala, modelo };
+  return { ancho, alto, nodos: rects.length, escala: marcoRect.escala, valida: true, modelo };
 }
 
 // Pinta el modelo en el canvas de la página y actualiza la línea de estado. Sin modelo se deja el
@@ -239,7 +278,14 @@ export function pintarVistaPrevia(modelo) {
   ultimoModelo = modelo;
   const canvas = canvasDeLaVista();
   const pintado = pintarModelo(canvas, modelo);
-  const nodos = Number(modelo.nodos) > 0 ? Number(modelo.nodos) : nodosAplanados(modelo).length;
+  if (pintado && pintado.valida === false) {
+    // el modelo llegó, pero su pantalla no es medible: panel vacío y motivo en la línea de estado
+    mensajeVistaPrevia("El modelo de vista previa no trae una pantalla medible (ancho o alto no " +
+      "finitos); no se pinta nada.");
+    return null;
+  }
+  const declarados = aNumero(modelo.nodos);
+  const nodos = declarados !== null && declarados > 0 ? declarados : nodosAplanados(modelo).length;
   const aproximado = modelo.aproximado === false ? "" : " (aproximada)";
   avisoDeLaVista("Vista previa" + aproximado + " de " + (modelo.layout || "el layout") + ": " +
     nodos + " nodos en una pantalla de " +
