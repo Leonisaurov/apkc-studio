@@ -10,6 +10,10 @@
 // /wasm_exec.js: no se copia ni se versiona (regla 2 del repo).
 import { crearFs } from "./fs-fragmento.js";
 
+// Cabecera de un módulo wasm: 00 61 73 6d. Un cuerpo truncado puede venir con 200 y pasar el
+// `ok` del fetch, así que se comprueba antes de confiar en los bytes.
+const magicoWasm = (b) => b && b.length > 7 && b[0] === 0 && b[1] === 0x61 && b[2] === 0x73 && b[3] === 0x6d;
+
 let sistema = null;            // { fs, montar, extraer, lista, ... } — se asigna AL FINAL del init
 let arranque = null;           // la promesa del init en curso: ver iniciar()
 let bytesModule = null;        // los bytes del wasm, una sola bajada; la instancia no se reutiliza
@@ -144,20 +148,28 @@ async function ejecutar(argv, env) {
 
   if (!bytesModule) {
     // El paquete publicado sirve apkc.wasm.gz (3,4 MB frente a 12,8 MB) y se descomprime en el
-    // navegador con DecompressionStream; si no está o no existe la API, cae al .wasm sin comprimir.
-    // Ambos caminos son del mismo origen (regla 4).
+    // navegador con DecompressionStream; si no está, no existe la API o los bytes no son un wasm,
+    // cae al .wasm sin comprimir. Ambos caminos son del mismo origen (regla 4).
+    // Un transporte que trunca el cuerpo devuelve 200 y rompe el arrayBuffer de la respuesta
+    // descomprimida: sin este try el fallback era inalcanzable (hallazgo confirmado por critico).
     let bytes = null;
     if (typeof DecompressionStream === "function") {
-      const comprimido = await fetch("/apkc.wasm.gz");
-      if (comprimido.ok && comprimido.body) {
-        const llano = comprimido.body.pipeThrough(new DecompressionStream("gzip"));
-        bytes = new Uint8Array(await new Response(llano).arrayBuffer());
+      try {
+        const comprimido = await fetch("/apkc.wasm.gz");
+        if (comprimido.ok && comprimido.body) {
+          const llano = comprimido.body.pipeThrough(new DecompressionStream("gzip"));
+          const candidato = new Uint8Array(await new Response(llano).arrayBuffer());
+          if (magicoWasm(candidato)) bytes = candidato;
+        }
+      } catch (e) {
+        console.warn("no se pudo descomprimir apkc.wasm.gz:", e && e.message ? e.message : e);
       }
     }
     if (!bytes) {
       const respuesta = await fetch("/apkc.wasm");
       if (!respuesta.ok) throw new Error("apkc.wasm no está servido (levanta servidor.js con APKC_WASM)");
       bytes = new Uint8Array(await respuesta.arrayBuffer());
+      if (!magicoWasm(bytes)) throw new Error("apkc.wasm llegó truncado o no es un módulo wasm");
     }
     bytesModule = bytes;
   }
