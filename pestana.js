@@ -2584,15 +2584,23 @@ async function decirEstadoDepuracion() {
   }
 }
 
-async function compilarCon(k, tipo) {
+// `opciones.incremental === false` compila sin `--inc`. Solo lo usa la prueba que compara las dos
+// formas de build en la misma pestaña: la página siempre compila con `--inc`, porque saltarse el
+// enlace de recursos cuando `res/` no cambió deja el apk igual entrada por entrada y es el 23 % de
+// la pasada caliente en wasm (docs/plan-incremental-web.md).
+async function compilarCon(k, tipo, opciones = {}) {
   const v4 = document.getElementById("v4-compilar").checked;
   const version = (document.getElementById("sdk-version").value || "34").trim();
   const codename = (document.getElementById("codename").value || "14").trim();
+  const inc = opciones.incremental !== false;
   await hospedador.cwd(PROYECTO);
-  const r = await correr(["build", "--linker", "go", "--compiler", "go",
+  const argv = ["build"];
+  if (inc) argv.push("--inc");
+  argv.push("--linker", "go", "--compiler", "go",
     "--android-jar", RUTA_JAR, "--sdk-version", version, "--codename", codename,
     "--keystore", k.ruta, "--storepass", k.pass, "--keyalias", k.alias,
-    "--v4=" + (v4 ? "true" : "false")]);
+    "--v4=" + (v4 ? "true" : "false"));
+  const r = await correr(argv);
   // la contraseña de release no se queda escrita aunque el build falle
   if (tipo !== "debug") {
     const campoPass = document.getElementById(KEYSTORES.compilar.pass);
@@ -3070,7 +3078,7 @@ export {
   exportarProyecto, importarProyecto, descargarBytes,
   leerAjustes, guardarAjustes, irALinea, saltarALinea, detener, enlazarSalidas,
   decirEstadoDepuracion, abrirBusqueda, cerrarBusqueda, buscarSiguiente,
-  reemplazarUno, reemplazarTodos, irALineaDesdeCuadro,
+  reemplazarUno, reemplazarTodos, irALineaDesdeCuadro, leerZip,
 };
 
 // Puente de compatibilidad para las pruebas de navegador y la consola de desarrollo.
@@ -3097,7 +3105,7 @@ if (typeof window !== "undefined") {
     exportarProyecto, importarProyecto, descargarBytes,
     leerAjustes, guardarAjustes, irALinea, saltarALinea, detener, enlazarSalidas,
     decirEstadoDepuracion, abrirBusqueda, cerrarBusqueda, buscarSiguiente,
-    reemplazarUno, reemplazarTodos, irALineaDesdeCuadro,
+    reemplazarUno, reemplazarTodos, irALineaDesdeCuadro, leerZip,
   });
   // Superficie completa para las pruebas CDP, que evalúan los nombres antiguos. No se usa desde
   // el código de la página; los imports son la vía normal.
