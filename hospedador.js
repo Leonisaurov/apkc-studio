@@ -147,10 +147,25 @@ async function ejecutar(argv, env) {
   };
 
   if (!bytesModule) {
-    // Un cuerpo truncado llega con 200 y con su Content-Length original, así que basta comparar
-    // los bytes recibidos con esa cabecera para saber que la copia (de red o del SW) está podrida.
-    // Se prueba primero la copia cacheada, después una URL nueva que fuerza red, y al final el
-    // binario sin comprimir. Todo del mismo origen (regla 4).
+    // El manifiesto que escribe tools/sitio.sh fija el tamaño y el SHA-256 del binario. Una copia
+    // cacheada o bajada a trozos puede traer 200 y la cabecera de longitud completa, así que solo
+    // se fía de esos dos números. Se prueba la copia del SW, una URL nueva que fuerza red y el binario
+    // sin comprimir. Todo del mismo origen (regla 4).
+    let manifest = null;
+    try {
+      const r = await fetch("/wasm-manifest.json");
+      if (r.ok) manifest = await r.json();
+    } catch (e) { /* sin manifiesto: se cae a la comprobación de cabecera */ }
+    const íntegro = async (candidato) => {
+      if (!magicoWasm(candidato) || candidato.length < 1024) return false;
+      if (manifest && manifest.bytes && candidato.length !== manifest.bytes) return false;
+      if (manifest && manifest.sha256 && typeof crypto !== "undefined" && crypto.subtle) {
+        const h = await crypto.subtle.digest("SHA-256", candidato);
+        const hex = Array.from(new Uint8Array(h)).map((b) => b.toString(16).padStart(2, "0")).join("");
+        if (hex !== manifest.sha256) return false;
+      }
+      return true;
+    };
     const rutas = ["/apkc.wasm.gz", "/apkc.wasm.gz?directo=" + Date.now(),
                    "/apkc.wasm", "/apkc.wasm?directo=" + Date.now()];
     for (const ruta of rutas) {
@@ -169,10 +184,11 @@ async function ejecutar(argv, env) {
           const llano = new Blob([crudo]).stream().pipeThrough(new DecompressionStream("gzip"));
           candidato = new Uint8Array(await new Response(llano).arrayBuffer());
         }
-        if (magicoWasm(candidato) && candidato.length > 1024) {
+        if (await íntegro(candidato)) {
           bytesModule = candidato;
           break;
         }
+        console.warn("wasm no íntegro en", ruta, candidato.length, "bytes");
       } catch (e) {
         console.warn("no se pudo cargar", ruta + ":", e && e.message ? e.message : e);
       }
