@@ -431,6 +431,29 @@ kbd {
   max-width: none;
 }
 
+/* ---- vista previa del apk -------------------------------------------------
+   Solo lectura: un canvas que pinta el modelo de `apkc preview` con los colores del tema. El
+   tamaño en CSS fija la caja; el pintor la encaja sin deformar la pantalla del modelo. */
+.previa-cab { max-width: 78ch; margin-bottom: 16px; }
+.previa-cuerpo { display: flex; gap: 18px; align-items: flex-start; flex-wrap: wrap; }
+.previa-marco {
+  background: var(--superficie2);
+  border: 1px solid var(--borde2);
+  border-radius: 6px;
+  padding: 10px;
+}
+.previa-canvas {
+  display: block;
+  width: 270px;
+  height: 480px;
+  max-width: 100%;
+  background: var(--superficie);
+  border: 1px solid var(--borde);
+  border-radius: 4px;
+}
+.previa-lado { flex: 1 1 240px; min-width: 220px; max-width: 52ch; }
+.previa-lado .nota { margin: 0 0 10px; }
+
 /* ---- contenido de Inicio -------------------------------------------------- */
 
 h1, h2, h3 { margin: 0; font-weight: 600; }

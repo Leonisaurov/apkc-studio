@@ -26,7 +26,7 @@ No se copia ninguna pieza de VS Code ni se carga ningún editor de terceros.
 +--------------------------------------------------------------------------+
 | barra de titulo: semaforo, "apkc studio - Mi app", "sin conexion"        |
 +------+-------------------+-----------------------------------------------+
-| act. | EXPLORADOR        | pestanas de vista: Inicio | Editor            |
+| act. | EXPLORADOR        | pestanas de vista: Inicio | Editor | Vista    |
 |      | COM.MI.APP        +-----------------------------------------------+
 |      | arbol del         | fichero  [Guardar] [Archivo v] [Compilar]     |
 |      | proyecto          +-----------------------------------------------+
@@ -52,13 +52,44 @@ se abre, el editor se encoge y conserva su propio scroll.
 
 `vistas.js` es el unico fichero que decide que vista se ve:
 
-- `mostrar(vista)` activa la seccion `#crear` o `#pestana`, marca el boton de la barra de
-  actividad y la pestana de vista, escribe `document.body.dataset.vista`, cambia
+- `mostrar(vista)` activa la seccion `#crear`, `#pestana` o `#vista`, marca el boton de la barra
+  de actividad y la pestana de vista, escribe `document.body.dataset.vista`, cambia
   `#vistas.modo-editor` y actualiza `#estado-general`.
 - Los botones `[data-vista]` de la barra de actividad y las pestanas `.pestana-vista` comparten
-  el mismo manejador; el hash (`#crear`, `#pestana`) tambien cambia de vista.
+  el mismo manejador; el hash (`#crear`, `#pestana`, `#vista`) tambien cambia de vista.
+- Al entrar en `#vista`, `vistas.js` llama a `repintarVistaPrevia()`: compilar puede ocurrir con
+  la vista oculta y entonces el canvas mide cero, así que el primer pintado usa el tamaño de
+  respaldo y se rehace al mostrarla.
 - Al arrancar, `iniciarPestana()` (en `pestana.js`) abre el `AndroidManifest.xml` si ya hay un
   proyecto en OPFS y pulsa la vista Editor. Si no hay proyecto, deja Inicio con el formulario.
+
+## Vista previa
+
+La tercera vista (`#vista`, clases `vista vista-previa`) es de **solo lectura**: pinta en un
+`<canvas>` el modelo que `apkc preview` imprime para el apk recién compilado. No se arrastra, no
+se edita el layout y no hay estado de documento.
+
+| Id | Qué es |
+| --- | --- |
+| `#vista-previa` | el `<canvas>`; `role="img"` y un `aria-label` que lo describen |
+| `#vista-previa-estado` | la línea de estado: «compila el proyecto» o el número de nodos del modelo |
+
+`vista-previa.js` separa las dos mitades:
+
+- **Modelo puro, probado en node** (`prueba.js`): `modeloDeSalida()` encuentra la línea JSON del
+  modelo entre la consola de apkc; `textoDeNodo()` prefiere un campo de texto dinámico (`texto…`
+  distinto de `texto`) y cae a `texto`; `nodosAplanados()` recorre el árbol en orden y pone cota;
+  `escalaPara()` encaja la pantalla en la caja sin deformarla; `rectsEscalados()` devuelve un
+  rectángulo por nodo y omite los que no traen `rect` numérico.
+- **Pintura** (`pintarModelo`, `pintarVistaPrevia`, `repintarVistaPrevia`,
+  `mensajeVistaPrevia`): lee los colores de las variables CSS del tema, nunca de literales, así
+  que los tres mundos de `DESIGN.md` se ven sin tocar el pintor.
+
+`pestana.js` llama a `previsualizarLoCompilado()` **después** de un build correcto, con
+`hospedador.ejecutar(["preview", "build/app.apk"])` y no con `correr()`: no es una orden de la
+persona, así que no pisa `#ultimo-codigo` ni la consola, y si el comando falla se queda en un
+mensaje del panel sin tocar el resultado de la compilación. Un campo nuevo en el JSON (por
+ejemplo el texto dinámico de la Fase 2) no rompe nada: se ignoran las claves que no se usan.
 
 ## Diagnóstico
 
@@ -442,7 +473,7 @@ En `@media (max-width: 760px)`:
 | Comando | Que cubre |
 | --- | --- |
 | `node studio/prueba.js` | genera el zip, comprueba EOCD, plantillas, reglas, ids de `index.html` (también los de `diagnostico.js`, `temas.js` e `historial.js`), el resaltador puro y el undo tree (ramas, reconstrucción y poda) |
-| `node studio/prueba-navegador.js` | `http` sin COOP/COEP: DOM, dos vistas, dos botones de actividad, reflejo del nombre/package, aviso de que no hay OPFS, localStorage, el diagnóstico, los temas y la paleta ANSI |
+| `node studio/prueba-navegador.js` | `http` sin COOP/COEP: DOM, tres vistas, tres botones de actividad, reflejo del nombre/package, aviso de que no hay OPFS, localStorage, el diagnóstico, los temas y la paleta ANSI |
 | `APKC_WASM=... node studio/prueba-crear.js` | por http con OPFS: crear, escribir el proyecto, abrir el manifiesto, comprobar `data-ruta` del arbol, el icono, API 34, el árbol cerrado con sus botones, que `build/` se vea como generado y que el filtro conserve las carpetas, subir un archivo, moverlo de carpeta, exportar/importar el `.zip` (con binario), leer y guardar los ajustes en el manifiesto, varias pestañas, la persistencia tras recargar, el undo tree con ramas/IndexedDB, dos ventanas que se pasan guardados por BroadcastChannel y la fusión/conflicto de la misma línea |
 | `APKC_WASM=... APK_EJEMPLO=... KS_EJEMPLO=... ANDROID_JAR=... node studio/prueba-pestana.js` | 83 comprobaciones: editar, guardar, recargar, resaltar, números de línea, scroll de las tres capas, Tab/Shift+Tab/Enter con deshacer, jar del SDK local, `.zip` oficial con sus términos, compilar debug sin keystore, barra de descargas con descarga real, consola con colores ANSI, menú de fichero, renombrar/borrar, pantalla de carga, firmar, compilar release, verificar, recargar sin red, no pedir nada fuera del origen, la salida por trozos, el enlace `ruta:línea`, Detener y la fase en la barra |
 | `APKC=... APKC_WASM=... sh studio/e2e.sh` | todo lo anterior más los apk/aab nativos y la plantilla Contador; en la pestaña, 83 comprobaciones |

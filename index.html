@@ -118,6 +118,9 @@
       <button data-vista="pestana" type="button" title="Editor" aria-label="Editor">
         <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 4h7l2 2h7v14H4z"/><path d="M4 10h16"/></svg>
       </button>
+      <button data-vista="vista" type="button" title="Vista previa" aria-label="Vista previa">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><rect x="7" y="3" width="10" height="18" rx="2"/><path d="M11 18h2"/></svg>
+      </button>
     </nav>
 
     <aside class="lateral" aria-label="Explorador del proyecto">
@@ -153,6 +156,7 @@
       <div class="pestanas" id="pestanas">
         <button class="pestana-vista activa" data-vista="crear" type="button">Inicio</button>
         <button class="pestana-vista" data-vista="pestana" type="button">Editor</button>
+        <button class="pestana-vista" data-vista="vista" type="button">Vista</button>
         <span class="pestanas-der"><span id="estado-pestana-cab" class="tenue"></span></span>
       </div>
 
@@ -463,6 +467,27 @@
                   <p class="nota" id="estado-linaje">sin linaje</p>
                 </details>
               </div>
+            </div>
+          </div>
+        </section>
+
+        <section id="vista" class="vista vista-previa">
+          <div class="previa-cab">
+            <h1>Vista previa</h1>
+            <p class="sub">La primera pantalla del apk que se acaba de compilar, leída por
+              <code>apkc preview</code>: un rectángulo por view con su tipo, su id y su texto. Es una
+              aproximación declarada y de solo lectura: no se arrastra ni se edita el layout.</p>
+          </div>
+          <div class="previa-cuerpo">
+            <div class="previa-marco">
+              <canvas id="vista-previa" class="previa-canvas" width="360" height="640"
+                      role="img" aria-label="Vista previa aproximada de la primera pantalla del apk"></canvas>
+            </div>
+            <div class="previa-lado">
+              <p class="nota" id="vista-previa-estado" role="status" aria-live="polite">Compila el
+                proyecto para ver aquí el modelo del apk.</p>
+              <p class="nota">Se actualiza al compilar. Fuentes, imágenes, márgenes finos y estilos
+                fieles quedan fuera de esta fase: el modelo lo dice con <code>"aproximado": true</code>.</p>
             </div>
           </div>
         </section>

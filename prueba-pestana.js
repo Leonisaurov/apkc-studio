@@ -153,6 +153,28 @@ async function conductor() {
       JSON.stringify(aislamiento));
   }
 
+  // 0b. la tercera vista, antes de compilar nada: se abre, marca `data-vista` y deja el canvas
+  // vacío con un mensaje. Es lo que ve quien entra sin apk y no puede parecer un fallo.
+  const previaVacia = await evaluar(`(() => {
+    document.querySelector('nav.actividad [data-vista="vista"]').click();
+    const canvas = document.getElementById("vista-previa");
+    return {
+      botones: document.querySelectorAll("nav.actividad [data-vista]").length,
+      activa: document.getElementById("vista").classList.contains("activa"),
+      cuerpo: document.body.dataset.vista,
+      estado: document.getElementById("vista-previa-estado").textContent,
+      rol: canvas.getAttribute("role"),
+      arrastrable: canvas.draggable === true || canvas.hasAttribute("contenteditable"),
+    };
+  })()`);
+  comprueba("la barra de actividad tiene tres vistas y la de vista previa se abre",
+    previaVacia.botones === 3 && previaVacia.activa === true && previaVacia.cuerpo === "vista",
+    JSON.stringify(previaVacia));
+  comprueba("sin apk la vista previa queda vacía con un mensaje y un canvas de solo lectura",
+    /[Cc]ompila/.test(String(previaVacia.estado)) && previaVacia.rol === "img" && previaVacia.arrastrable === false,
+    JSON.stringify(previaVacia));
+  await evaluar(`document.querySelector('nav.actividad [data-vista="crear"]').click()`);
+
   // 1. crear el proyecto CON apkc dentro de la pestaña, desde cero: OPFS es por origen y una
   // sesión anterior puede haber dejado /proyecto, que entonces se traga el create
   await evaluar(`(async () => { await hospedador.limpiar("/proyecto"); return true; })()`);
@@ -989,6 +1011,44 @@ async function conductor() {
     comprueba("y su apk verifica con la anonima, el if y la concatenación dentro",
       contador.v1 === true && contador.v2 === true,
       JSON.stringify(String(contador.detalle).slice(-180)));
+
+    // 12a-bis. la vista previa que se pintó al compilar: al entrar en la vista se repinta dentro
+    // de la caja visible, con un color de fondo, el marco y cada rectángulo. El canvas es de solo
+    // lectura y el comando no pasó por la consola ni pisó el último código del build.
+    const previa = await evaluar(`(() => {
+      document.querySelector('nav.actividad [data-vista="vista"]').click();
+      const canvas = document.getElementById("vista-previa");
+      const ctx = canvas.getContext("2d");
+      const datos = ctx.getImageData(0, 0, canvas.width, canvas.height).data;
+      const colores = new Set();
+      for (let i = 0; i < datos.length; i += 4) {
+        colores.add(datos[i] + "," + datos[i + 1] + "," + datos[i + 2] + "," + datos[i + 3]);
+      }
+      const r = {
+        cuerpo: document.body.dataset.vista,
+        activa: document.getElementById("vista").classList.contains("activa"),
+        estado: document.getElementById("vista-previa-estado").textContent,
+        colores: colores.size,
+        pixel: canvas.width > 0 && canvas.height > 0,
+        visible: canvas.clientWidth,
+        ancho: canvas.width,
+        alto: canvas.height,
+        codigo: document.getElementById("ultimo-codigo").textContent,
+        enConsola: /apkc preview/.test(document.getElementById("consola-pestana").textContent),
+      };
+      document.querySelector('nav.actividad [data-vista="pestana"]').click();
+      return r;
+    })()`);
+    comprueba("la vista previa pinta el modelo del apk compilado en el canvas",
+      /3 nodos/.test(String(previa.estado)) && previa.colores > 3 && previa.pixel === true,
+      JSON.stringify(previa).slice(0, 260));
+    comprueba("al entrar en Vista se repinta dentro de la caja visible y avisa de que es aproximada",
+      previa.cuerpo === "vista" && previa.activa === true && previa.visible > 0 &&
+      previa.ancho >= previa.visible && /aproximada/.test(String(previa.estado)),
+      JSON.stringify({ cuerpo: previa.cuerpo, visible: previa.visible, ancho: previa.ancho, estado: previa.estado }).slice(0, 260));
+    comprueba("la vista previa no ensucia la consola ni el último código del build",
+      previa.codigo === "0" && previa.enConsola === false,
+      JSON.stringify({ codigo: previa.codigo, enConsola: previa.enConsola }));
     fs.writeFileSync(path.join(fuera, "pestanera-contador.apk"), apkContador);
     console.log("  --- el apk de la app del contador, compilado en la pestaña, es " +
       path.join(fuera, "pestanera-contador.apk"));

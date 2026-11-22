@@ -102,6 +102,13 @@ const conductor = `(async () => {
   r.editorVisible = document.getElementById("pestana").classList.contains("activa") &&
     !document.getElementById("crear").classList.contains("activa");
   r.estadoBarra = document.getElementById("estado-general").textContent;
+  // la tercera vista: pestaña, botón de actividad y su sección, sin wasm (aquí solo es DOM)
+  document.querySelector('.pestana-vista[data-vista="vista"]').click();
+  r.vistaPreviaVisible = document.getElementById("vista").classList.contains("activa") &&
+    !document.getElementById("pestana").classList.contains("activa");
+  r.estadoPrevia = document.getElementById("estado-general").textContent;
+  r.avisoPrevia = document.getElementById("vista-previa-estado").textContent;
+  r.canvasPrevia = !!document.getElementById("vista-previa");
   document.querySelector('.pestana-vista[data-vista="crear"]').click();
   r.vueltaInicio = document.getElementById("crear").classList.contains("activa");
 
@@ -202,12 +209,16 @@ function comprueba(cond, msg) { if (!cond) { fallos++; console.log("  FALLO:", m
     comprueba(v.lang === "es" && /Saltar/.test(v.salto) && v.principal === -1,
       "falta el enlace de salto o el destino con foco programable: " +
         JSON.stringify({ lang: v.lang, salto: v.salto, principal: v.principal }));
-    comprueba(v.vistas.join(",") === "Inicio,Editor", "las pestañas no son las dos medidas: " + v.vistas);
-    comprueba(v.actividad.join(",") === "crear,pestana", "la barra de actividad no tiene las dos vistas: " + v.actividad);
+    comprueba(v.vistas.join(",") === "Inicio,Editor,Vista", "las pestañas no son las tres medidas: " + v.vistas);
+    comprueba(v.actividad.join(",") === "crear,pestana,vista", "la barra de actividad no tiene las tres vistas: " + v.actividad);
     comprueba(v.tituloTrasNombre === "Prueba", "el nombre no llegó a la barra de título: " + v.tituloTrasNombre);
     comprueba(v.paqueteLateral === "com.prueba.app", "el package no llegó al explorador: " + v.paqueteLateral);
     comprueba(v.editorVisible, "la pestaña Editor no se abrió");
     comprueba(v.estadoBarra === "Editor", "la barra de estado no dijo Editor: " + v.estadoBarra);
+    comprueba(v.vistaPreviaVisible && v.estadoPrevia === "Vista" && v.canvasPrevia,
+      "la vista previa no abre su sección: " + JSON.stringify(v));
+    comprueba(/[Cc]ompila/.test(String(v.avisoPrevia)),
+      "sin apk, la vista previa no pide compilar: " + JSON.stringify(v.avisoPrevia));
     comprueba(v.vueltaInicio, "no se pudo volver a Inicio");
     comprueba(v.icono, "falta el campo del icono");
     // Sin APKC_WASM esta prueba es solo de DOM: basta con que el SW haya aislado la página y el

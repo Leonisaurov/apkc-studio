@@ -8,9 +8,11 @@ import {
   hayDocumentosSucios, confirmarDescartes, limpiarEstadoEditor,
   conBloqueo, publicar,
 } from "./pestana.js";
+import { repintarVistaPrevia } from "./vista-previa.js";
 
 (() => {
-  const NOMBRES = { crear: "Inicio", pestana: "Editor" };
+  // tres vistas: Inicio, Editor y la vista previa del apk compilado
+  const NOMBRES = { crear: "Inicio", pestana: "Editor", vista: "Vista" };
 
   function mostrar(vista) {
     if (!document.getElementById(vista)) vista = "crear";
@@ -23,6 +25,9 @@ import {
       else boton.classList.toggle("activo", activo);
     }
     document.body.dataset.vista = vista;
+    // al entrar en Vista se repinta con el último modelo: compilar puede ocurrir con esta pestaña
+    // oculta y entonces el canvas mide cero, así que el primer pintado usa el tamaño de respaldo
+    if (vista === "vista") repintarVistaPrevia();
     const estado = document.getElementById("estado-general");
     if (estado) estado.textContent = NOMBRES[vista] || vista;
     const vistas = document.getElementById("vistas");

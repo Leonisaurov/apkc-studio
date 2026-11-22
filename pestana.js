@@ -8,6 +8,7 @@ import { CONSOLA, pintarConsola, consolaHtml, textoHtml, enlazarSalidas,
   mostrarCarga, ocultarCarga, conCarga } from "./consola.js";
 import { leerZip, zipDelArbol, paqueteDelManifiesto, nombreDeZip,
   ajustesDelManifiesto, conAjustes } from "./proyecto.js";
+import { modeloDeSalida, pintarVistaPrevia, mensajeVistaPrevia } from "./vista-previa.js";
 
 // La pestaña que hace: editor de fuente + un arbol en OPFS + los comandos de apkc.wasm.
 //
@@ -2592,8 +2593,37 @@ async function compilarCon(k, tipo) {
     await descargar(PROYECTO + "/build/app.apk", "descargar-apk-compilada");
     await ofrecerDescarga(PROYECTO + "/build/app.apk.idsig", "descargar-idsig-compilada");
     await verificarLoCompilado();
+    // el build ya está bien; la vista previa es un extra y su fallo no puede convertirlo en fallo
+    await previsualizarLoCompilado();
   }
   return r;
+}
+
+// La vista previa después de compilar: `apkc preview` lee el apk recién escrito y devuelve una
+// línea de JSON con el modelo de su primera pantalla. Va por `hospedador.ejecutar` y no por
+// `correr()` a propósito: no es una orden de la persona, así que no pisa `#ultimo-codigo` ni la
+// consola, y si falla se queda en un mensaje del panel sin tocar el resultado del build.
+async function previsualizarLoCompilado() {
+  try {
+    const apk = await hospedador.bytes(PROYECTO + "/build/app.apk");
+    if (!apk || !apk.length) {
+      mensajeVistaPrevia("No hay build/app.apk que previsualizar: compila el proyecto primero.");
+      return null;
+    }
+    await hospedador.cwd(PROYECTO);
+    const r = await hospedador.ejecutar(["preview", "build/app.apk"]);
+    const modelo = modeloDeSalida(r && r.consola);
+    if (!modelo) {
+      const lineas = String((r && (r.error || r.consola)) || "").trim().split("\n").filter(Boolean);
+      const motivo = lineas.length ? lineas[lineas.length - 1].trim() : "";
+      mensajeVistaPrevia("apkc preview no devolvió un modelo legible" + (motivo ? ": " + motivo : "."));
+      return null;
+    }
+    return pintarVistaPrevia(modelo);
+  } catch (e) {
+    mensajeVistaPrevia("no se pudo leer la vista previa: " + (e && e.message ? e.message : e));
+    return null;
+  }
 }
 
 async function compilarDebug() {
@@ -3006,7 +3036,7 @@ export {
   pedirSubida, subirSeleccion, renderHistorial, restaurarNodoHistorial,
   limpiarHistorial, resaltar, esXml, textoHtml, consolaHtml,
   jarDeSeleccion, extraerJarDeZip, sincronizarApi, moverRuta, revelarRuta,
-  verificarLoCompilado, inspeccionarKeystore, crearLinaje, guardarPersistencia,
+  verificarLoCompilado, previsualizarLoCompilado, inspeccionarKeystore, crearLinaje, guardarPersistencia,
   documentoActivo, documentoDe, volcarHistorial, programarHistorial,
   aplicarNodoHistorial, historialDe, conCarga, mostrarCarga, ocultarCarga,
   pintarConsola, KEYSTORES, DEBUG_KEY, RUTA_JAR, RUTA_LINAJE, RUTA_VIEJO,
@@ -3033,7 +3063,7 @@ if (typeof window !== "undefined") {
     pedirSubida, subirSeleccion, renderHistorial, restaurarNodoHistorial,
     limpiarHistorial, resaltar, esXml, textoHtml, consolaHtml,
     jarDeSeleccion, extraerJarDeZip, sincronizarApi, Historial, moverRuta,
-    revelarRuta, verificarLoCompilado, inspeccionarKeystore, crearLinaje,
+    revelarRuta, verificarLoCompilado, previsualizarLoCompilado, inspeccionarKeystore, crearLinaje,
     guardarPersistencia, documentoActivo, documentoDe, volcarHistorial,
     programarHistorial, aplicarNodoHistorial, historialDe, conCarga,
     mostrarCarga, ocultarCarga, pintarConsola, KEYSTORES, DEBUG_KEY,

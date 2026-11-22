@@ -9,6 +9,7 @@ import { Historial } from "./historial.js";
 import { fusionar } from "./fusion.js";
 import { leerZip, zipDelArbol, paqueteDelManifiesto, nombreDeZip, rutaSegura,
   ajustesDelManifiesto, conAjustes } from "./proyecto.js";
+import * as vistaPrevia from "./vista-previa.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const a = { buildProject, makeZip, analyze, RULES, crc32 };
@@ -167,14 +168,88 @@ for (const m of js.matchAll(/getElementById\("([^"]+)"\)/g))
 const pestana = fs.readFileSync(path.join(__dirname, "pestana.js"), "utf8");
 for (const m of pestana.matchAll(/getElementById\("([^"]+)"\)/g))
   if (!ids.has(m[1])) mal(`pestana.js pide #${m[1]} y index.html no lo tiene`);
-for (const fichero of ["diagnostico.js", "temas.js", "historial.js"]) {
+for (const fichero of ["diagnostico.js", "temas.js", "historial.js", "vista-previa.js"]) {
   const fuente = fs.readFileSync(path.join(__dirname, fichero), "utf8");
   for (const m of fuente.matchAll(/getElementById\("([^"]+)"\)/g))
     if (!ids.has(m[1])) mal(`${fichero} pide #${m[1]} y index.html no lo tiene`);
 }
+// la tercera vista es contrato: su botón en la barra de actividad, su pestaña y su sección. Sin
+// el id, vistas.js cae a Inicio y la vista previa nunca se ve.
+const botonesVista = [...html.matchAll(/<button[^>]*data-vista="([^"]+)"/g)].map((m) => m[1]);
+for (const v of botonesVista) if (!ids.has(v)) mal(`el botón data-vista="${v}" no tiene sección con ese id`);
+if (!botonesVista.includes("vista")) mal("nav.actividad no tiene el botón de la vista previa");
+if (!/class="pestana-vista"[^>]*data-vista="vista"|data-vista="vista"[^>]*class="pestana-vista"/.test(html)) {
+  mal("la pestaña .pestana-vista de la vista previa no está en index.html");
+}
 for (const m of html.matchAll(/<input[^>]*name="([^"]+)"/g))
   if (!new RegExp(`"(f\\.get|f\\.has)\\(\"${m[1]}\"`).test(js) && !js.includes(`"${m[1]}"`))
     mal(`el formulario tiene ${m[1]} y estado() no lo lee`);
+
+// 6b. la vista previa: el modelo de `apkc preview` y el pintor. Las funciones de modelo son puras
+//     (sin DOM) y esta es su prueba de node; que el canvas pinte se comprueba en chromium. El
+//     modelo es el medido sobre la plantilla Contador (docs/plan-vista-previa.md, Fase 1).
+const modeloPrevia = {
+  paquete: "com.hola.contador", version: "0.1", actividad: ".MainActivity",
+  layout: "res/layout/main.xml",
+  pantalla: { x: 0, y: 0, ancho: 360, alto: 640 }, aproximado: true, nodos: 3,
+  raiz: {
+    tipo: "LinearLayout", ancho: "match_parent", alto: "match_parent",
+    rect: { x: 0, y: 0, ancho: 360, alto: 640 },
+    hijos: [
+      { tipo: "TextView", id: "id/total", idRef: "0x7f010001", texto: "Pulsos: 0",
+        estilo: "@0x01030042", ancho: "wrap_content", alto: "wrap_content",
+        rect: { x: 0, y: 0, ancho: 88, alto: 24 } },
+      { tipo: "Button", id: "id/pulsar", idRef: "0x7f010000", texto: "Pulsar",
+        ancho: "wrap_content", alto: "wrap_content",
+        rect: { x: 0, y: 24, ancho: 64, alto: 48 } },
+    ],
+  },
+};
+const lineaModelo = "un aviso suelto\n" + JSON.stringify(modeloPrevia) + "\n[apkc] finished in 3ms\n";
+const leido = vistaPrevia.modeloDeSalida(lineaModelo);
+if (!leido || leido.layout !== "res/layout/main.xml" || leido.raiz.tipo !== "LinearLayout") {
+  mal("modeloDeSalida no encuentra la línea del modelo entre la consola");
+}
+if (vistaPrevia.modeloDeSalida("sin json\n[apkc] finished") !== null) mal("modeloDeSalida inventa un modelo sin JSON");
+if (vistaPrevia.modeloDeSalida('{"no":"es un modelo"}') !== null) mal("modeloDeSalida acepta un JSON que no es un modelo");
+// el texto: `texto` es el respaldo y un campo de texto dinámico de la Fase 2 gana sin romper nada
+if (vistaPrevia.textoDeNodo({ texto: "Pulsos: 0" }) !== "Pulsos: 0") mal("textoDeNodo no lee texto");
+if (vistaPrevia.textoDeNodo({ texto: "Pulsos: 0", textoDinamico: "Pulsos: 3" }) !== "Pulsos: 3") {
+  mal("textoDeNodo no prefiere el texto dinámico");
+}
+if (vistaPrevia.textoDeNodo({ texto: "estático", otraCosa: "x" }) !== "estático") mal("textoDeNodo se pierde con campos nuevos");
+if (vistaPrevia.textoDeNodo(null) !== "" || vistaPrevia.textoDeNodo({}) !== "") mal("textoDeNodo no tolera nodos vacíos");
+const planos = vistaPrevia.nodosAplanados(modeloPrevia);
+if (planos.length !== 3 || planos[0].nodo.tipo !== "LinearLayout" || planos[1].nodo.tipo !== "TextView") {
+  mal("nodosAplanados no recorre el árbol en orden: " + planos.map((p) => p.nodo.tipo).join(","));
+}
+const cajaPrevia = vistaPrevia.escalaPara(modeloPrevia, 360, 640);
+if (cajaPrevia.escala !== 1 || cajaPrevia.x !== 0 || cajaPrevia.y !== 0) mal("escalaPara no deja 1:1 la pantalla de 360x640");
+const cajaDoble = vistaPrevia.escalaPara(modeloPrevia, 720, 1280);
+if (cajaDoble.escala !== 2 || cajaDoble.ancho !== 720 || cajaDoble.alto !== 1280) mal("escalaPara no escala x2");
+const rectsPrevia = vistaPrevia.rectsEscalados(modeloPrevia, 720, 1280);
+if (rectsPrevia.length !== 3) mal("rectsEscalados no devuelve un rectángulo por nodo: " + rectsPrevia.length);
+const [raizR, totalR, botonR] = rectsPrevia;
+if (raizR.x !== 0 || raizR.y !== 0 || raizR.ancho !== 720 || raizR.alto !== 1280 || raizR.profundidad !== 0) {
+  mal("el rectángulo de la raíz no cubre la pantalla escalada");
+}
+if (totalR.x !== 0 || totalR.y !== 0 || totalR.ancho !== 176 || totalR.alto !== 48 || totalR.texto !== "Pulsos: 0") {
+  mal("el rectángulo del TextView no coincide con el modelo: " + JSON.stringify(totalR));
+}
+if (totalR.tipo !== "TextView" || totalR.id !== "id/total") mal("el rectángulo no lleva tipo e id");
+if (botonR.y !== 48 || botonR.ancho !== 128 || botonR.alto !== 96) {
+  mal("el rectángulo del Button no coincide con el modelo: " + JSON.stringify(botonR));
+}
+// un nodo sin rect se omite en vez de pintarse en (0,0); y la cota corta un árbol desmedido
+const sinRect = { pantalla: { ancho: 100, alto: 100 }, raiz: { tipo: "X", hijos: [{ tipo: "Y" }] } };
+if (vistaPrevia.rectsEscalados(sinRect, 100, 100).length !== 0) mal("rectsEscalados pinta un nodo sin rect");
+let cadena = { tipo: "A", rect: { x: 0, y: 0, ancho: 1, alto: 1 }, hijos: [] };
+let punta = cadena;
+for (let i = 0; i < 600; i++) {
+  const hijo = { tipo: "A" + i, rect: { x: 0, y: 0, ancho: 1, alto: 1 }, hijos: [] };
+  punta.hijos.push(hijo); punta = hijo;
+}
+if (vistaPrevia.nodosAplanados({ raiz: cadena }).length > 512) mal("nodosAplanados no pone cota al árbol");
 
 // 7. el resaltador del editor es puro y se puede probar sin DOM; si se rompe, el código se
 // queda sin color o, peor, el HTML del resaltado se come el texto
