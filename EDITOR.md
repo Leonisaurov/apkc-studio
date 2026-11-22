@@ -171,11 +171,17 @@ del panel, que a su vez contiene los ocho tiradores y el `<aside>`:
 | `#previa-paleta` | la paleta de añadir elementos (`role="toolbar"`), capa flotante a la izquierda del dibujo; `hidden` fuera del modo editar; lleva `data-plegada` |
 | `#previa-paleta-titulo`, `#previa-paleta-plegar`, `#previa-paleta-scroll` | la cabecera («Añadir»), el botón que pliega la paleta (`aria-expanded`, `aria-controls`) y la lista con scroll por categorías (`tabindex="0"`, `aria-label`) |
 | `#previa-anadir-textview`, `#previa-anadir-edittext`, `#previa-anadir-button`, `#previa-anadir-imagebutton`, `#previa-anadir-imageview`, `#previa-anadir-checkbox`, `#previa-anadir-radiobutton`, `#previa-anadir-switch`, `#previa-anadir-progressbar`, `#previa-anadir-seekbar`, `#previa-anadir-view`, `#previa-anadir-space`, `#previa-anadir-linearlayout`, `#previa-anadir-framelayout`, `#previa-anadir-relativelayout`, `#previa-anadir-scrollview`, `#previa-anadir-tablelayout`, `#previa-anadir-gridlayout` | los botones de la paleta; cada uno con `data-tipo` y `aria-label` (los tipos con `*` dibujan un bloque que no imita la vista). El orden y los grupos son los de `gruposPaleta()` |
-| `#previa-propiedades`, `#previa-propiedades-titulo`, `#previa-propiedades-campos` | la ficha de propiedades del nodo seleccionado (incluida la raíz), capa flotante arriba a la derecha; `hidden` si no hay nodo o no está el modo editar; lleva `data-plegada` |
-| `#previa-propiedades-plegar`, `#previa-propiedades-cerrar` | pliegan la ficha (`aria-expanded`) y la cierran (suelta el nodo, como `Esc`) |
+| `#previa-propiedades`, `#previa-propiedades-titulo`, `#previa-propiedades-campos` | la ficha de propiedades del nodo seleccionado (incluida la raíz, con tipo/orientación/padding/fondo), capa flotante arriba a la derecha; `hidden` si no hay nodo o no está el modo editar; lleva `data-plegada`. En una imagen, el control de `android:src` trae «Elegir fichero» (con `role="button"`), el selector de iconos del sistema y `aria-label="Arrastra una imagen o pulsa Elegir fichero"` |
 | `#previa-propiedades-vacio` | el aviso de la ficha cuando no hay nada seleccionado (queda oculto: sin selección no hay ficha) |
-| `#previa-seleccionar-raiz` | el botón que selecciona el layout raíz sin tocar el dibujo |
-| `#previa-editar-estado` | el estado del modo editar: qué está seleccionado, el último cambio o el motivo por el que no se puede editar (`role="status"`) |
+| `#previa-propiedades-plegar`, `#previa-propiedades-cerrar` | pliegan la ficha (`aria-expanded`) y la cierran (suelta el nodo, como `Esc`) |
+| `#previa-editar-estado` | el estado del modo editar, al pie de la paleta: qué está seleccionado, el último cambio o el motivo por el que no se puede editar (`role="status"`) |
+| `#previa-jerarquia` | la capa del **visor de jerarquía** (`hidden` hasta que se abre); `#previa-jerarquia-lista` son sus filas (`button[data-ruta]`, con `activa` y `aria-current`) y `#previa-jerarquia-cerrar` la cierra |
+| `#previa-jerarquia-alternar` | el interruptor del visor en la barra de acciones; `aria-pressed` y `aria-controls="previa-jerarquia"` |
+| `#previa-editar-deshacer`, `#previa-editar-rehacer` | deshacer y rehacer del **historial del diseñador** (`aria-keyshortcuts`); `disabled` cuando no hay pasos |
+| `#previa-editar-eliminar`, `#previa-propiedades-eliminar` | la basura: borran el nodo seleccionado (`aria-label="Eliminar elemento"`); la raíz se rechaza con mensaje |
+| `#previa-propiedades-padre` | «↑ Padre»: sube la selección al contenedor; `disabled` en la raíz |
+| `#previa-destino-linea`, `#previa-destino-hueco` | las dos formas del **indicador de destino** del arrastre (línea en un lineal, hueco discontinuo en un marco); `hidden` fuera del gesto |
+| `#previa-imagen-archivo` | el `<input type="file" accept="image/*">` oculto del campo de imagen |
 | `#previa-lateral-canvas`, `#previa-render-estado` | el canvas del emulador (enfocable y pulsable) y su línea de estado |
 | `#previa-seccion-pulsos`, `#previa-seccion-registro`, `#previa-seccion-consola` | las tres secciones del emulador en el panel (`role="tab"`, `aria-selected`, `aria-controls`); Pulsar es la de por defecto |
 | `#previa-pulsos`, `#previa-oyentes`, `#previa-pulsos-cuenta`, `#previa-pulsos-nota` | la sección de pulsar: los botones de las vistas con `OnClickListener`, la cuenta de clics y la nota cuando no hay a quién pulsar |
@@ -294,7 +300,11 @@ panel lo apaga, y el modo no se persiste: al recargar se vuelve a la vista de so
   id), `Supr` borra el nodo del XML y `Esc` suelta la selección. El manejador ignora los campos de
   texto y cualquier combinación con `Ctrl`/`Alt`/`Meta`, así que no toca el autocompletado, la
   paleta `Ctrl+Mayús+P` ni `Ctrl+G`. `Esc` sí funciona desde dentro de la ficha (es una capa, no una
-  columna): cierra la ficha y suelta el nodo.
+  columna): cierra la ficha y suelta el nodo. La **basura** está en la barra del modo editar
+  (`#previa-editar-eliminar`) y en la ficha (`#previa-propiedades-eliminar`), con
+  `aria-label="Eliminar elemento"`; las dos y `Supr` escriben con el mismo
+  `layout-editor.borrarElemento`, con diff mínimo y en el historial del diseñador. La raíz no se
+  borra: se rechaza con el motivo en `#previa-editar-estado`.
 - **Propiedades del nodo.** Con un nodo seleccionado, `#previa-propiedades` es una **ficha
   flotante** en la esquina superior derecha del marco (`position: absolute`): aparece al seleccionar
   y desaparece al soltar; no reduce el canvas. `#previa-propiedades-cerrar` hace lo mismo que `Esc`
@@ -313,14 +323,14 @@ panel lo apaga, y el modo no se persiste: al recargar se vuelve a la vista de so
   llegan al modelo (`vista-xml.js` resuelve también `@color/…` desde `res/values*/colors.xml`) y el
   canvas los usa para rellenar y para el texto.
 - **Propiedades de la raíz.** El hueco del layout —un clic dentro de la raíz que no cae en ningún
-  hijo— selecciona la raíz (ruta `[]`), y `#previa-seleccionar-raiz` hace lo mismo sin puntero desde
-  la cabecera de la ficha.
-  Su ficha añade el **tipo de layout** (`LinearLayout`, `FrameLayout` y `RelativeLayout`), la
-  orientación, gravedad, padding y fondo. `cambiarTipoRaiz` renombra solo la etiqueta de apertura y
-  la de cierre, conserva atributos e hijos y pone `android:orientation="vertical"` al volver a un
-  lineal. **`RelativeLayout` se rechaza por su nombre**: sus reglas (`layout_toRightOf`,
-  `layout_alignParent…`) no las escribe este editor y la gravedad que sí escribe no la aplica
-  Android, así que el dibujo no coincidiría con el aparato. La raíz no se borra ni se arrastra.
+  hijo— selecciona la raíz (ruta `[]`); **no hay botón** para eso. Su ficha es la configuración
+  general del layout: tipo (`LinearLayout`/`FrameLayout`), orientación, gravedad, padding y fondo,
+  con los mismos `leerPropiedades`/`escribirPropiedad` que el resto. `cambiarTipoRaiz` renombra solo
+  la etiqueta de apertura y la de cierre, conserva atributos e hijos y pone
+  `android:orientation="vertical"` al volver a un lineal. **`RelativeLayout` se rechaza por su
+  nombre**: sus reglas (`layout_toRightOf`, `layout_alignParent…`) no las escribe este editor y la
+  gravedad que sí escribe no la aplica Android, así que el dibujo no coincidiría con el aparato. La
+  raíz no se borra ni se arrastra.
 - **Cómo escribe.** Toda edición es `layout-editor.js` (puro: `insertarElemento`, `moverEnMarco`,
   `reordenarHijo`, `borrarElemento`, `leerPropiedades`, `escribirPropiedad` y `cambiarTipoRaiz`)
   sobre el texto del buffer y se aplica con `EDITOR.cambiar()`: el cambio entra en el undo tree y el
@@ -329,14 +339,55 @@ panel lo apaga, y el modo no se persiste: al recargar se vuelve a la vista de so
   dibujado no es el documento abierto, el XML está a medias o no hay layout válido, la paleta y la
   ficha se deshabilitan y `#previa-editar-estado` dice por qué en vez de escribir a ciegas. Guardar
   es lo de siempre: `Ctrl+S`.
+- **Historial del diseñador.** El modo editar lleva su **propia** pila de operaciones
+  (`pilaDeshacer`/`pilaRehacer` en `previa-panel.js`, con el XML anterior y el posterior de cada
+  añadido, arrastre, borrado o cambio de propiedad). `Ctrl+Z`/`Ctrl+Mayús+Z` (y `Ctrl+Y`) y los
+  botones `#previa-editar-deshacer`/`#previa-editar-rehacer` deshacen y rehacen **el diseño**, no el
+  texto: con el foco en el canvas, en la paleta o en un campo de la ficha, el atajo se captura antes
+  de que llegue al editor de código (y `preventDefault` corta el undo nativo del navegador, que
+  reescribía el XML a espaldas del modelo). Cada paso se aplica con `EDITOR.cambiar` como mecanismo
+  de escritura, así que el undo tree del documento también lo ve, pero la fuente de verdad del gesto
+  es la pila del diseñador. Una edición a mano del XML (un `input` que no dejó el diseñador) o abrir
+  otro fichero vacía la pila y se avisa: nunca se aplica el XML de otro layout. Tras deshacer, el
+  modelo y el canvas se repintan y `#ultimo-codigo` no cambia.
+- **Indicador de destino.** Mientras se arrastra un tipo desde la paleta, `pintarDestino` calcula el
+  destino con la misma `destinoDeSoltar` que usa el soltar y pinta una **línea** en el hueco de un
+  lineal (`#previa-destino-linea`) o un **hueco discontinuo** con el tamaño aproximado del tipo en un
+  marco (`#previa-destino-hueco`). Se recalcula en cada `pointermove`, se apaga al soltar, al
+  cancelar y al salir del modo editar. No toca el documento.
+- **Jerarquía.** `#previa-jerarquia-alternar` abre una capa flotante (abajo a la derecha) con el
+  árbol de nodos del layout, indentado y con `tipo · id` (o `(sin id)`); cada fila es un botón que
+  selecciona ese nodo, y las ramas con hijos se pliegan con la flecha. Se reconstruye cuando cambia
+  la estructura o los rótulos, así que añadir, borrar, mover o cambiar un id se ven al momento, sin
+  compilar. `#previa-propiedades-padre` («↑ Padre», deshabilitado en la raíz) sube la selección al
+  contenedor, igual que la barra de Android Studio.
+- **Imagen.** Para `ImageView`/`ImageButton` la ficha ofrece `android:src` (tipo `imagen`, validado a
+  `@drawable/…` o `@android:drawable/…`) con tres vías: el texto, **«Elegir fichero»**
+  (`#previa-imagen-archivo`, un `<input type="file" accept="image/*">` que lee el fichero y lo
+  escribe en `/proyecto/res/drawable/<nombre>.<ext>`), **soltar la imagen sobre el canvas** del nodo
+  seleccionado (mismo camino) y el **selector de iconos del sistema**. El campo y el canvas llevan
+  `aria-label="Arrastra una imagen o pulsa Elegir fichero"` y el control `role="button"`;
+  `android:contentDescription` (el «alt») es otro campo de la misma ficha. El `@drawable/…` se
+  dibuja con el PNG real (`createImageBitmap` desde los bytes de OPFS, escalado al nodo) y el
+  `@android:drawable/…` como marcador con su nombre: los iconos del framework viven en el jar, no en
+  el proyecto. Nada sale del origen.
+- **Iconos del sistema.** La lista (`iconosSistema()` en `layout-editor.js`) son los `ic_*` con
+  nombre **público** en API 34, comprobados con
+  `aapt2 dump resources android.jar | grep " resource .* drawable/… PUBLIC"`: `ic_delete`, `ic_info`,
+  `ic_menu_add`, `ic_menu_camera`, `ic_menu_delete`, `ic_menu_edit`, `ic_menu_gallery`,
+  `ic_menu_help`, `ic_menu_search` e `ic_menu_share`. **No hay** variantes `*_white`/`*_black`/
+  `*_gray` de `ic_*` como recurso público en 34 (sí `_holo_dark`/`_holo_light`, privadas), así que
+  no se ofrecen; la ficha lo dice.
 
 Frontera del modo editar: solo cambia lo que el render en vivo entiende. No hay constraints de
-`ConstraintLayout` (ni `bias`, ni cadenas), ni estilos ni temas, ni reparentado (arrastrar un nodo
-dentro de otro contenedor), ni imágenes reales de `drawable`, ni deshacer propio (el del editor),
-ni edición de `@string`, ni de `@color` (se referencian, no se crean), y un layout lineal no admite
-posición libre: ahí mover es reordenar. `android:enabled` se escribe como atributo válido pero el
-dibujo no lo imita. Cambiar la raíz a `RelativeLayout` se rechaza por nombre por la razón de arriba;
-tampoco se cambia una raíz que no sea `LinearLayout` o `FrameLayout`.
+`ConstraintLayout` (ni `bias`, ni cadenas), ni estilos ni temas, ni reparentado de un nodo que ya
+está dibujado (arrastrar un nodo dentro de otro contenedor), ni edición de `@string`, ni de `@color`
+(se referencian, no se crean), y un layout lineal no admite posición libre: ahí mover es reordenar.
+`android:enabled` se escribe como atributo válido pero el dibujo no lo imita. Cambiar la raíz a
+`RelativeLayout` se rechaza por nombre por la razón de arriba; tampoco se cambia una raíz que no sea
+`LinearLayout` o `FrameLayout`. En las imágenes, un `drawable` vectorial (`.xml`) no se dibuja (solo
+PNG/JPG/WebP), los iconos `@android:drawable/…` se dibujan como marcador con su nombre porque viven
+en el `android.jar`, y no hay recorte (`scaleType`): el PNG se escala para caber, centrado.
 
 ### Emulador, clics y consola de la ejecución
 
@@ -1002,7 +1053,7 @@ En `@media (max-width: 760px)`:
 | `node studio/prueba.js` | genera el zip, comprueba EOCD, plantillas, reglas, ids de `index.html` (de `diagnostico.js`, `temas.js`, `historial.js`, `vista-previa.js`, `previa-panel.js`, `autocompletado.js`, `diagnostico-vivo.js`), ids viejos prohibidos, sin `<pre>` en el panel, el resaltador puro, el modelo del layout dibujado en vivo, los datos del autocompletado (recursos, `R.java`, contexto y lector de zip/.class), el XML del editor (contexto, catálogo, linter con columna en runes), las funciones puras de los tiradores y las del editor de layout (`leerPropiedades`/`escribirPropiedad`, colores, paleta y `cambiarTipoRaiz`) |
 | `node studio/prueba-navegador.js` | `http` sin COOP/COEP: DOM, tres vistas, tres botones de actividad, reflejo del nombre/package, aviso de que no hay OPFS, localStorage, el diagnóstico, los temas y la paleta ANSI, y el contrato de la vista dividida (separador con teclado, alternancia Vista previa/Emulador, los dos modos y la consola de Pantalla, que no haya `<pre>` con el XML y consola vacía con su motivo) |
 | `APKC_WASM=... node studio/prueba-crear.js` | por http con OPFS: crear, escribir el proyecto, abrir el manifiesto, comprobar `data-ruta` del arbol, API 34, el árbol cerrado, subir/mover ficheros, exportar/importar el `.zip`, ajustes, pestañas, undo tree, dos ventanas y fusión/conflicto |
-| `APKC_WASM=... APK_EJEMPLO=... KS_EJEMPLO=... ANDROID_JAR=... node studio/prueba-pestana.js` | la pestaña completa: editar, guardar, recargar, jar del SDK, compilar debug/release, firmar, verificar, recargar sin red, cero peticiones fuera del origen, el autocompletado Java y XML (con contexto separado), el linter XML con origen `XML` y sin `apkc check`, el enlace `ruta:línea`, Detener, la vista dividida con sus ocho tiradores por marco (puntero, teclado, persistencia), compilar→pintar sin mover el cursor, el layout **dibujado** en vivo, la alternancia Vista previa/Emulador con estado, las dos superficies (Editor y Pantalla), la consola de la ejecución con el `<script>` escapado, que el nodo pinte su texto sin el rótulo `Button · id/pulsar`, y el **modo editar** (lápiz, añadir un `Button` y un `EditText`, arrastrar dentro de un `FrameLayout`, `Supr`, `Esc`, el undo tree, la ficha de propiedades con texto/id/fondo, la orientación del raíz y el cambio de tipo con `RelativeLayout` rechazado). Además comprueba que la paleta y la ficha son capas que **no cambian `clientWidth`/`clientHeight` del canvas**, que la paleta hace scroll por categorías y se pliega sin moverlo, que arrastrar un `Button` de la paleta al dibujo lo añade donde se suelta y lo selecciona, y que `Esc` cierra la ficha |
+| `APKC_WASM=... APK_EJEMPLO=... KS_EJEMPLO=... ANDROID_JAR=... node studio/prueba-pestana.js` | la pestaña completa: editar, guardar, recargar, jar del SDK, compilar debug/release, firmar, verificar, recargar sin red, cero peticiones fuera del origen, el autocompletado Java y XML (con contexto separado), el linter XML con origen `XML` y sin `apkc check`, el enlace `ruta:línea`, Detener, la vista dividida con sus ocho tiradores por marco (puntero, teclado, persistencia), compilar→pintar sin mover el cursor, el layout **dibujado** en vivo, la alternancia Vista previa/Emulador con estado, las dos superficies (Editor y Pantalla), la consola de la ejecución con el `<script>` escapado, que el nodo pinte su texto sin el rótulo `Button · id/pulsar`, y el **modo editar** (lápiz, añadir un `Button` y un `EditText`, arrastrar dentro de un `FrameLayout`, `Supr`, `Esc`, el undo tree, la ficha de propiedades con texto/id/fondo, la orientación del raíz y el cambio de tipo con `RelativeLayout` rechazado). Además comprueba que la paleta y la ficha son capas que **no cambian `clientWidth`/`clientHeight` del canvas**, que la paleta hace scroll por categorías y se pliega sin moverlo, que arrastrar un `Button` de la paleta al dibujo lo añade donde se suelta y lo selecciona, que `Esc` cierra la ficha, que soltar un tipo sobre un `LinearLayout` interno lo deja como hijo suyo, que el **historial del diseñador** deshace y rehace con `Ctrl+Z`/`Ctrl+Mayús+Z` con el foco en el canvas (el nodo desaparece y vuelve, sin tocar `#ultimo-codigo`), que el **indicador de destino** aparece y cambia con el puntero, que la **basura** y `Supr` borran el nodo y la raíz se rechaza, que el **visor de jerarquía** lista los nodos, selecciona una fila y sube al padre, y que el campo de imagen escribe `@drawable/…`, guarda el fichero en OPFS y `contentDescription` se edita |
 | `APKC=... APKC_WASM=... sh studio/e2e.sh` | todo lo anterior más los apk/aab nativos y la plantilla Contador; el número exacto de comprobaciones se mide en cada gate |
 
 El gate completo de la pagina es `e2e.sh`; `prueba-pestana.js` solo no basta para decir que la
@@ -1029,13 +1080,14 @@ estan en `studio/README.md` y en `docs/evidencia.md` §140. En resumen: se copia
 - **El XML se edita en el panel, pero solo lo que la vista en vivo entiende.** El lápiz
   (`#previa-modo-editar`) añade los dieciocho tipos de la paleta —un clic al final de la raíz o
   arrastrándolos a un punto del dibujo—, arrastra nodos dentro de su padre (márgenes en un marco,
-  reordenar en un `LinearLayout`), edita sus propiedades —también las del layout raíz— y los borra
-  con `Supr`; no hay `ConstraintLayout`, estilos ni reparentado de un nodo ya dibujado (soltar un
-  tipo en otro contenedor sí crea el nodo dentro de él), y la raíz no se cambia a `RelativeLayout`.
-  El panel escribe con `EDITOR.cambiar()`, así que el texto, el cursor y el undo tree son los del
-  editor de siempre. La paleta y la ficha son capas: tapan parte del dibujo mientras están abiertas,
-  pero no cambian su caja; se pliegan y, la ficha, se cierra con `Esc`. La vista **Pantalla** y el
-  modo **Emulador** siguen siendo de solo lectura.
+  reordenar en un `LinearLayout`), edita sus propiedades —también las del layout raíz—, los borra
+  con la basura o `Supr` y deshace con su propio historial (`Ctrl+Z`); no hay `ConstraintLayout`,
+  estilos ni reparentado de un nodo ya dibujado (soltar un tipo en otro contenedor sí crea el nodo
+  dentro de él), y la raíz no se cambia a `RelativeLayout`. El panel escribe con `EDITOR.cambiar()`,
+  así que el texto, el cursor y el undo tree son los del editor de siempre. La paleta, la ficha y la
+  jerarquía son capas: tapan parte del dibujo mientras están abiertas, pero no cambian su caja; se
+  pliegan y, la ficha, se cierra con `Esc`. La vista **Pantalla** y el modo **Emulador** siguen
+  siendo de solo lectura.
 - **El render es el modelo de `apkc preview`, no la app ejecutándose.** La consola muestra lo que
   el intérprete capturó en `onCreate` y en los clics registrados; no es un `logcat` ni hay hilos,
   JNI ni excepciones fuera del subconjunto que el intérprete resuelve.

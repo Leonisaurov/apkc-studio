@@ -33,6 +33,8 @@ const PROPIEDADES = [
   { nombre: "android:id", etiqueta: "id", tipo: "id", ayuda: "nombre del recurso: nuevo → @+id/nuevo" },
   { nombre: "android:text", etiqueta: "Texto", tipo: "texto", ayuda: "texto literal o @string/nombre", soloTexto: true },
   { nombre: "android:textColor", etiqueta: "Color del texto", tipo: "color", ayuda: "#RRGGBB o @color/nombre", soloTexto: true },
+  { nombre: "android:src", etiqueta: "Imagen", tipo: "imagen", ayuda: "@drawable/nombre o @android:drawable/ic_delete", soloImagen: true },
+  { nombre: "android:contentDescription", etiqueta: "Descripción", tipo: "texto", ayuda: "texto para lectores de pantalla (alt)", soloImagen: true },
   { nombre: "android:background", etiqueta: "Fondo", tipo: "color", ayuda: "#RRGGBB, #AARRGGBB o @color/nombre" },
   { nombre: "android:layout_width", etiqueta: "Ancho", tipo: "dimension", ayuda: "match_parent, wrap_content o 120dp" },
   { nombre: "android:layout_height", etiqueta: "Alto", tipo: "dimension", ayuda: "match_parent, wrap_content o 48dp" },
@@ -68,6 +70,15 @@ const GRUPOS_PALETA = [
   { titulo: "Imágenes", tipos: ["ImageView"] },
   { titulo: "Indicadores", tipos: ["ProgressBar", "SeekBar"] },
   { titulo: "Espaciadores", tipos: ["View", "Space"] },
+];
+
+// Iconos del framework con nombre PÚBLICO en API 34, comprobados con
+// `aapt2 dump resources android.jar | grep " resource .* drawable/… PUBLIC"`. No hay variantes
+// `*_white`/`*_black`/`*_gray` de `ic_*` como recurso público en 34 (sí `_holo_dark`/`_holo_light`,
+// pero no son públicas): la ficha lo dice y no se ofrecen nombres que no existan.
+const ICONOS_SISTEMA = [
+  "ic_delete", "ic_info", "ic_menu_add", "ic_menu_camera", "ic_menu_delete", "ic_menu_edit",
+  "ic_menu_gallery", "ic_menu_help", "ic_menu_search", "ic_menu_share",
 ];
 
 // Cada tipo entra con atributos válidos para el render en vivo. `id` es la base del
@@ -126,6 +137,8 @@ const TIPOS = {
 
 // Los tipos que llevan texto visible (para ofrecer `android:text` y `textColor` en la ficha).
 const CON_TEXTO = /^(TextView|EditText|AutoCompleteTextView|CheckedTextView|TextInputEditText|Button|ImageButton|MaterialButton|AppCompatButton|CheckBox|RadioButton|Switch)$/;
+// Las vistas que admiten una imagen: `android:src` y su `contentDescription`.
+const CON_IMAGEN = /^(ImageView|ImageButton|MaterialImageView|AppCompatImageView)$/;
 
 // Los tipos entre los que se puede cambiar la raíz. `RelativeLayout` se nombra aparte porque es el
 // que se rechaza con un motivo, no porque falte una rama.
@@ -143,6 +156,12 @@ export function tiposDisponibles() {
 // puede cambiar el orden de la herramienta por accidente.
 export function gruposPaleta() {
   return GRUPOS_PALETA.map((grupo) => ({ titulo: grupo.titulo, tipos: grupo.tipos.slice() }));
+}
+
+// Los iconos del sistema que la ficha puede escribir, con el nombre público de API 34. Son datos
+// puros: `prueba.js` comprueba la lista y la ficha no inventa ninguno.
+export function iconosSistema() {
+  return ICONOS_SISTEMA.slice();
 }
 
 export function infoTipo(tipo) {
@@ -174,6 +193,7 @@ export function propiedadesDisponibles(opciones) {
   const raiz = !!(opciones && opciones.raiz);
   return PROPIEDADES.filter((p) => {
     if (p.soloTexto && !CON_TEXTO.test(tipo)) return false;
+    if (p.soloImagen && !CON_IMAGEN.test(tipo)) return false;
     if (p.soloHijo && raiz) return false;
     if (p.soloLineal && !/LinearLayout$/.test(tipo)) return false;
     return true;
@@ -502,6 +522,16 @@ function normalizarNumero(valor) {
   return String(n);
 }
 
+// Un `android:src`: el recurso del proyecto (`@drawable/x`, `@mipmap/x`) o uno del framework
+// (`@android:drawable/ic_delete`). Un nombre suelto se rechaza para no adivinar dónde vive.
+function normalizarImagen(valor) {
+  const v = String(valor == null ? "" : valor).trim();
+  if (!v) return "";
+  if (/^@(\+)?(drawable|mipmap)\/[A-Za-z_][A-Za-z0-9_]*$/.test(v)) return v;
+  if (/^@android:drawable\/[A-Za-z_][A-Za-z0-9_]*$/.test(v)) return v;
+  return null;
+}
+
 function normalizarOrientacion(valor) {
   const v = String(valor == null ? "" : valor).trim();
   if (!v) return "";
@@ -521,6 +551,7 @@ function normalizarPropiedad(def, valor) {
     case "id": return normalizarId(valor);
     case "texto": return String(valor == null ? "" : valor);
     case "color": return normalizarColor(valor);
+    case "imagen": return normalizarImagen(valor);
     case "dimension": return normalizarDimension(valor);
     case "medida": return normalizarMedida(valor);
     case "gravedad": return normalizarGravedad(valor);
