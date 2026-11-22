@@ -26,17 +26,29 @@ import { hospedador, estadoPestana, DOCUMENTOS, RUTA_JAR, irALinea } from "./pes
     return Number.isFinite(alto) && alto > 0 ? alto : 20;
   }
 
-  // El ancho de un carácter se mide con la fuente del textarea, que es monoespaciada: sin esto el
-  // subrayado de la columna no cae sobre el token. Se mide una vez por fuente y no por error; si el
-  // usuario cambia `#fuente-editor`, la clave cambia y se vuelve a medir.
-  let anchoCaracter = 0;
-  let fuenteMedida = "";
-  function medirCaracter() {
+  // Geometría de una línea. Hay dos conversiones y ninguna es opcional:
+  //   (a) `apkc` cuenta la columna en caracteres (runes) y el editor indexa en unidades UTF-16, así
+  //       que un carácter astral (`\uD83D\uDE00`, un rune y dos unidades) desplaza el corte;
+  //   (b) el ancho no es «columnas por ancho de carácter»: un tabulador llega a su parada (`tab-size:
+  //       4` en style.css) y un astral puede ocupar dos celdas. Se mide el prefijo.
+  function indiceUTF16(texto, columna) {
+    let i = 0;
+    let runes = 1;
+    while (i < texto.length && runes < columna) {
+      const punto = texto.codePointAt(i) || 0;
+      i += punto > 0xffff ? 2 : 1;
+      runes++;
+    }
+    return i;
+  }
+
+  // Mide en píxeles un trozo de texto con la fuente y el tabulador del textarea. Es una sonda fuera
+  // de pantalla: el resultado no depende de dónde esté el cursor ni del scroll.
+  function anchoDe(texto) {
+    if (!texto) return 0;
     const estilo = getComputedStyle(area);
-    const clave = estilo.fontSize + "|" + estilo.fontFamily;
-    if (anchoCaracter > 0 && clave === fuenteMedida) return anchoCaracter;
     const sonda = document.createElement("span");
-    sonda.textContent = "0".repeat(40);
+    sonda.textContent = texto;
     sonda.style.position = "absolute";
     sonda.style.visibility = "hidden";
     sonda.style.whiteSpace = "pre";
@@ -44,33 +56,31 @@ import { hospedador, estadoPestana, DOCUMENTOS, RUTA_JAR, irALinea } from "./pes
     sonda.style.fontSize = estilo.fontSize;
     sonda.style.fontWeight = estilo.fontWeight;
     sonda.style.letterSpacing = estilo.letterSpacing;
+    sonda.style.tabSize = estilo.tabSize;
     document.body.appendChild(sonda);
-    const ancho = sonda.getBoundingClientRect().width / 40;
+    const ancho = sonda.getBoundingClientRect().width;
     sonda.remove();
-    anchoCaracter = Number.isFinite(ancho) && ancho > 0 ? ancho : 8;
-    fuenteMedida = clave;
-    return anchoCaracter;
+    return Number.isFinite(ancho) ? ancho : 0;
   }
 
-  // El token que hay que subrayar: desde la columna, el identificador o la cadena de accesos
+  // El token que hay que subrayar: desde el índice, el identificador o la cadena de accesos
   // (`R.layout.main`) que sigue. Si el error cae en un signo, se subraya ese signo.
-  function largoDeToken(texto, columna) {
-    const resto = String(texto || "").slice(Math.max(0, columna - 1));
+  function tokenEn(texto, indice) {
+    const resto = String(texto || "").slice(Math.max(0, indice));
     const m = /^[A-Za-z0-9_$.]+/.exec(resto);
-    return m ? m[0].length : 1;
+    return m ? m[0] : resto.slice(0, 1);
   }
 
   function sincronizar() {
     const alto = alturaLinea();
-    const ancho = medirCaracter();
     for (const nodo of marcas.children) {
       const linea = Number(nodo.dataset.linea) || 1;
       nodo.style.top = (10 + (linea - 1) * alto + alto - 2 - area.scrollTop) + "px";
-      const columna = Number(nodo.dataset.columna) || 0;
-      if (columna > 0) {
+      // la izquierda y el ancho se midieron al pintar; aquí solo se les suma el padding y el scroll
+      if (nodo.dataset.izquierda !== undefined) {
         nodo.style.right = "auto";
-        nodo.style.left = (12 + (columna - 1) * ancho - area.scrollLeft) + "px";
-        nodo.style.width = (Number(nodo.dataset.ancho) || ancho) + "px";
+        nodo.style.left = (12 + Number(nodo.dataset.izquierda) - area.scrollLeft) + "px";
+        nodo.style.width = (Number(nodo.dataset.ancho) || 0) + "px";
       }
     }
   }
@@ -78,7 +88,6 @@ import { hospedador, estadoPestana, DOCUMENTOS, RUTA_JAR, irALinea } from "./pes
   function pintar() {
     marcas.textContent = "";
     const lineas = area.value.split("\n");
-    const ancho = medirCaracter();
     for (const e of errores) {
       const linea = Number(e.linea);
       if (!linea || linea < 1) continue;
@@ -87,9 +96,13 @@ import { hospedador, estadoPestana, DOCUMENTOS, RUTA_JAR, irALinea } from "./pes
       marca.dataset.linea = String(linea);
       const columna = Number(e.columna);
       if (columna > 0) {
-        const largo = largoDeToken(lineas[linea - 1], columna);
-        marca.dataset.columna = String(columna);
-        marca.dataset.ancho = String(largo * ancho);
+        const texto = lineas[linea - 1] || "";
+        const indice = indiceUTF16(texto, columna);
+        const token = tokenEn(texto, indice);
+        marca.dataset.columna = String(columna); // la de apkc, en caracteres
+        marca.dataset.utf16 = String(indice);    // lo que el editor corta
+        marca.dataset.izquierda = String(anchoDe(texto.slice(0, indice)));
+        marca.dataset.ancho = String(anchoDe(token));
       }
       marcas.appendChild(marca);
     }
