@@ -3173,15 +3173,29 @@ async function conductor() {
       marcarSucio(false);
       return true;
     })()`);
-    // el input programa un check a 350 ms y la pasada tarda ~1,6 s: se espera a que el estado se
-    // quede quieto para que la comparación de después mida las flechas, no el check pendiente
-    let estable = null;
-    for (let i = 0; i < 20; i++) {
-      const ahora = await evaluar(`document.getElementById("diagnostico-vivo-estado").textContent`);
-      if (ahora && ahora === estable) break;
-      estable = ahora;
-      await esperar(400);
-    }
+    // El input que acaba de irrumpir programa un check a 350 ms (diagnostico-vivo.js:26) y el
+    // estado pasa por un valor transitorio, «comprobando…» (diagnostico-vivo.js:226), antes del
+    // resumen. Esperar a que dos lecturas coincidan no es esperar a que la pasada pare: durante la
+    // pasada «comprobando…» se repite, así que la base podía ser ese transitorio y el resumen
+    // llegaba dentro de la ventana de las flechas. La prueba fallaba entonces sin que las flechas
+    // escribieran nada —solo mueven `activo` (autocompletado.js:326-334 y 373-380) y no disparan
+    // ningún `input`—: era una carrera contra el reloj de la pasada. Se espera, de una vez y desde
+    // dentro de la página (sin ruido de CDP), al resumen y a 1 s de silencio, que cubre el debounce
+    // y la segunda pasada que deja `pendiente` (diagnostico-vivo.js:284-292).
+    const quiescente = await evaluar(`(async () => {
+      const estado = document.getElementById("diagnostico-vivo-estado");
+      const resumen = /^([0-9]+ error|sin errores|no se pudo)/;
+      const t0 = Date.now();
+      let previo = estado.textContent;
+      let desde = Date.now();
+      while (Date.now() - t0 < 20000) {
+        const ahora = estado.textContent;
+        if (ahora !== previo) { previo = ahora; desde = Date.now(); }
+        if (resumen.test(ahora) && Date.now() - desde >= 1000) return { ms: Date.now() - t0, estado: ahora };
+        await new Promise((r) => setTimeout(r, 50));
+      }
+      return { ms: Date.now() - t0, estado: null };
+    })()`);
     const antesFlecha = await evaluar(`({
       visible: !document.getElementById("autocompletado").hidden,
       valor: document.getElementById("codigo").value,
@@ -3189,6 +3203,21 @@ async function conductor() {
       opciones: [...document.querySelectorAll("#autocompletado-lista .autocompletado-opcion")]
         .map((b) => b.firstChild ? b.firstChild.textContent : b.textContent)
     })`);
+    // Un cambio del texto no es la única huella de una pasada: si el fichero no cambió, el resumen
+    // es el mismo y una igualdad de texto no ve la pasada nueva. Con la base ya quiescente, se
+    // cuentan las mutaciones de `#diagnostico-vivo-estado` en la ventana de las flechas: una pasada
+    // escribe «comprobando…» y luego el resumen, así que deja al menos dos.
+    await evaluar(`(() => {
+      const estado = document.getElementById("diagnostico-vivo-estado");
+      window.__dx = { cambios: 0, textos: [] };
+      if (window.__dxObs) window.__dxObs.disconnect();
+      window.__dxObs = new MutationObserver(() => {
+        window.__dx.cambios++;
+        window.__dx.textos.push(String(estado.textContent).slice(0, 40));
+      });
+      window.__dxObs.observe(estado, { childList: true, characterData: true, subtree: true });
+      return true;
+    })()`);
     const trasFlecha = await evaluar(`(() => {
       const area = document.getElementById("codigo");
       const tecla = (key) => area.dispatchEvent(
@@ -3201,11 +3230,16 @@ async function conductor() {
         activaFinal: (document.querySelector("#autocompletado-lista .autocompletado-opcion.activa") || {}).id || "" };
     })()`);
     await esperar(700);
-    const despuesFlecha = await evaluar(`({
-      estadoDx: document.getElementById("diagnostico-vivo-estado").textContent,
-      valor: document.getElementById("codigo").value,
-      visible: !document.getElementById("autocompletado").hidden
-    })`);
+    const despuesFlecha = await evaluar(`(() => {
+      if (window.__dxObs) window.__dxObs.disconnect();
+      return {
+        estadoDx: document.getElementById("diagnostico-vivo-estado").textContent,
+        valor: document.getElementById("codigo").value,
+        visible: !document.getElementById("autocompletado").hidden,
+        cambios: window.__dx ? window.__dx.cambios : -1,
+        textos: window.__dx ? window.__dx.textos : []
+      };
+    })()`);
     const segundaOpcion = antesFlecha.opciones[1] || "";
     await evaluar(`document.getElementById("codigo").dispatchEvent(
       new KeyboardEvent("keydown", { key: "Tab", bubbles: true, cancelable: true }))`);
@@ -3214,13 +3248,14 @@ async function conductor() {
       popup: document.getElementById("autocompletado").hidden
     })`);
     comprueba("las flechas recorren la lista sin escribir ni lanzar otro check",
-      antesFlecha.visible === true && antesFlecha.opciones.length >= 2 &&
+      quiescente.estado !== null && antesFlecha.visible === true && antesFlecha.opciones.length >= 2 &&
       trasFlecha.segunda === "autocompletado-opcion-1" &&
       trasFlecha.activaFinal === "autocompletado-opcion-1" &&
-      despuesFlecha.valor === antesFlecha.valor &&
+      despuesFlecha.valor === antesFlecha.valor && despuesFlecha.cambios === 0 &&
       despuesFlecha.estadoDx === antesFlecha.estadoDx && despuesFlecha.visible === true,
       JSON.stringify({ segunda: trasFlecha.segunda, igual: despuesFlecha.valor === antesFlecha.valor,
-        dx: despuesFlecha.estadoDx === antesFlecha.estadoDx }).slice(0, 240));
+        dx: despuesFlecha.estadoDx === antesFlecha.estadoDx, base: quiescente,
+        cambios: despuesFlecha.cambios, textos: despuesFlecha.textos }).slice(0, 300));
     comprueba("Tab acepta la opción resaltada por las flechas",
       segundaOpcion !== "" && insertada.texto === "class Auto { int x = R.layout." + segundaOpcion + "; }" &&
       insertada.popup === true,
