@@ -17,11 +17,18 @@
 const PANTALLA_POR_DEFECTO = { x: 0, y: 0, ancho: 360, alto: 640 };
 const NODOS_MAXIMOS = 512;
 
+// El mensaje del panel vacío. Vive aquí y lo importa `previa-panel.js` para que el estado vacío
+// de las dos superficies (la vista dividida y Pantalla) diga exactamente lo mismo: el canvas de
+// las dos es el Emulador, no el modo Vista previa, que dibuja el XML sin compilar.
+export const MENSAJE_SIN_MODELO = "Compila el proyecto (Editor → Compilar → Compilar debug) para " +
+  "ver aquí la pantalla del emulador y lo que ejecuta la app.";
+
 // Una medida usable. El JSON de apkc trae números, pero un modelo manipulado o una fase futura
 // puede colar `null`, cadenas, `NaN` o `1e400` (que es `Infinity`): ninguno de esos es una
 // medida. Devolver null deja que el llamante use su respaldo en vez de propagar `NaN` al
-// canvas, que se traga los rectángulos sin lanzar nada.
-function aNumero(valor) {
+// canvas, que se traga los rectángulos sin lanzar nada. No la confundas con `aNumeroOCero` de
+// `vista-xml.js`: esta distingue «no hay medida» (null) de un cero legítimo.
+function aNumeroOFinito(valor) {
   if (typeof valor === "number") return Number.isFinite(valor) ? valor : null;
   if (typeof valor === "string" && valor.trim() !== "") {
     const n = Number(valor);
@@ -86,21 +93,21 @@ export function nodosAplanados(modelo) {
 // rectángulo de la pantalla dentro de la caja.
 export function escalaPara(modelo, ancho, alto) {
   const pantalla = (modelo && modelo.pantalla) || {};
-  const anchoDeclarado = aNumero(pantalla.ancho);
-  const altoDeclarado = aNumero(pantalla.alto);
+  const anchoDeclarado = aNumeroOFinito(pantalla.ancho);
+  const altoDeclarado = aNumeroOFinito(pantalla.alto);
   const anchoPantalla = anchoDeclarado !== null && anchoDeclarado > 0
     ? anchoDeclarado : PANTALLA_POR_DEFECTO.ancho;
   const altoPantalla = altoDeclarado !== null && altoDeclarado > 0
     ? altoDeclarado : PANTALLA_POR_DEFECTO.alto;
-  const anchoCaja = aNumero(ancho);
-  const altoCaja = aNumero(alto);
+  const anchoCaja = aNumeroOFinito(ancho);
+  const altoCaja = aNumeroOFinito(alto);
   const cajaAncho = anchoCaja !== null && anchoCaja > 0 ? anchoCaja : anchoPantalla;
   const cajaAlto = altoCaja !== null && altoCaja > 0 ? altoCaja : altoPantalla;
   const escala = Math.min(cajaAncho / anchoPantalla, cajaAlto / altoPantalla);
   // 1e400 llega como Infinity y su división da 0 o NaN: ninguna de las dos es una escala
   if (!Number.isFinite(escala) || escala <= 0) return cajaNula();
-  const x = (cajaAncho - anchoPantalla * escala) / 2 - (aNumero(pantalla.x) || 0) * escala;
-  const y = (cajaAlto - altoPantalla * escala) / 2 - (aNumero(pantalla.y) || 0) * escala;
+  const x = (cajaAncho - anchoPantalla * escala) / 2 - (aNumeroOFinito(pantalla.x) || 0) * escala;
+  const y = (cajaAlto - altoPantalla * escala) / 2 - (aNumeroOFinito(pantalla.y) || 0) * escala;
   const caja = {
     escala,
     x,
@@ -125,7 +132,8 @@ export function rectsEscalados(modelo, ancho, alto) {
     if (!r || typeof r !== "object") continue;
     // las cuatro medidas se leen con la misma regla que la pantalla: `null` o una cadena vacía
     // no valen cero, valen «este nodo no se puede situar»
-    const x = aNumero(r.x), y = aNumero(r.y), ancho = aNumero(r.ancho), alto = aNumero(r.alto);
+    const x = aNumeroOFinito(r.x), y = aNumeroOFinito(r.y);
+    const ancho = aNumeroOFinito(r.ancho), alto = aNumeroOFinito(r.alto);
     if ([x, y, ancho, alto].some((v) => v === null)) continue;
     const escalado = {
       x: caja.x + x * caja.escala,
@@ -162,7 +170,7 @@ function colorDe(nombre, respaldo) {
 }
 
 // El estado del modelo vive en este módulo para poder repintar al cambiar de vista sin repetir el
-// comando: compilar puede ocurrir con la pestaña Vista oculta y el canvas mide cero entonces.
+// comando: compilar puede ocurrir con la vista Pantalla oculta y el canvas mide cero entonces.
 let ultimoModelo = null;
 
 // El panel lateral de la vista dividida (previa-panel.js) no puede importar `ultimoModelo` sin
@@ -307,11 +315,26 @@ export function pintarModelo(canvas, modelo, medir) {
   return { ancho, alto, nodos: rects.length, escala: marcoRect.escala, valida: true, modelo, resumen };
 }
 
+// La línea de estado del Emulador, pura y compartida: la escriben la vista Pantalla (aquí) y el
+// panel de la vista dividida (previa-panel.js) al repintar, así que las dos superficies dicen lo
+// mismo del mismo modelo. Se llama por su nombre —«Emulador», no «Vista previa», que es el otro
+// modo y no ejecuta la app—.
+export function textoDelModelo(modelo) {
+  const declarados = aNumeroOFinito(modelo && modelo.nodos);
+  const nodos = declarados !== null && declarados > 0 ? declarados : nodosAplanados(modelo).length;
+  const aproximado = modelo && modelo.aproximado === false ? "" : " aproximado";
+  const pantalla = (modelo && modelo.pantalla) || {};
+  return "Emulador" + aproximado + " de " + ((modelo && modelo.layout) || "el layout") + ": " +
+    nodos + " nodos en una pantalla de " +
+    (pantalla.ancho || PANTALLA_POR_DEFECTO.ancho) + "×" +
+    (pantalla.alto || PANTALLA_POR_DEFECTO.alto) + " dp.";
+}
+
 // Pinta el modelo en el canvas de la página y actualiza la línea de estado. Sin modelo se deja el
 // panel vacío con un mensaje: es lo que ve quien abre la vista antes de compilar.
 export function pintarVistaPrevia(modelo) {
   if (!modelo) {
-    mensajeVistaPrevia("Compila el proyecto (Editor → Compilar → Compilar debug) para ver la vista previa del apk.");
+    mensajeVistaPrevia(MENSAJE_SIN_MODELO);
     return null;
   }
   ultimoModelo = modelo;
@@ -323,15 +346,7 @@ export function pintarVistaPrevia(modelo) {
       "finitos); no se pinta nada.");
     return null;
   }
-  const declarados = aNumero(modelo.nodos);
-  const nodos = declarados !== null && declarados > 0 ? declarados : nodosAplanados(modelo).length;
-  // esta línea la lee la columna de Pantalla, que es del Emulador: se llama por su nombre, no
-  // «Vista previa», que es el otro modo y no ejecuta la app
-  const aproximado = modelo.aproximado === false ? "" : " aproximado";
-  const texto = "Emulador" + aproximado + " de " + (modelo.layout || "el layout") + ": " +
-    nodos + " nodos en una pantalla de " +
-    ((modelo.pantalla && modelo.pantalla.ancho) || PANTALLA_POR_DEFECTO.ancho) + "×" +
-    ((modelo.pantalla && modelo.pantalla.alto) || PANTALLA_POR_DEFECTO.alto) + " dp.";
+  const texto = textoDelModelo(modelo);
   avisoDeLaVista(texto);
   // el panel lateral pinta el mismo modelo y su consola sin volver a pedirlo
   avisar(modelo, texto);
@@ -342,7 +357,7 @@ export function pintarVistaPrevia(modelo) {
 // medía cero y los rectángulos salieron con el tamaño de respaldo.
 export function repintarVistaPrevia() {
   if (!ultimoModelo) {
-    mensajeVistaPrevia("Compila el proyecto (Editor → Compilar → Compilar debug) para ver la vista previa del apk.");
+    mensajeVistaPrevia(MENSAJE_SIN_MODELO);
     return null;
   }
   return pintarVistaPrevia(ultimoModelo);

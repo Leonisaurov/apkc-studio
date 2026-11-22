@@ -4,6 +4,9 @@ import "./pestana.js";
 import "./autocompletado.js";
 import "./vistas.js";
 import "./diagnostico.js";
+// la paleta de comandos (Ctrl+Mayús+P) es de toda la página, no del panel de Inicio: vive aquí y
+// no dentro de `diagnostico.js`, que solo pinta `analyze()`
+import "./paleta.js";
 import "./idioma.js";
 import "./offline.js";
 import "./reparar.js";

@@ -31,7 +31,7 @@
 // OPFS y el documento activo llegan por el objeto de dependencias: no importa `pestana.js`.
 import {
   pintarModelo, modeloActual, EVENTO_PREVIA, modeloDeSalida, pintarVistaPrevia, nodosAplanados,
-  textoDeNodo, rectsEscalados, escalaPara,
+  textoDeNodo, rectsEscalados, escalaPara, MENSAJE_SIN_MODELO, textoDelModelo,
 } from "./vista-previa.js";
 import { modeloDeLayout, decodificarEntidades, paddingDe, esLineal, atributoLocal } from "./vista-xml.js";
 import {
@@ -74,8 +74,6 @@ const AVISOS_MAXIMOS = 24;
 const CONSOLA_MAXIMAS = 128;
 const OYENTES_MAXIMOS = 32;
 
-const MENSAJE_SIN_MODELO = "Compila el proyecto (Editor → Compilar → Compilar debug) para ver aquí " +
-  "la pantalla del emulador y lo que ejecuta la app.";
 const MENSAJE_SIN_EJECUCION = "El modelo no trae ejecución: el apk se leyó con --sin-ejecutar o no " +
   "tiene classes.dex. Sin capturas ni avisos.";
 const MENSAJE_SIN_LAYOUT = "El proyecto no tiene ningún res/layout/*.xml. Crea un layout en el " +
@@ -317,8 +315,10 @@ const SUPERFICIES = [
   {
     id: "vista",
     canvasVivo: "vista-layout-canvas", estadoVivo: "vista-layout-estado",
-    // el estado del emulador de Pantalla lo escribe vista-previa.js con el modelo de apkc
-    canvasRender: "vista-previa", estadoRender: null,
+    // el estado del emulador lo escribe vista-previa.js al pintar el modelo de apkc, pero la
+    // línea de esta superficie también recibe los «Ejecutando el clic…» y los fallos: es la
+    // misma que la del panel, sin una segunda copia del estado
+    canvasRender: "vista-previa", estadoRender: "vista-previa-estado",
     log: { lista: "vista-log-lista", cabecera: "vista-log-cabecera", vacio: "vista-log-vacio" },
     consola: { lista: "vista-consola-lista", cabecera: "vista-consola-cabecera", vacio: "vista-consola-vacio" },
     pulsos: { caja: "vista-oyentes", cuenta: "vista-pulsos-cuenta", nota: "vista-pulsos-nota" },
@@ -936,7 +936,9 @@ export function crearPreviaPanel({ hospedador, proyecto, estadoPestana, editor }
   // no puede guardar la máquina entre invocaciones y no lo finge.
   async function pulsar(idRef) {
     if (pulsando || typeof idRef !== "string" || !idRef) return null;
-    if (!document.getElementById("previa-render-estado")) return null;
+    // el clic puede venir del panel o de la vista Pantalla: con que una superficie esté montada
+    // ya hay dónde escribir el «Ejecutando el clic…» y el fallo
+    if (!SUPERFICIES.some((s) => s.estadoRender && document.getElementById(s.estadoRender))) return null;
     const antes = pulsos.length;
     pulsos.push(idRef);
     pulsando = true;
@@ -1077,10 +1079,10 @@ export function crearPreviaPanel({ hospedador, proyecto, estadoPestana, editor }
         canvas.__espacio = { ancho: pintado.ancho, alto: pintado.alto };
       }
       if (estado) {
-        const layout = modelo.layout ? String(modelo.layout) : "el layout";
-        estado.textContent = (modelo.aproximado === false ? "Emulador de " : "Emulador aproximado de ") +
-          layout + " con los eventos de la app. Arranca en onCreate: pulsa una vista para ejecutar su " +
-          "OnClickListener; se actualiza al compilar.";
+        // la misma línea que escribe `vista-previa.js` para Pantalla, más el recordatorio del clic:
+        // las dos superficies dicen lo mismo del mismo modelo
+        estado.textContent = textoDelModelo(modelo) + " Arranca en onCreate: pulsa una vista para " +
+          "ejecutar su OnClickListener; se actualiza al compilar.";
         if (pintado && pintado.valida === false) {
           estado.textContent = "El modelo de vista previa no trae una pantalla medible (ancho o alto no " +
             "finitos); no se pinta nada.";

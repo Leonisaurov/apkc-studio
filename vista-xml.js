@@ -157,7 +157,10 @@ export function atributoLocal(atributos, nombre) {
   return local(atributos, nombre);
 }
 
-function aNumero(valor) {
+// Una medida del layout, con 0 cuando no lo es. Ojo: no es `aNumeroOFinito` de `vista-previa.js`,
+// que devuelve null para distinguir «no hay medida» de un cero legítimo; aquí el 0 es el respaldo
+// que esperan `paddingDe` y el reparto de pesos.
+function aNumeroOCero(valor) {
   const n = Number(valor);
   return Number.isFinite(n) ? n : 0;
 }
@@ -196,12 +199,12 @@ function dimension(valor, maximo) {
 }
 
 export function paddingDe(nodo) {
-  const general = aNumero(dimension(local(nodo.atributos, "padding"), 0));
-  const horizontal = aNumero(dimension(local(nodo.atributos, "paddingHorizontal"), 0));
-  const vertical = aNumero(dimension(local(nodo.atributos, "paddingVertical"), 0));
+  const general = aNumeroOCero(dimension(local(nodo.atributos, "padding"), 0));
+  const horizontal = aNumeroOCero(dimension(local(nodo.atributos, "paddingHorizontal"), 0));
+  const vertical = aNumeroOCero(dimension(local(nodo.atributos, "paddingVertical"), 0));
   const lados = (nombre, respaldo) => {
     const valor = local(nodo.atributos, nombre);
-    return valor ? aNumero(dimension(valor, 0)) : respaldo;
+    return valor ? aNumeroOCero(dimension(valor, 0)) : respaldo;
   };
   return {
     izq: lados("paddingLeft", lados("paddingStart", general + horizontal)),
@@ -212,10 +215,10 @@ export function paddingDe(nodo) {
 }
 
 function margenDe(nodo) {
-  const general = aNumero(dimension(local(nodo.atributos, "layout_margin"), 0));
+  const general = aNumeroOCero(dimension(local(nodo.atributos, "layout_margin"), 0));
   const lados = (nombre, respaldo) => {
     const valor = local(nodo.atributos, nombre);
-    return valor ? aNumero(dimension(valor, 0)) : respaldo;
+    return valor ? aNumeroOCero(dimension(valor, 0)) : respaldo;
   };
   return {
     izq: lados("layout_marginLeft", lados("layout_marginStart", general)),
@@ -322,7 +325,7 @@ function colocarLineal(nodo, caja, vertical) {
   const piezas = nodo.hijos.map((hijo) => {
     const margen = margenDe(hijo);
     const dimPrincipal = dimension(local(hijo.atributos, vertical ? "layout_height" : "layout_width"), principalMax);
-    const peso = aNumero(local(hijo.atributos, "layout_weight"));
+    const peso = aNumeroOCero(local(hijo.atributos, "layout_weight"));
     const flexible = peso > 0 && (dimPrincipal === 0 || dimPrincipal === null);
     const tam = flexible ? null : medirNodo(hijo, caja.ancho, caja.alto);
     const fijo = (tam ? (vertical ? tam.alto : tam.ancho) : 0) +
