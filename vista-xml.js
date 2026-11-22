@@ -114,12 +114,19 @@ export function analizarXml(texto) {
         fallo(i, "cierra </" + nombre + "> pero estaba abierto <" + actual.nombre + ">");
       }
       pila.pop();
+      actual.fin = fin + 1;
     } else {
       const autocierre = interior.endsWith("/");
       const cuerpo = autocierre ? interior.slice(0, -1).trim() : interior;
       const m = /^([A-Za-z_][\w.:-]*)([^]*)$/.exec(cuerpo);
       if (!m) fallo(i, "etiqueta inválida");
-      const nodo = { nombre: m[1], atributos: leerAtributos(m[2]), hijos: [] };
+      // `desde`/`hasta` son el tramo de la ETIQUETA de apertura (donde viven los atributos) y
+      // `fin`, el final de todo el elemento; el editor de layout reescribe el XML con ellos. El
+      // modelo no los copia.
+      const nodo = {
+        nombre: m[1], atributos: leerAtributos(m[2]), hijos: [], desde: i, hasta: fin + 1,
+        fin: fin + 1,
+      };
       pila[pila.length - 1].hijos.push(nodo);
       if (!autocierre) pila.push(nodo);
     }
@@ -142,6 +149,12 @@ function local(atributos, nombre) {
   return clave ? atributos[clave] : "";
 }
 
+// El `android:` primero y, si no está, cualquier prefijo con el mismo nombre local. Lo usan el
+// mediador del modelo y el editor de layout (para la orientación del LinearLayout).
+export function atributoLocal(atributos, nombre) {
+  return local(atributos, nombre);
+}
+
 function aNumero(valor) {
   const n = Number(valor);
   return Number.isFinite(n) ? n : 0;
@@ -159,7 +172,7 @@ function dimension(valor, maximo) {
   return Math.max(0, Number(m[1]));
 }
 
-function paddingDe(nodo) {
+export function paddingDe(nodo) {
   const general = aNumero(dimension(local(nodo.atributos, "padding"), 0));
   const horizontal = aNumero(dimension(local(nodo.atributos, "paddingHorizontal"), 0));
   const vertical = aNumero(dimension(local(nodo.atributos, "paddingVertical"), 0));
@@ -197,7 +210,7 @@ function esTexto(tipo) {
   return /^(TextView|EditText|AutoCompleteTextView|CheckedTextView|TextInputEditText)$/.test(tipo);
 }
 
-function esLineal(tipo) {
+export function esLineal(tipo) {
   return /^(LinearLayout|RadioGroup|TableRow|TableLayout)$/.test(tipo);
 }
 

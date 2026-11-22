@@ -117,8 +117,8 @@ diagnóstico en vivo y misma paleta. La fila es `.editor-fila`, con tres hijos:
   <div class="editor">…</div>
   <div id="separador-previa" role="separator" aria-orientation="vertical" tabindex="0" …></div>
   <aside id="previa-lateral">
-    … #previa-modo-vivo | #previa-modo-render …
-    <div id="previa-vivo">…#previa-vivo-canvas</div>
+    … #previa-modo-vivo | #previa-modo-render | #previa-modo-editar …
+    <div id="previa-vivo">…#previa-vivo-canvas … #previa-paleta … #previa-editar-estado</div>
     <div id="previa-render">…#previa-lateral-canvas … #previa-log</div>
   </aside>
 </div>
@@ -132,15 +132,20 @@ diagnóstico en vivo y misma paleta. La fila es `.editor-fila`, con tres hijos:
 | `#previa-alternar` | el botón **Previa** de la barra del fichero; `aria-expanded` |
 | `#previa-cerrar` | la × de la cabecera del panel |
 | `#previa-modo-vivo`, `#previa-modo-render` | las dos pestañas (`role="tab"`, `aria-selected`) |
+| `#previa-modo-editar` | el **lápiz** del modo editar: interruptor con `aria-pressed`, `aria-label="Editar layout"` y `aria-controls="previa-paleta"` |
 | `#previa-vivo`, `#previa-render` | los paneles (`role="tabpanel"`) |
-| `#previa-vivo-canvas`, `#previa-vivo-estado` | el canvas del layout dibujado y su línea de estado |
+| `#previa-vivo-canvas`, `#previa-vivo-estado` | el canvas del layout dibujado (enfocable: `tabindex="0"`) y su línea de estado |
+| `#previa-paleta` | la paleta de añadir elementos (`role="toolbar"`); `hidden` fuera del modo editar |
+| `#previa-anadir-textview`, `#previa-anadir-button`, `#previa-anadir-imageview`, `#previa-anadir-linearlayout`, `#previa-anadir-framelayout` | los cinco botones de la paleta; cada uno con `data-tipo` |
+| `#previa-editar-estado` | el estado del modo editar: qué está seleccionado, el último cambio o el motivo por el que no se puede editar (`role="status"`) |
 | `#previa-lateral-canvas`, `#previa-render-estado` | el canvas del modelo con eventos y su línea de estado |
 | `#previa-log`, `#previa-log-cabecera`, `#previa-log-lista`, `#previa-log-vacio` | la consola del intérprete (`role="log"`) |
 
 `previa-panel.js` es dueño de esta pieza y no importa `pestana.js`: recibe `hospedador`, la carpeta
 del proyecto, `estadoPestana` y `EDITOR` desde `pestana.js` (`crearPreviaPanel`). Así el editor no
 gana una copia del estado y la prueba de node puede importar las funciones puras. `vista-xml.js`
-convierte el XML en modelo, también sin DOM.
+convierte el XML en modelo, también sin DOM; `layout-editor.js` hace el camino de vuelta del modo
+editar (modelo → XML), con las mismas reglas y sin DOM.
 
 ### El separador
 
@@ -189,6 +194,44 @@ cambiar de documento y 400 ms cuando el árbol se repinta; nunca lanza un comand
 motivo; con un **XML a medias o inválido** se conserva el último render bueno y la línea de estado
 avisa con `XML inválido (línea N): se conserva el último render…` (clase `.con-aviso`), sin pintar
 nada de código en el canvas.
+
+### Modo editar: el lápiz
+
+El botón `#previa-modo-editar` (un lápiz, con `aria-pressed`) enciende y apaga el **modo editar**
+sobre la lectura **En vivo**. No es una tercera pestaña: es un interruptor que convierte el dibujo
+en un lienzo de edición. Al encenderlo se fuerza `vivo`; cambiar a **Render (eventos)** u ocultar el
+panel lo apaga, y el modo no se persiste: al recargar se vuelve a la vista de solo lectura.
+
+- **Paleta.** `#previa-paleta` ofrece los cinco tipos que el render en vivo ya dibuja —`TextView`,
+  `Button`, `ImageView`, `LinearLayout`, `FrameLayout`— y cada botón (`data-tipo`) añade el elemento
+  como último hijo de la raíz. El XML que se escribe lleva `android:layout_width="wrap_content"`,
+  `android:layout_height="wrap_content"`, `android:text` en las vistas de texto y un
+  `android:id="@+id/…"` libre (`boton`, `boton2`…): así el elemento se puede tocar en el canvas
+  enseguida. Un contenedor entra con un `TextView` dentro para que haya algo que arrastrar.
+- **Arrastrar.** `pointerdown` sobre el canvas hace *hit-test* con los `rect` del modelo en vivo
+  (gana el nodo más profundo; la raíz no se selecciona) y arranca un arrastre que se sigue en el
+  documento. Mientras se mueve se dibuja el contorno desplazado; al soltar se aplica:
+  - en un contenedor **de marco** (`FrameLayout`, `RelativeLayout`, `ScrollView`…) se escriben
+    `android:layout_marginLeft` y `android:layout_marginTop` en dp y se quita `android:layout_gravity`,
+    porque con gravedad el margen no se aplica; el nodo no se reparenta;
+  - en un **`LinearLayout`** (vertical u horizontal) se **reordena el hijo** en el XML: el índice
+    sale de comparar el punto donde se suelta con los centros de sus hermanos.
+- **Selección y borrado.** Un clic selecciona (contorno con `--acento` y estado con el tipo y el
+  id), `Supr` borra el nodo del XML y `Esc` suelta la selección. El manejador ignora los campos de
+  texto y cualquier combinación con `Ctrl`/`Alt`/`Meta`, así que no toca el autocompletado, la
+  paleta `Ctrl+Mayús+P` ni `Ctrl+G`.
+- **Cómo escribe.** Toda edición es `layout-editor.js` (puro: `insertarElemento`, `moverEnMarco`,
+  `reordenarHijo`, `borrarElemento`) sobre el texto del buffer y se aplica con `EDITOR.cambiar()`:
+  el cambio entra en el undo tree y el documento queda sucio una sola vez. Después del cambio el
+  foco vuelve al canvas para que `Supr` y `Esc` sigan respondiendo. Si el layout dibujado no es el
+  documento abierto, el XML está a medias o no hay layout válido, la paleta se deshabilita y
+  `#previa-editar-estado` dice por qué en vez de escribir a ciegas. Guardar es lo de siempre:
+  `Ctrl+S`.
+
+Frontera del modo editar: solo cambia lo que el render en vivo entiende. No hay constraints de
+`ConstraintLayout` (ni `bias`, ni cadenas), ni estilos ni temas, ni reparentado (arrastrar un nodo
+dentro de otro contenedor), ni imágenes reales de `drawable`, ni deshacer propio (el del editor),
+ni edición de `@string`, y un layout lineal no admite posición libre: ahí mover es reordenar.
 
 ### Render y consola de la ejecución
 
@@ -727,8 +770,8 @@ En `@media (max-width: 760px)`:
 | `node studio/prueba.js` | genera el zip, comprueba EOCD, plantillas, reglas, ids de `index.html` (de `diagnostico.js`, `temas.js`, `historial.js`, `vista-previa.js`, `previa-panel.js`, `autocompletado.js`), ids viejos prohibidos, sin `<pre>` en el panel, el resaltador puro, el modelo del layout dibujado en vivo y los datos del autocompletado (recursos, `R.java`, contexto y lector de zip/.class) |
 | `node studio/prueba-navegador.js` | `http` sin COOP/COEP: DOM, tres vistas, tres botones de actividad, reflejo del nombre/package, aviso de que no hay OPFS, localStorage, el diagnóstico, los temas y la paleta ANSI, y el contrato de la vista dividida (separador con teclado, alternancia En vivo/Render, que no haya `<pre>` con el XML y consola vacía con su motivo) |
 | `APKC_WASM=... node studio/prueba-crear.js` | por http con OPFS: crear, escribir el proyecto, abrir el manifiesto, comprobar `data-ruta` del arbol, API 34, el árbol cerrado, subir/mover ficheros, exportar/importar el `.zip`, ajustes, pestañas, undo tree, dos ventanas y fusión/conflicto |
-| `APKC_WASM=... APK_EJEMPLO=... KS_EJEMPLO=... ANDROID_JAR=... node studio/prueba-pestana.js` | la pestaña completa: editar, guardar, recargar, jar del SDK, compilar debug/release, firmar, verificar, recargar sin red, cero peticiones fuera del origen, el autocompletado (recursos, jar por trozos, Tab/Esc/flechas y undo), el enlace `ruta:línea`, Detener, y la vista dividida: separador por puntero y teclado, compilar→pintar sin mover el cursor, el layout **dibujado** en vivo que cambia al editar `android:text` sin compilar, XML inválido que conserva el render, alternancia En vivo/Render con estado, y la consola de la ejecución con el JSON del Contador, el `<script>` escapado y el límite de 64/24 |
-| `APKC=... APKC_WASM=... sh studio/e2e.sh` | todo lo anterior más los apk/aab nativos y la plantilla Contador; en la pestaña, 127 comprobaciones |
+| `APKC_WASM=... APK_EJEMPLO=... KS_EJEMPLO=... ANDROID_JAR=... node studio/prueba-pestana.js` | la pestaña completa: editar, guardar, recargar, jar del SDK, compilar debug/release, firmar, verificar, recargar sin red, cero peticiones fuera del origen, el autocompletado (recursos, jar por trozos, Tab/Esc/flechas y undo), el enlace `ruta:línea`, Detener, la vista dividida (separador por puntero y teclado, compilar→pintar sin mover el cursor, el layout **dibujado** en vivo que cambia al editar `android:text` sin compilar, XML inválido que conserva el render, alternancia En vivo/Render con estado, la consola de la ejecución con el JSON del Contador, el `<script>` escapado y el límite de 64/24) y el **modo editar** (lápiz, añadir un `Button` al XML y al dibujo, arrastrar dentro de un `FrameLayout`, `Supr`, `Esc` y el undo tree) |
+| `APKC=... APKC_WASM=... sh studio/e2e.sh` | todo lo anterior más los apk/aab nativos y la plantilla Contador; en la pestaña, 143 comprobaciones |
 
 El gate completo de la pagina es `e2e.sh`; `prueba-pestana.js` solo no basta para decir que la
 pagina funciona. Los comandos de entorno estan en `tools/entorno.sh` (`test`, `wasm`, `gate`).
@@ -751,8 +794,12 @@ estan en `studio/README.md` y en `docs/evidencia.md` §140. En resumen: se copia
   propias (LinearLayout con pesos, marcos, textos, tamaños, gravedad, padding y márgenes); no
   conoce `ConstraintLayout` por sus constraints, estilos, temas, `drawable` ni medidas de fuente
   reales. No ejecuta la app: los eventos están en **Render (eventos)**.
-- **El XML no se edita en el panel.** Se dibuja; los cambios se hacen en el editor de siempre y el
-  panel los sigue con 350 ms de retardo. No sigue el cursor ni resalta el fichero.
+- **El XML se edita en el panel, pero solo lo que el render en vivo entiende.** El lápiz
+  (`#previa-modo-editar`) añade los cinco tipos de la paleta, arrastra nodos dentro de su padre
+  (márgenes en un marco, reordenar en un `LinearLayout`) y los borra con `Supr`; no hay
+  `ConstraintLayout`, estilos ni reparentado. El panel escribe con `EDITOR.cambiar()`, así que el
+  texto, el cursor y el undo tree son los del editor de siempre. La vista **Vista** y el modo
+  **Render (eventos)** siguen siendo de solo lectura.
 - **El render es el modelo de `apkc preview`, no la app ejecutándose.** La consola muestra lo que
   el intérprete capturó en `onCreate` y en los clics registrados; no es un `logcat` ni hay hilos,
   JNI ni excepciones fuera del subconjunto que el intérprete resuelve.
