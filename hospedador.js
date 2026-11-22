@@ -147,31 +147,39 @@ async function ejecutar(argv, env) {
   };
 
   if (!bytesModule) {
-    // El paquete publicado sirve apkc.wasm.gz (3,4 MB frente a 12,8 MB) y se descomprime en el
-    // navegador con DecompressionStream; si no está, no existe la API o los bytes no son un wasm,
-    // cae al .wasm sin comprimir. Ambos caminos son del mismo origen (regla 4).
-    // Un transporte que trunca el cuerpo devuelve 200 y rompe el arrayBuffer de la respuesta
-    // descomprimida: sin este try el fallback era inalcanzable (hallazgo confirmado por critico).
-    let bytes = null;
-    if (typeof DecompressionStream === "function") {
+    // Un cuerpo truncado llega con 200 y con su Content-Length original, así que basta comparar
+    // los bytes recibidos con esa cabecera para saber que la copia (de red o del SW) está podrida.
+    // Se prueba primero la copia cacheada, después una URL nueva que fuerza red, y al final el
+    // binario sin comprimir. Todo del mismo origen (regla 4).
+    const rutas = ["/apkc.wasm.gz", "/apkc.wasm.gz?directo=" + Date.now(),
+                   "/apkc.wasm", "/apkc.wasm?directo=" + Date.now()];
+    for (const ruta of rutas) {
       try {
-        const comprimido = await fetch("/apkc.wasm.gz");
-        if (comprimido.ok && comprimido.body) {
-          const llano = comprimido.body.pipeThrough(new DecompressionStream("gzip"));
-          const candidato = new Uint8Array(await new Response(llano).arrayBuffer());
-          if (magicoWasm(candidato)) bytes = candidato;
+        const respuesta = await fetch(ruta);
+        if (!respuesta.ok) continue;
+        const crudo = new Uint8Array(await respuesta.arrayBuffer());
+        const esperado = Number(respuesta.headers.get("content-length") || 0);
+        if (esperado && crudo.length !== esperado) {
+          console.warn("wasm truncado en", ruta, crudo.length, "de", esperado);
+          continue;
+        }
+        let candidato = crudo;
+        if (ruta.indexOf(".gz") >= 0) {
+          if (typeof DecompressionStream !== "function") continue;
+          const llano = new Blob([crudo]).stream().pipeThrough(new DecompressionStream("gzip"));
+          candidato = new Uint8Array(await new Response(llano).arrayBuffer());
+        }
+        if (magicoWasm(candidato) && candidato.length > 1024) {
+          bytesModule = candidato;
+          break;
         }
       } catch (e) {
-        console.warn("no se pudo descomprimir apkc.wasm.gz:", e && e.message ? e.message : e);
+        console.warn("no se pudo cargar", ruta + ":", e && e.message ? e.message : e);
       }
     }
-    if (!bytes) {
-      const respuesta = await fetch("/apkc.wasm");
-      if (!respuesta.ok) throw new Error("apkc.wasm no está servido (levanta servidor.js con APKC_WASM)");
-      bytes = new Uint8Array(await respuesta.arrayBuffer());
-      if (!magicoWasm(bytes)) throw new Error("apkc.wasm llegó truncado o no es un módulo wasm");
+    if (!bytesModule) {
+      throw new Error("no se pudo bajar un apkc.wasm íntegro: recarga con Ctrl+Mayús+R o borra los datos del sitio");
     }
-    bytesModule = bytes;
   }
   // la instancia se crea CADA VEZ: un binario de Go en wasm no puede volver a correrse sobre la
   // misma instancia después de salir, así que lo que se guarda son los bytes, no la instancia
