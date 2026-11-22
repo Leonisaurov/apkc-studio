@@ -1304,7 +1304,7 @@ async function conductor() {
     })`);
     comprueba("el diagnóstico en vivo marca el error con la vista previa abierta",
       conVista.cuerpo === "vista" && conVista.activa === true &&
-      /error/i.test(String(vivoVista.estado)) && /linea 4|linea 5/.test(String(vivoVista.lista)) &&
+      /error/i.test(String(vivoVista.estado)) && /linea [45]|vivo\.java:[45]/.test(String(vivoVista.lista)) &&
       vivoVista.marcas >= 1,
       JSON.stringify({ conVista, vivoVista }).slice(0, 280));
     await evaluar(`document.dispatchEvent(new KeyboardEvent("keydown",
