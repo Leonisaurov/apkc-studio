@@ -1954,6 +1954,218 @@ async function conductor() {
       vivoVacio.tinta === 0 && vivoVacio.modelo === true && vivoVacio.restaurado === true,
       JSON.stringify(vivoVacio).slice(0, 280));
 
+    // 12a-septies. el modo editar del layout: el lápiz, la paleta, el arrastre, el borrado y el
+    // undo tree. Nada de esto abre otra pestaña ni toca el Emulador (Render con eventos).
+    const editorLayout = await evaluar(`(async () => {
+      const vp = await import("/vista-previa.js");
+      marcarSucio(false);
+      await abrir("/proyecto/res/layout/main.xml");
+      if (!PREVIA_PANEL.estado().visible) document.getElementById("previa-alternar").click();
+      document.getElementById("previa-modo-vivo").click();
+      await new Promise((ok) => setTimeout(ok, 900));
+      const area = document.getElementById("codigo");
+      const original = area.value;
+      const boton = document.getElementById("previa-modo-editar");
+      const paleta = document.getElementById("previa-paleta");
+      const estadoEditar = document.getElementById("previa-editar-estado");
+      const canvas = document.getElementById("previa-vivo-canvas");
+      const apagado = {
+        pressed: boton.getAttribute("aria-pressed"),
+        paleta: paleta.hidden,
+        estado: estadoEditar.hidden,
+        modo: PREVIA_PANEL.estado().modo,
+        editando: PREVIA_PANEL.estado().editando,
+      };
+      boton.click();
+      await new Promise((ok) => setTimeout(ok, 500));
+      const encendido = {
+        pressed: boton.getAttribute("aria-pressed"),
+        clase: boton.classList.contains("activo"),
+        paleta: paleta.hidden,
+        estado: estadoEditar.hidden,
+        texto: estadoEditar.textContent,
+        editando: PREVIA_PANEL.estado().editando,
+        modo: PREVIA_PANEL.estado().modo,
+        paletaHabilitada: !document.getElementById("previa-anadir-button").disabled,
+      };
+      // añadir un Button: tiene que aparecer en el XML del editor y en el dibujo
+      const botonesXmlAntes = (area.value.match(/<Button\\b/g) || []).length;
+      const antesDeAnadir = { xml: area.value, nodos: PREVIA_PANEL.modeloVivo().nodos };
+      document.getElementById("previa-anadir-button").click();
+      await new Promise((ok) => setTimeout(ok, 700));
+      const modeloBoton = PREVIA_PANEL.modeloVivo();
+      const buscar = (nodo, salida) => {
+        if (nodo.tipo === "Button") salida.push({ id: nodo.id, texto: nodo.texto, rect: nodo.rect });
+        for (const h of nodo.hijos || []) buscar(h, salida);
+      };
+      const botones = [];
+      if (modeloBoton) buscar(modeloBoton.raiz, botones);
+      const annadido = {
+        xml: /<Button\\b/.test(area.value) && /@\\+id\\/boton\\b/.test(area.value),
+        botonesXmlAntes,
+        botonesXml: (area.value.match(/<Button\\b/g) || []).length,
+        nodos: modeloBoton ? modeloBoton.nodos : 0,
+        botones,
+        nuevo: botones.some((b) => b.id === "id/boton" && b.texto === "Boton"),
+        sucio: !document.getElementById("marca-sucio").hidden,
+        nota: estadoEditar.textContent,
+        seleccion: PREVIA_PANEL.estado().seleccion,
+      };
+      // un marco con dos vistas separadas: arrastrar una cambia su margen en el XML
+      const marcoXml = '<?xml version="1.0" encoding="utf-8"?>\\n' +
+        '<FrameLayout xmlns:android="http://schemas.android.com/apk/res/android"\\n' +
+        '    android:layout_width="match_parent"\\n' +
+        '    android:layout_height="match_parent"\\n' +
+        '    android:padding="8dp">\\n\\n' +
+        '    <TextView\\n' +
+        '        android:id="@+id/uno"\\n' +
+        '        android:layout_width="wrap_content"\\n' +
+        '        android:layout_height="wrap_content"\\n' +
+        '        android:layout_gravity="top|left"\\n' +
+        '        android:text="Uno"/>\\n\\n' +
+        '    <TextView\\n' +
+        '        android:id="@+id/dos"\\n' +
+        '        android:layout_width="wrap_content"\\n' +
+        '        android:layout_height="wrap_content"\\n' +
+        '        android:layout_gravity="bottom|right"\\n' +
+        '        android:text="Dos"/>\\n' +
+        '</FrameLayout>\\n';
+      EDITOR.cambiar(0, area.value.length, marcoXml, [0, 0]);
+      await new Promise((ok) => setTimeout(ok, 800));
+      const modelo = PREVIA_PANEL.modeloVivo();
+      const dos = modelo ? modelo.raiz.hijos.find((h) => h.id === "id/dos") : null;
+      const caja = vp.escalaPara(modelo, canvas.clientWidth, canvas.clientHeight);
+      const cajaCanvas = canvas.getBoundingClientRect();
+      const factor = cajaCanvas.width > 0 && canvas.clientWidth ? canvas.clientWidth / cajaCanvas.width : 1;
+      const enCliente = (rect) => ({
+        x: cajaCanvas.left + (caja.x + (rect.x + rect.ancho / 2) * caja.escala) / factor,
+        y: cajaCanvas.top + (caja.y + (rect.y + rect.alto / 2) * caja.escala) / factor,
+      });
+      const p = enCliente(dos.rect);
+      const antesArrastre = { rect: { ...dos.rect }, xml: area.value };
+      canvas.dispatchEvent(new PointerEvent("pointerdown", { bubbles: true, button: 0, pointerId: 11,
+        clientX: p.x, clientY: p.y }));
+      await new Promise((ok) => setTimeout(ok, 60));
+      const seleccionado = PREVIA_PANEL.estado().seleccion;
+      document.dispatchEvent(new PointerEvent("pointermove", { bubbles: true, pointerId: 11,
+        clientX: p.x - 40, clientY: p.y - 60 }));
+      document.dispatchEvent(new PointerEvent("pointerup", { bubbles: true, pointerId: 11,
+        clientX: p.x - 40, clientY: p.y - 60 }));
+      await new Promise((ok) => setTimeout(ok, 700));
+      const trasModelo = PREVIA_PANEL.modeloVivo();
+      const dosTras = trasModelo ? trasModelo.raiz.hijos.find((h) => h.id === "id/dos") : null;
+      const arrastrado = {
+        seleccionado,
+        margen: /android:layout_marginLeft="\\d+dp"/.test(area.value) &&
+          /android:layout_marginTop="\\d+dp"/.test(area.value),
+        // la gravedad tiene que desaparecer SOLO del nodo movido: los demás la conservan
+        gravedad: /android:layout_gravity/.test(
+          (area.value.match(/<TextView\\s+android:id="@\\+id\\/dos"[^>]*>/) || [""])[0]),
+        rect: dosTras ? { ...dosTras.rect } : null,
+        xml: area.value,
+      };
+      // Supr borra el nodo seleccionado y Esc suelta la selección
+      document.dispatchEvent(new KeyboardEvent("keydown", { key: "Delete", bubbles: true }));
+      await new Promise((ok) => setTimeout(ok, 700));
+      const modeloTrasBorrar = PREVIA_PANEL.modeloVivo();
+      const borrado = {
+        xml: !/id\\/dos/.test(area.value),
+        hijos: modeloTrasBorrar ? modeloTrasBorrar.raiz.hijos.map((h) => h.id) : [],
+        valido: !!modeloTrasBorrar,
+        seleccion: PREVIA_PANEL.estado().seleccion,
+        nota: estadoEditar.textContent,
+      };
+      // el undo tree devuelve el nodo: lo que se borró fue un cambio del editor, no un atajo
+      const deshecho = deshacer();
+      await new Promise((ok) => setTimeout(ok, 200));
+      await PREVIA_PANEL.refrescarVivo();
+      const trasDeshacer = PREVIA_PANEL.modeloVivo();
+      const vuelta = {
+        deshecho,
+        xml: /id\\/dos/.test(area.value),
+        margen: /android:layout_marginLeft="\\d+dp"/.test(area.value),
+        hijos: trasDeshacer ? trasDeshacer.raiz.hijos.map((h) => h.id) : [],
+      };
+      // clic sin arrastre selecciona; Esc lo suelta
+      const uno = modeloTrasBorrar ? modeloTrasBorrar.raiz.hijos.find((h) => h.id === "id/uno") : null;
+      const q = uno ? enCliente(uno.rect) : { x: 0, y: 0 };
+      canvas.dispatchEvent(new PointerEvent("pointerdown", { bubbles: true, button: 0, pointerId: 12,
+        clientX: q.x, clientY: q.y }));
+      canvas.dispatchEvent(new PointerEvent("pointerup", { bubbles: true, pointerId: 12,
+        clientX: q.x, clientY: q.y }));
+      await new Promise((ok) => setTimeout(ok, 120));
+      const conSeleccion = PREVIA_PANEL.estado().seleccion;
+      const textoSeleccion = estadoEditar.textContent;
+      document.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true }));
+      await new Promise((ok) => setTimeout(ok, 120));
+      const suelto = {
+        seleccion: PREVIA_PANEL.estado().seleccion,
+        texto: estadoEditar.textContent,
+        textoSeleccion,
+      };
+      // salir del lápiz deja la vista como estaba y el Emulador sigue siendo suyo
+      document.getElementById("previa-modo-render").click();
+      await new Promise((ok) => setTimeout(ok, 120));
+      const enRender = {
+        editando: PREVIA_PANEL.estado().editando,
+        pressed: boton.getAttribute("aria-pressed"),
+        paleta: paleta.hidden,
+      };
+      document.getElementById("previa-modo-vivo").click();
+      await new Promise((ok) => setTimeout(ok, 300));
+      marcarSucio(false);
+      EDITOR.cambiar(0, area.value.length, original, [0, 0]);
+      await new Promise((ok) => setTimeout(ok, 800));
+      marcarSucio(false);
+      return { apagado, encendido, annadido, antesArrastre, arrastrado, borrado, vuelta, conSeleccion,
+        suelto, enRender, restaurado: area.value === original };
+    })()`);
+    comprueba("el lápiz enciende el modo editar (paleta y estado) y apagado deja la vista de solo lectura",
+      editorLayout.apagado.pressed === "false" && editorLayout.apagado.paleta === true &&
+      editorLayout.apagado.estado === true && editorLayout.apagado.editando === false &&
+      editorLayout.encendido.pressed === "true" && editorLayout.encendido.clase === true &&
+      editorLayout.encendido.paleta === false && editorLayout.encendido.estado === false &&
+      editorLayout.encendido.editando === true && editorLayout.encendido.paletaHabilitada === true &&
+      editorLayout.encendido.modo === "vivo",
+      JSON.stringify({ apagado: editorLayout.apagado, encendido: editorLayout.encendido }).slice(0, 400));
+    comprueba("añadir un Button lo escribe en el XML del editor y aparece en el layout dibujado",
+      editorLayout.annadido.xml === true &&
+      editorLayout.annadido.botonesXml === editorLayout.annadido.botonesXmlAntes + 1 &&
+      editorLayout.annadido.botones.length === editorLayout.annadido.botonesXml &&
+      editorLayout.annadido.nuevo === true &&
+      editorLayout.annadido.nodos >= 3 && editorLayout.annadido.sucio === true &&
+      JSON.stringify(editorLayout.annadido.seleccion) !== "null",
+      JSON.stringify(editorLayout.annadido).slice(0, 400));
+    comprueba("arrastrar una vista dentro de un FrameLayout escribe su margen y mueve el dibujo",
+      JSON.stringify(editorLayout.arrastrado.seleccionado) !== "null" &&
+      editorLayout.arrastrado.margen === true && editorLayout.arrastrado.gravedad === false &&
+      !!editorLayout.arrastrado.rect &&
+      editorLayout.arrastrado.rect.x < editorLayout.antesArrastre.rect.x - 10 &&
+      editorLayout.arrastrado.rect.y < editorLayout.antesArrastre.rect.y - 10,
+      JSON.stringify({ antes: editorLayout.antesArrastre.rect, tras: editorLayout.arrastrado.rect,
+        margen: editorLayout.arrastrado.margen, gravedad: editorLayout.arrastrado.gravedad }).slice(0, 360));
+    comprueba("Supr borra el nodo seleccionado del XML y del dibujo, y el undo tree lo devuelve",
+      editorLayout.borrado.xml === true && editorLayout.borrado.valido === true &&
+      editorLayout.borrado.hijos.join(",") === "id/uno" &&
+      editorLayout.borrado.seleccion === null &&
+      editorLayout.vuelta.deshecho === true && editorLayout.vuelta.xml === true &&
+      editorLayout.vuelta.margen === true &&
+      editorLayout.vuelta.hijos.join(",") === "id/uno,id/dos",
+      JSON.stringify({ borrado: editorLayout.borrado, vuelta: editorLayout.vuelta }).slice(0, 400));
+    comprueba("clic selecciona con contorno y Esc lo suelta sin tocar el texto",
+      JSON.stringify(editorLayout.conSeleccion) !== "null" &&
+      editorLayout.suelto.seleccion === null &&
+      /Seleccionado/.test(String(editorLayout.suelto.textoSeleccion)) &&
+      /Clic en un elemento/.test(String(editorLayout.suelto.texto)) &&
+      editorLayout.restaurado === true,
+      JSON.stringify({ conSeleccion: editorLayout.conSeleccion, suelto: editorLayout.suelto,
+        restaurado: editorLayout.restaurado }).slice(0, 320));
+    comprueba("cambiar a Render (eventos) apaga el modo editar y no deja la paleta abierta",
+      editorLayout.enRender.editando === false && editorLayout.enRender.pressed === "false" &&
+      editorLayout.enRender.paleta === true,
+      JSON.stringify(editorLayout.enRender).slice(0, 240));
+
+
     // 12a-octies. el separador: se arrastra con puntero, se mueve con el teclado y guarda el ancho
     // sin tocar el modelo, el texto ni el cursor del editor.
     const separadorPrueba = await evaluar(`(async () => {

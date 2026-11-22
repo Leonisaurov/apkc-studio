@@ -345,6 +345,11 @@
                   <button id="previa-modo-render" class="previa-modo" type="button" role="tab"
                           aria-selected="false" aria-controls="previa-render">Emulador</button>
                 </div>
+                <button id="previa-modo-editar" class="previa-modo previa-modo-editar" type="button"
+                        title="Editar el layout: añadir y arrastrar elementos" aria-label="Editar layout"
+                        aria-pressed="false" aria-controls="previa-paleta">
+                  <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 20l1-4L16 5l3 3L8 19z"/><path d="M13 6l3 3"/></svg>
+                </button>
                 <button id="previa-cerrar" class="icono-boton" type="button" title="Ocultar la vista previa"
                         aria-label="Ocultar la vista previa">
                   <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18"/></svg>
@@ -354,8 +359,23 @@
               <div id="previa-vivo" class="previa-vivo" role="tabpanel" aria-labelledby="previa-modo-vivo">
                 <div class="previa-marco previa-marco-lateral">
                   <canvas id="previa-vivo-canvas" class="previa-canvas previa-canvas-lateral" width="360" height="640"
-                          role="img" aria-label="Dibujo del layout del editor, sin compilar"></canvas>
+                          role="img" tabindex="0" aria-label="Dibujo del layout del editor, sin compilar"></canvas>
                 </div>
+                <div id="previa-paleta" class="previa-paleta" role="toolbar" aria-label="Añadir elementos al layout" hidden>
+                  <span class="previa-paleta-titulo">Añadir</span>
+                  <button id="previa-anadir-textview" class="previa-paleta-boton" type="button" data-tipo="TextView"
+                          title="Añadir un TextView">TextView</button>
+                  <button id="previa-anadir-button" class="previa-paleta-boton" type="button" data-tipo="Button"
+                          title="Añadir un Button">Button</button>
+                  <button id="previa-anadir-imageview" class="previa-paleta-boton" type="button" data-tipo="ImageView"
+                          title="Añadir un ImageView">ImageView</button>
+                  <button id="previa-anadir-linearlayout" class="previa-paleta-boton" type="button" data-tipo="LinearLayout"
+                          title="Añadir un LinearLayout">LinearLayout</button>
+                  <button id="previa-anadir-framelayout" class="previa-paleta-boton" type="button" data-tipo="FrameLayout"
+                          title="Añadir un FrameLayout">FrameLayout</button>
+                </div>
+                <p id="previa-editar-estado" class="previa-estado previa-editar-estado" role="status"
+                   aria-live="polite" hidden></p>
                 <p id="previa-vivo-estado" class="previa-estado" role="status" aria-live="polite">Abre un
                   res/layout/*.xml en el editor para verlo dibujado aquí, sin compilar.</p>
               </div>

@@ -14,6 +14,7 @@ import * as previaPanel from "./previa-panel.js";
 import * as autocompletado from "./autocompletado-datos.js";
 import * as xmlEditor from "./xml-editor.js";
 import * as vistaXml from "./vista-xml.js";
+import * as layoutEditor from "./layout-editor.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const a = { buildProject, makeZip, analyze, RULES, crc32 };
@@ -173,7 +174,7 @@ const pestana = fs.readFileSync(path.join(__dirname, "pestana.js"), "utf8");
 for (const m of pestana.matchAll(/getElementById\("([^"]+)"\)/g))
   if (!ids.has(m[1])) mal(`pestana.js pide #${m[1]} y index.html no lo tiene`);
 for (const fichero of ["diagnostico.js", "temas.js", "historial.js", "vista-previa.js",
-  "previa-panel.js", "autocompletado.js", "diagnostico-vivo.js"]) {
+  "previa-panel.js", "autocompletado.js", "diagnostico-vivo.js", "layout-editor.js"]) {
   const fuente = fs.readFileSync(path.join(__dirname, fichero), "utf8");
   for (const m of fuente.matchAll(/getElementById\("([^"]+)"\)/g))
     if (!ids.has(m[1])) mal(`${fichero} pide #${m[1]} y index.html no lo tiene`);
@@ -476,6 +477,103 @@ if (conLinea.ok !== false || !(conLinea.linea >= 1)) {
   mal("modeloDeLayout no dice la línea del XML roto: " + JSON.stringify(conLinea));
 }
 
+// 6b-bis. el editor de layout del modo editar: añadir, mover, reordenar y borrar son operaciones
+// de TEXTO sobre el XML. Se prueban aquí porque son puras; que el panel las aplique con el canvas
+// y el undo tree se conduce en `prueba-pestana.js`.
+const layoutBase = `<?xml version="1.0" encoding="utf-8"?>
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:orientation="vertical"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent">
+
+    <TextView
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:text="Hola"/>
+</LinearLayout>
+`;
+const insertado = layoutEditor.insertarElemento(layoutBase, { tipo: "Button" });
+if (!insertado.ok) mal("el editor de layout no añade un Button: " + insertado.error);
+else {
+  if (!/<Button\b/.test(insertado.xml) || !/@\+id\/boton\b/.test(insertado.xml)) {
+    mal("el Button añadido no trae su id: " + insertado.xml.slice(-240));
+  }
+  if (!/android:layout_width="wrap_content"/.test(insertado.xml) || !/android:text="Boton"/.test(insertado.xml)) {
+    mal("el Button añadido no trae wrap_content y texto");
+  }
+  const modeloInsertado = vistaXml.modeloDeLayout(insertado.xml);
+  if (!modeloInsertado.ok) mal("el XML con el Button añadido no se puede analizar: " + modeloInsertado.error);
+  else {
+    const boton = modeloInsertado.modelo.raiz.hijos.find((h) => h.tipo === "Button");
+    if (!boton || boton.id !== "id/boton" || boton.texto !== "Boton") {
+      mal("el modelo en vivo no ve el Button añadido: " + JSON.stringify(modeloInsertado.modelo.raiz.hijos.map((h) => h.tipo)));
+    }
+  }
+  const otro = layoutEditor.insertarElemento(insertado.xml, { tipo: "Button" });
+  if (!otro.ok || otro.id !== "boton2" || !/@\+id\/boton2/.test(otro.xml)) {
+    mal("el segundo Button no recibe un id libre: " + otro.id);
+  }
+  const contenedor = layoutEditor.insertarElemento(layoutBase, { tipo: "FrameLayout" });
+  if (!contenedor.ok || !/<FrameLayout\b/.test(contenedor.xml) || !/<TextView\b/.test(contenedor.xml)) {
+    mal("el FrameLayout añadido no lleva dentro un hijo con el que poder probar el arrastre");
+  }
+}
+const conMarco = `<?xml version="1.0" encoding="utf-8"?>
+<FrameLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent">
+
+    <TextView
+        android:id="@+id/uno"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:layout_gravity="center"
+        android:text="Uno"/>
+
+    <TextView
+        android:id="@+id/dos"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:text="Dos"/>
+</FrameLayout>
+`;
+const movido = layoutEditor.moverEnMarco(conMarco, [1], { izquierda: 40, arriba: 24 });
+if (!movido.ok || !/android:layout_marginLeft="40dp"/.test(movido.xml) ||
+    !/android:layout_marginTop="24dp"/.test(movido.xml)) {
+  mal("mover en un marco no escribe los márgenes: " + (movido.error || movido.xml));
+} else {
+  const m = vistaXml.modeloDeLayout(movido.xml);
+  const dos = m.ok ? m.modelo.raiz.hijos[1] : null;
+  if (!dos || dos.rect.x !== 40 || dos.rect.y !== 24) {
+    mal("el margen escrito no coloca el nodo donde se arrastró: " + JSON.stringify(dos && dos.rect));
+  }
+}
+const sinGravedad = layoutEditor.moverEnMarco(conMarco, [0], { izquierda: 8, arriba: 6 });
+if (!sinGravedad.ok || /layout_gravity/.test(sinGravedad.xml)) {
+  mal("mover no quita layout_gravity: el margen no se aplicaría");
+}
+const ordenado = layoutEditor.reordenarHijo(conMarco, [0], 1);
+if (!ordenado.ok || !ordenado.cambio) mal("no reordena dos hijos del mismo LinearLayout/marco: " + ordenado.error);
+else {
+  const m = vistaXml.modeloDeLayout(ordenado.xml);
+  const ids = m.ok ? m.modelo.raiz.hijos.map((h) => h.id) : [];
+  if (ids.join(",") !== "id/dos,id/uno") mal("reordenar no cambia el orden del XML: " + ids.join(","));
+}
+const quitado = layoutEditor.borrarElemento(conMarco, [1]);
+if (!quitado.ok || /id\/dos/.test(quitado.xml) || !vistaXml.modeloDeLayout(quitado.xml).ok) {
+  mal("borrar un nodo no deja el XML válido sin él: " + (quitado.error || ""));
+}
+if (layoutEditor.borrarElemento(conMarco, []).ok) mal("el editor de layout deja borrar la raíz");
+if (layoutEditor.insertarElemento("<LinearLayout>", { tipo: "Button" }).ok) {
+  mal("el editor de layout acepta un XML roto para añadir");
+}
+const raizVacia = "<FrameLayout xmlns:android=\"http://schemas.android.com/apk/res/android\" " +
+  "android:layout_width=\"match_parent\" android:layout_height=\"match_parent\" />";
+const enVacia = layoutEditor.insertarElemento(raizVacia, { tipo: "TextView" });
+if (!enVacia.ok || !vistaXml.modeloDeLayout(enVacia.xml).ok || !/<TextView\b/.test(enVacia.xml)) {
+  mal("añadir sobre una raíz autocerrada no abre la etiqueta: " + (enVacia.error || enVacia.xml));
+}
+
 // el bloque que emite el intérprete: capturas en orden, avisos aparte, cuentas y error tolerantes
 const ejecucionContador = {
   actividad: "com.hola.contador.MainActivity", metodo: "onCreate", pasos: 128, interacciones: 1,
@@ -629,6 +727,14 @@ for (const [id, donde] of [
   ["previa-log-lista", "la consola de la ejecución"],
   ["previa-log-cabecera", "el resumen de la ejecución"],
   ["previa-log-vacio", "el mensaje de «sin ejecución»"],
+  ["previa-modo-editar", "el lápiz que entra y sale del modo editar"],
+  ["previa-paleta", "la paleta de añadir elementos"],
+  ["previa-anadir-textview", "el botón que añade un TextView"],
+  ["previa-anadir-button", "el botón que añade un Button"],
+  ["previa-anadir-imageview", "el botón que añade un ImageView"],
+  ["previa-anadir-linearlayout", "el botón que añade un LinearLayout"],
+  ["previa-anadir-framelayout", "el botón que añade un FrameLayout"],
+  ["previa-editar-estado", "la línea de estado del modo editar"],
   ["vista-modo-previa", "la pestaña Vista previa de la vista Pantalla"],
   ["vista-modo-emulador", "la pestaña Emulador de la vista Pantalla"],
   ["vista-layout", "el panel de Vista previa de la vista Pantalla"],
@@ -650,6 +756,18 @@ for (const [id, donde] of [
   ["vista-lado", "la columna de estado y consola de la vista Pantalla"],
 ]) {
   if (!ids.has(id)) mal(`${donde} (${id}) no está en index.html`);
+}
+if (!/id="previa-modo-editar"[^>]*aria-label="Editar layout"/.test(html)) {
+  mal("el lápiz del modo editar no se llama «Editar layout»");
+}
+if (!/id="previa-modo-editar"[^>]*aria-pressed="false"/.test(html)) {
+  mal("el lápiz del modo editar no declara aria-pressed");
+}
+if (!/id="previa-paleta"[^>]*hidden/.test(html)) {
+  mal("la paleta de añadir empieza visible: solo debe verse en modo editar");
+}
+for (const tipo of ["TextView", "Button", "ImageView", "LinearLayout", "FrameLayout"]) {
+  if (!new RegExp('data-tipo="' + tipo + '"').test(html)) mal("la paleta no ofrece " + tipo);
 }
 // el modo «en vivo» dibuja el layout: no puede quedar ni un visor de código XML en el panel
 for (const idViejo of ["previa-xml", "previa-xml-codigo", "previa-xml-estado", "previa-modo-xml"]) {

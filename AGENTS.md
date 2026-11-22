@@ -69,7 +69,8 @@ dar el editor por probado, comprueba en la salida `pestaña: N comprobaciones` y
 | `vistas.js` | cambio de vista, reflejo nombre/package y creación del proyecto desde el formulario. |
 | `vista-previa.js` | modelo y pintura de `apkc preview`: funciones puras y canvas; publica `apkc:previa-actualizada`. |
 | `vista-xml.js` | el XML del editor convertido en modelo (`pantalla` + nodos con `rect`): parser mínimo, jerarquía, pesos, gravedad y `@string`. Puro, sin DOM. |
-| `previa-panel.js` | las dos superficies de la vista previa (la vista dividida del editor y la vista Pantalla): cuatro aristas y cuatro esquinas por marco, modo **Vista previa** (layout dibujado) y **Emulador** (modelo de `apkc preview`) y consola del intérprete, pintadas con el mismo modelo. Recibe `hospedador` y `EDITOR`; no importa `pestana.js`. |
+| `layout-editor.js` | el camino de vuelta del modo editar: añadir, mover (margen en un marco, reordenar en un `LinearLayout`) y borrar sobre el XML. Puro, sin DOM. |
+| `previa-panel.js` | las dos superficies de la vista previa (la vista dividida del editor y la vista Pantalla): cuatro aristas y cuatro esquinas por marco, modo **Vista previa** (layout dibujado), **Emulador** (modelo de `apkc preview`), consola del intérprete y el **modo editar** del layout, pintados con el mismo modelo. Recibe `hospedador` y `EDITOR`; no importa `pestana.js`. |
 | `diagnostico.js` | panel de Inicio que pinta `analyze()`; solo DOM, sin reglas propias. |
 | `hospedador.js` | worker de módulo: `fs`/`path`/`process` para Go y una cola de un comando por vez. |
 | `fs-fragmento.js` | `fs` con forma de Node sobre OPFS (lo importa el worker, no la página). |
@@ -88,12 +89,16 @@ los imports y no debe depender de ese puente.
 
 ## Contratos que rompen pruebas
 
-- **La vista dividida no muta el modelo.** `previa-panel.js` reparte ancho y alto con
+- **La vista dividida no muta el modelo por mirar.** `previa-panel.js` reparte ancho y alto con
   `--previa-ancho`/`--previa-alto`/`--previa-arriba` desde sus ocho tiradores, pinta el layout
   **dibujado** desde el buffer o de OPFS (nunca su código en un `<pre>`) y, en el otro modo, el
   modelo ya emitido, en la vista dividida **y** en la vista Pantalla; ningún `pointerdown` de un
-  tirador ni del panel escribe en OPFS, cambia `estadoPestana` ni reescribe `#codigo`. El texto del
-  intérprete se pinta con `textContent`: `<script>` sale escapado.
+  tirador ni del panel escribe en OPFS, cambia `estadoPestana` ni reescribe `#codigo`. La excepción
+  es el **modo editar** (`#previa-modo-editar`): solo con el lápiz encendido, y solo al pulsar la
+  paleta, soltar un arrastre o `Supr`, `layout-editor.js` devuelve el XML nuevo y se aplica con
+  `EDITOR.cambiar()` (undo tree y documento sucio); sigue sin escribir en OPFS —eso es `Ctrl+S`— ni
+  cambiar `estadoPestana`. El texto del intérprete se pinta con `textContent`: `<script>` sale
+  escapado.
 - **Los ids son contrato.** `prueba.js` comprueba que todo `getElementById` de `vistas.js`,
   `pestana.js` y `diagnostico.js` exista en `index.html`; `prueba-crear.js`, `prueba-pestana.js`
   y `e2e.sh` buscan ids concretos. Cambiar uno exige cambiar su prueba.

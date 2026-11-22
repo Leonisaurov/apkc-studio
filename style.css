@@ -621,6 +621,49 @@ body.separando-previa[data-eje="suroeste"] { cursor: nesw-resize; }
   box-shadow: inset 0 -2px 0 var(--acento);
 }
 .previa-modo:focus-visible { outline: 2px solid var(--foco); outline-offset: -2px; }
+/* el lápiz entra y sale del modo editar: no es una tercera pestaña, es un interruptor */
+.previa-modo-editar { flex: 0 0 auto; padding: 4px 6px; }
+.previa-modo-editar svg {
+  width: 15px;
+  height: 15px;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.8;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  display: block;
+}
+.previa-modo-editar.activo {
+  background: var(--acento);
+  color: var(--blanco);
+  box-shadow: none;
+}
+.previa-paleta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  align-items: center;
+}
+.previa-paleta[hidden] { display: none; }
+.previa-paleta-titulo { font-size: 11px; color: var(--texto-medio); margin-right: 2px; }
+.previa-paleta-boton {
+  background: var(--boton);
+  border: 1px solid var(--borde2);
+  border-radius: 4px;
+  color: var(--texto-fuerte);
+  font: inherit;
+  font-size: 11px;
+  padding: 2px 6px;
+  cursor: pointer;
+}
+.previa-paleta-boton:hover:not(:disabled) { background: var(--boton-hover); color: var(--blanco); }
+.previa-paleta-boton:disabled { opacity: .5; cursor: not-allowed; }
+.previa-paleta-boton:focus-visible { outline: 2px solid var(--foco); outline-offset: -2px; }
+/* en modo editar el canvas no es una imagen: se arrastra dentro de él */
+.previa-canvas.editable { cursor: grab; touch-action: none; }
+.previa-canvas.editable:active { cursor: grabbing; }
+.previa-canvas:focus-visible { outline: 2px solid var(--foco); outline-offset: 2px; }
+.previa-editar-estado[hidden] { display: none; }
 .previa-vivo,
 .previa-render {
   flex: 1 1 auto;

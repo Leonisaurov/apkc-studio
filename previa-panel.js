@@ -21,15 +21,20 @@
 // Cada marco (editor y Pantalla) tiene cuatro aristas y cuatro esquinas: un tirador horizontal
 // cambia el ancho y uno vertical el alto; las esquinas cambian los dos. Es preferencia de ventana.
 //
+// Sobre la lectura «Vista previa» hay un modo **editar** (lápiz): añade nodos, los reordena en un
+// LinearLayout o les fija márgenes en un marco, escribiendo el XML del editor con
+// `layout-editor.js` (puro). El panel sigue sin tocar el documento: se lo pide a `EDITOR.cambiar`.
+//
 // Funciones puras, probadas en node (`prueba.js`): `medidaValida`, `anchoValido`,
 // `cajaRedimensionada`, `esRutaDeLayout`, `candidatosDeLayout`, `resumenEjecucion`,
 // `oyentesDeModelo` y `nodoEnPunto`. El modelo en vivo se prueba en `vista-xml.js`. La carpeta de
 // OPFS y el documento activo llegan por el objeto de dependencias: no importa `pestana.js`.
 import {
   pintarModelo, modeloActual, EVENTO_PREVIA, modeloDeSalida, pintarVistaPrevia, nodosAplanados,
-  textoDeNodo, rectsEscalados,
+  textoDeNodo, rectsEscalados, escalaPara,
 } from "./vista-previa.js";
-import { modeloDeLayout, decodificarEntidades } from "./vista-xml.js";
+import { modeloDeLayout, decodificarEntidades, paddingDe, esLineal, atributoLocal } from "./vista-xml.js";
+import { insertarElemento, moverEnMarco, reordenarHijo, borrarElemento } from "./layout-editor.js";
 
 // Persistencia de la vista dividida. Son preferencias de esta ventana, no del proyecto.
 const CLAVE_ANCHO = "apkc-studio/previa-ancho";
@@ -337,6 +342,14 @@ export function crearPreviaPanel({ hospedador, proyecto, estadoPestana, editor }
   // que es lo que hace reproducible la pantalla (el comando no guarda estado entre invocaciones)
   let pulsos = [];
   let pulsando = false;
+  // El modo editar no es un tercer modo de lectura: es un interruptor sobre «Vista previa». Guarda
+  // la ruta del nodo seleccionado (índices desde la raíz, sin contar los nodos de texto) y el
+  // arrastre de un nodo en curso. Nada de esto se persiste: al recargar se vuelve a la lectura.
+  // El arrastre del nodo se llama `arrastreNodo`: `arrastre` es el de los tiradores del marco.
+  let editando = false;
+  let seleccion = null;
+  let arrastreNodo = null;
+  let notaEdicion = "";
 
   const conDocumento = () => typeof document !== "undefined" && !!document.getElementById;
   const el = (id) => (conDocumento() ? document.getElementById(id) : null);
@@ -626,6 +639,7 @@ export function crearPreviaPanel({ hospedador, proyecto, estadoPestana, editor }
   // --- visibilidad -------------------------------------------------------------------------
   function aplicarVisible(valor, persistir) {
     visible = !!valor;
+    if (!visible && editando) aplicarEditable(false);
     const marco = marcoPanel();
     const panel = el("previa-lateral");
     const separador = el("separador-previa");
@@ -647,6 +661,8 @@ export function crearPreviaPanel({ hospedador, proyecto, estadoPestana, editor }
   function aplicarModo(valor, persistir) {
     // una preferencia vieja (`xml`) era el nombre anterior del mismo panel dibujado
     modo = valor === "render" ? "render" : "vivo";
+    // el modo editar no existe sobre el emulador con eventos: cambiar de lectura lo apaga
+    if (modo === "render" && editando) aplicarEditable(false);
     const grupos = [
       { botones: ["previa-modo-vivo", "previa-modo-render"], secciones: ["previa-vivo", "previa-render"] },
       { botones: ["vista-modo-previa", "vista-modo-emulador"], secciones: ["vista-layout", "vista-emulador"] },
@@ -976,12 +992,20 @@ export function crearPreviaPanel({ hospedador, proyecto, estadoPestana, editor }
         continue;
       }
       const pintado = pintarModelo(canvas, modeloVivo);
+      // el nodo seleccionado se marca en las dos superficies: el modelo es uno y el dibujo tiene
+      // que contarlo igual en el panel del editor y en Pantalla
+      if (editando && seleccion) {
+        const nodo = nodoPorRuta(modeloVivo.raiz, seleccion);
+        if (nodo && nodo.rect) dibujarContorno(canvas, cajaDeCanvas(canvas, modeloVivo), nodo.rect, false);
+      }
       const estado = el(superficie.estadoVivo);
       if (estado && pintado && pintado.valida === false) {
         estado.textContent = "El layout no cabe en la caja del panel; se dibuja a tamaño de respaldo.";
       }
       if (!primero) primero = pintado;
     }
+    actualizarPaleta();
+    actualizarEstadoEdicion();
     return primero;
   }
 
@@ -1145,6 +1169,8 @@ export function crearPreviaPanel({ hospedador, proyecto, estadoPestana, editor }
         ponerEstadoVivo(nodos.length || error
           ? MENSAJE_SIN_LAYOUT + (error ? " (" + error + ")" : "")
           : MENSAJE_SIN_ABRIR, false);
+        actualizarPaleta();
+        actualizarEstadoEdicion();
         return;
       }
     }
@@ -1156,6 +1182,8 @@ export function crearPreviaPanel({ hospedador, proyecto, estadoPestana, editor }
       // un XML a medias no borra la pantalla que ya estaba bien: se avisa y se conserva
       ponerEstadoVivo("XML inválido" + (resultado.linea ? " (línea " + resultado.linea + ")" : "") +
         ": se conserva el último render" + (rutaViva ? " de " + relativa(rutaViva) : "") + ".", true);
+      actualizarPaleta();
+      actualizarEstadoEdicion();
       return;
     }
     rutaViva = ruta;
@@ -1206,6 +1234,360 @@ export function crearPreviaPanel({ hospedador, proyecto, estadoPestana, editor }
       // el layout del modelo puede decir cuál es el layout del proyecto si aún no hay ninguno vivo
       if (modo === "vivo" && !modeloVivo) programarVivo(ESPERA_PREVIA);
     });
+  }
+
+  // --- modo editar: añadir, arrastrar y borrar ------------------------------------------------
+  // El panel no escribe el modelo: cambia el TEXTO del layout con `layout-editor.js` (puro) y lo
+  // aplica con `editor.cambiar()`, así el cambio entra en el undo tree y el documento queda sucio
+  // una sola vez. El canvas dibuja lo que devuelve `vista-xml.js`; no hay estado de documento aquí.
+  function colorTema(nombre, respaldo) {
+    if (!conDocumento() || typeof getComputedStyle !== "function") return respaldo;
+    const valor = getComputedStyle(document.documentElement).getPropertyValue(nombre).trim();
+    return valor || respaldo;
+  }
+
+  function nodoPorRuta(raiz, ruta) {
+    let nodo = raiz;
+    for (const i of Array.isArray(ruta) ? ruta : []) {
+      if (!nodo || !Array.isArray(nodo.hijos) || !nodo.hijos[i]) return null;
+      nodo = nodo.hijos[i];
+    }
+    return nodo || null;
+  }
+
+  function etiquetaDe(nodo) {
+    if (!nodo) return "";
+    return nodo.id ? nodo.id + " (" + nodo.tipo + ")" : String(nodo.tipo || "vista");
+  }
+
+  // El cambio mínimo entre dos textos: `editor.cambiar(ini, fin, medio)` sustituye solo lo que
+  // cambió, que es lo que hace legible el undo tree.
+  function diferencia(a, b) {
+    const max = Math.min(a.length, b.length);
+    let ini = 0;
+    while (ini < max && a[ini] === b[ini]) ini++;
+    let fa = a.length, fb = b.length;
+    while (fa > ini && fb > ini && a[fa - 1] === b[fb - 1]) { fa--; fb--; }
+    return { ini, fin: fa, medio: b.slice(ini, fb) };
+  }
+
+  function motivoNoEditable() {
+    if (!editando) return "El modo editar está apagado.";
+    if (!editor || typeof editor.texto !== "function") return "El editor no está disponible.";
+    if (!modeloVivo) {
+      return "El layout abierto no es un XML válido: corrígelo en el editor antes de editarlo aquí.";
+    }
+    if (!estadoPestana || estadoPestana.ruta !== rutaViva) {
+      return "El layout que se dibuja no está abierto: ábrelo en el editor para editarlo aquí.";
+    }
+    return "";
+  }
+
+  function puedeEditar() {
+    return motivoNoEditable() === "";
+  }
+
+  function textoEstadoEdicion() {
+    if (!editando) return "";
+    const motivo = motivoNoEditable();
+    if (motivo) return motivo;
+    const nodo = seleccion ? nodoPorRuta(modeloVivo.raiz, seleccion) : null;
+    if (nodo) {
+      return "Seleccionado " + etiquetaDe(nodo) +
+        " · arrástralo para moverlo · Supr lo borra · Esc lo suelta.";
+    }
+    return "Clic en un elemento del dibujo para seleccionarlo; añade otros desde la paleta.";
+  }
+
+  function actualizarEstadoEdicion() {
+    const estado = document.getElementById("previa-editar-estado");
+    if (!estado) return;
+    estado.hidden = !editando;
+    estado.textContent = editando ? (notaEdicion || textoEstadoEdicion()) : "";
+  }
+
+  function avisarEdicion(texto) {
+    notaEdicion = String(texto || "");
+    actualizarEstadoEdicion();
+  }
+
+  function actualizarPaleta() {
+    const paleta = document.getElementById("previa-paleta");
+    if (paleta) paleta.hidden = !editando;
+    if (!conDocumento()) return;
+    const puede = puedeEditar();
+    for (const boton of document.querySelectorAll("#previa-paleta button")) boton.disabled = !puede;
+  }
+
+  // Aplica el XML nuevo al buffer. `editor.cambiar` devuelve el foco al textarea: en modo editar
+  // se lo devolvemos al canvas para que Supr y Esc sigan funcionando sin volver a pulsar el nodo.
+  function aplicarXml(nuevo, mensaje) {
+    if (!editor || typeof editor.texto !== "function") return false;
+    const antes = String(editor.texto());
+    if (nuevo === antes) {
+      if (mensaje) avisarEdicion(mensaje);
+      return false;
+    }
+    const d = diferencia(antes, nuevo);
+    editor.cambiar(d.ini, d.fin, d.medio, [d.ini + d.medio.length, d.ini + d.medio.length]);
+    const canvas = canvasVivo();
+    if (canvas && typeof canvas.focus === "function") canvas.focus();
+    refrescarVivo().catch(() => {});
+    if (mensaje) avisarEdicion(mensaje);
+    return true;
+  }
+
+  function seleccionar(ruta) {
+    const limpia = Array.isArray(ruta) && ruta.length ? ruta.slice() : null;
+    const igual = JSON.stringify(limpia) === JSON.stringify(seleccion);
+    seleccion = limpia;
+    if (!igual) notaEdicion = "";
+    if (visible && modo === "vivo") pintarVivo();
+    else { actualizarPaleta(); actualizarEstadoEdicion(); }
+  }
+
+  function anadir(tipo) {
+    const motivo = motivoNoEditable();
+    if (motivo) { avisarEdicion(motivo); return false; }
+    const r = insertarElemento(String(editor.texto()), { tipo });
+    if (!r.ok) { avisarEdicion("No se pudo añadir: " + r.error); return false; }
+    seleccion = r.ruta;
+    notaEdicion = "";
+    return aplicarXml(r.xml, "Añadido " + tipo + (r.id ? " (id/" + r.id + ")" : "") + ".");
+  }
+
+  function borrarSeleccion() {
+    if (!seleccion) return false;
+    const motivo = motivoNoEditable();
+    if (motivo) { avisarEdicion(motivo); return false; }
+    const nodo = nodoPorRuta(modeloVivo.raiz, seleccion);
+    const etiqueta = etiquetaDe(nodo);
+    const r = borrarElemento(String(editor.texto()), seleccion);
+    if (!r.ok) { avisarEdicion("No se pudo borrar: " + r.error); return false; }
+    seleccion = null;
+    notaEdicion = "";
+    return aplicarXml(r.xml, "Borrado " + etiqueta + ".");
+  }
+
+  function canvasVivo() {
+    return conDocumento() ? document.getElementById("previa-vivo-canvas") : null;
+  }
+
+  function cajaDeCanvas(canvas, modelo) {
+    return escalaPara(modelo, canvas.clientWidth || canvas.width, canvas.clientHeight || canvas.height);
+  }
+
+  function puntoDePuntero(canvas, evento) {
+    const r = canvas.getBoundingClientRect();
+    // el canvas tiene borde de 1 px: `clientWidth` no lo cuenta y `rect.width` sí
+    const factor = r.width > 0 && canvas.clientWidth ? canvas.clientWidth / r.width : 1;
+    return { x: (evento.clientX - r.left) * factor, y: (evento.clientY - r.top) * factor };
+  }
+
+  function puntoModelo(canvas, modelo, evento) {
+    const caja = cajaDeCanvas(canvas, modelo);
+    if (!caja.valida) return null;
+    const p = puntoDePuntero(canvas, evento);
+    return { x: (p.x - caja.x) / caja.escala, y: (p.y - caja.y) / caja.escala, caja };
+  }
+
+  // El nodo más profundo cuyo `rect` contiene el punto. La raíz no entra: borrarla dejaría la
+  // actividad sin `setContentView`.
+  function golpeEn(modelo, x, y) {
+    let mejor = null;
+    const recorrer = (nodo, ruta, profundidad) => {
+      const r = nodo && nodo.rect;
+      if (profundidad > 0 && r && Number.isFinite(r.ancho) && Number.isFinite(r.alto) &&
+          x >= r.x && x <= r.x + r.ancho && y >= r.y && y <= r.y + r.alto) {
+        if (!mejor || profundidad >= mejor.profundidad) mejor = { ruta, profundidad, nodo };
+      }
+      const hijos = nodo && Array.isArray(nodo.hijos) ? nodo.hijos : [];
+      hijos.forEach((hijo, i) => recorrer(hijo, ruta.concat(i), profundidad + 1));
+    };
+    if (modelo && modelo.raiz) recorrer(modelo.raiz, [], 0);
+    return mejor;
+  }
+
+  function dibujarContorno(canvas, caja, rect, guiones) {
+    if (!canvas || !canvas.getContext || !caja || !caja.valida || !rect) return;
+    const ctx = canvas.getContext("2d");
+    if (!ctx) return;
+    const dpr = canvas.clientWidth ? canvas.width / canvas.clientWidth : 1;
+    ctx.save();
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    ctx.strokeStyle = colorTema("--acento", "#007acc");
+    ctx.lineWidth = 2;
+    ctx.setLineDash(guiones ? [4, 3] : []);
+    const x = caja.x + rect.x * caja.escala;
+    const y = caja.y + rect.y * caja.escala;
+    const ancho = Math.max(1, rect.ancho * caja.escala);
+    const alto = Math.max(1, rect.alto * caja.escala);
+    ctx.strokeRect(x + 1, y + 1, Math.max(1, ancho - 2), Math.max(1, alto - 2));
+    ctx.restore();
+  }
+
+  // Durante el arrastre se dibuja el contorno del nodo desplazado: es la única realimentación que
+  // necesita el dedo o el ratón, y no toca el documento hasta soltar.
+  function dibujarFantasma(dx, dy) {
+    const canvas = canvasVivo();
+    if (!canvas || !modeloVivo || !arrastreNodo) return;
+    const nodo = nodoPorRuta(modeloVivo.raiz, arrastreNodo.ruta);
+    if (!nodo || !nodo.rect) return;
+    pintarVivo();
+    const caja = cajaDeCanvas(canvas, modeloVivo);
+    dibujarContorno(canvas, caja, {
+      x: nodo.rect.x + dx, y: nodo.rect.y + dy, ancho: nodo.rect.ancho, alto: nodo.rect.alto,
+    }, true);
+  }
+
+  function moverNodo(ruta, dx, dy) {
+    const motivo = motivoNoEditable();
+    if (motivo) { avisarEdicion(motivo); return false; }
+    const modelo = modeloVivo;
+    const nodo = nodoPorRuta(modelo.raiz, ruta);
+    const rutaPadre = ruta.slice(0, -1);
+    const padre = nodoPorRuta(modelo.raiz, rutaPadre);
+    if (!nodo || !nodo.rect || !padre || !padre.rect) return false;
+    const texto = String(editor.texto());
+    if (esLineal(padre.tipo)) {
+      // Un layout lineal coloca en orden: mover es reordenar los hijos en el XML.
+      const vertical = atributoLocal(padre.atributos, "orientation") !== "horizontal";
+      const otros = (padre.hijos || [])
+        .map((hijo, i) => ({ nodo: hijo, ruta: rutaPadre.concat(i) }))
+        .filter((x) => x.ruta.join("/") !== ruta.join("/"));
+      const centro = (x) => {
+        const r = x.nodo.rect || { x: 0, y: 0, ancho: 0, alto: 0 };
+        return vertical ? r.y + r.alto / 2 : r.x + r.ancho / 2;
+      };
+      const objetivo = vertical
+        ? nodo.rect.y + nodo.rect.alto / 2 + dy
+        : nodo.rect.x + nodo.rect.ancho / 2 + dx;
+      let indice = 0;
+      for (const x of otros) if (centro(x) < objetivo) indice++;
+      const r = reordenarHijo(texto, ruta, indice);
+      if (!r.ok) { avisarEdicion("No se pudo mover: " + r.error); return false; }
+      if (!r.cambio) { avisarEdicion("El elemento ya está en esa posición."); return false; }
+      seleccion = r.ruta;
+      notaEdicion = "";
+      return aplicarXml(r.xml, "Movido " + etiquetaDe(nodo) + " a la posición " +
+        (r.ruta[r.ruta.length - 1] + 1) + ".");
+    }
+    // Un marco coloca por gravedad y márgenes: se fijan margen izquierdo y superior respecto al
+    // contenido del padre (y se quita `layout_gravity`, que anularía el margen).
+    const pad = paddingDe(padre);
+    const izquierda = Math.max(0, nodo.rect.x - (padre.rect.x + pad.izq) + dx);
+    const arriba = Math.max(0, nodo.rect.y - (padre.rect.y + pad.arriba) + dy);
+    const r = moverEnMarco(texto, ruta, { izquierda, arriba });
+    if (!r.ok) { avisarEdicion("No se pudo mover: " + r.error); return false; }
+    if (!r.cambio) { avisarEdicion("El margen no cambia."); return false; }
+    return aplicarXml(r.xml, "Movido " + etiquetaDe(nodo) + " a " + Math.round(izquierda) +
+      "dp de margen izquierdo y " + Math.round(arriba) + "dp de superior.");
+  }
+
+  function soltarCanvas(e) {
+    if (!arrastreNodo) return;
+    const a = arrastreNodo;
+    arrastreNodo = null;
+    if (!a.movido) return;
+    const canvas = canvasVivo();
+    const modelo = modeloVivo;
+    if (!canvas || !modelo) return;
+    const caja = cajaDeCanvas(canvas, modelo);
+    if (!caja.valida) return;
+    const r = canvas.getBoundingClientRect();
+    const factor = r.width > 0 && canvas.clientWidth ? canvas.clientWidth / r.width : 1;
+    moverNodo(a.ruta, ((e.clientX - a.x0) * factor) / caja.escala,
+      ((e.clientY - a.y0) * factor) / caja.escala);
+  }
+
+  function conectarCanvasEditable() {
+    const canvas = canvasVivo();
+    if (!canvas) return;
+    canvas.addEventListener("pointerdown", (e) => {
+      if (!editando || (typeof e.button === "number" && e.button !== 0)) return;
+      const modelo = modeloVivo;
+      if (!modelo) { avisarEdicion(motivoNoEditable()); return; }
+      const p = puntoModelo(canvas, modelo, e);
+      if (!p) return;
+      const golpe = golpeEn(modelo, p.x, p.y);
+      seleccionar(golpe ? golpe.ruta : null);
+      if (typeof canvas.focus === "function") canvas.focus();
+      e.preventDefault();
+      if (!golpe) return;
+      arrastreNodo = { ruta: golpe.ruta, x0: e.clientX, y0: e.clientY, movido: false };
+      try { canvas.setPointerCapture(e.pointerId); } catch (err) { /* puntero sintético */ }
+    });
+    // el movimiento y el soltar se siguen en el documento: el puntero puede salir del canvas
+    document.addEventListener("pointermove", (e) => {
+      if (!arrastreNodo) return;
+      const dx = e.clientX - arrastreNodo.x0;
+      const dy = e.clientY - arrastreNodo.y0;
+      if (!arrastreNodo.movido && Math.abs(dx) < 4 && Math.abs(dy) < 4) return;
+      arrastreNodo.movido = true;
+      if (!modeloVivo) return;
+      const caja = cajaDeCanvas(canvas, modeloVivo);
+      if (!caja.valida) return;
+      const r = canvas.getBoundingClientRect();
+      const factor = r.width > 0 && canvas.clientWidth ? canvas.clientWidth / r.width : 1;
+      dibujarFantasma((dx * factor) / caja.escala, (dy * factor) / caja.escala);
+      e.preventDefault();
+    });
+    document.addEventListener("pointerup", soltarCanvas);
+    document.addEventListener("pointercancel", () => { arrastreNodo = null; });
+  }
+
+  // Supr borra y Esc suelta, solo con el modo editar y una selección. Se ignoran los campos de
+  // texto y cualquier combinación con Ctrl/Alt/Meta: el autocompletado, `Ctrl+Mayús+P`, `Ctrl+G` y
+  // la búsqueda siguen siendo del editor.
+  function conectarTecladoEditable() {
+    document.addEventListener("keydown", (e) => {
+      if (!editando || !seleccion) return;
+      if (e.ctrlKey || e.metaKey || e.altKey || e.shiftKey) return;
+      const destino = e.target;
+      const esCampo = destino && (destino.tagName === "TEXTAREA" || destino.tagName === "INPUT" ||
+        destino.tagName === "SELECT" || destino.isContentEditable);
+      if (esCampo) return;
+      if (e.key === "Delete") {
+        e.preventDefault();
+        borrarSeleccion();
+      } else if (e.key === "Escape") {
+        e.preventDefault();
+        seleccionar(null);
+      }
+    });
+  }
+
+  function aplicarEditable(valor) {
+    const activo = !!valor && visible;
+    if (activo && modo !== "vivo") aplicarModo("vivo", true);
+    editando = activo;
+    arrastreNodo = null;
+    if (!editando) { seleccion = null; notaEdicion = ""; }
+    const boton = document.getElementById("previa-modo-editar");
+    if (boton) {
+      boton.classList.toggle("activo", editando);
+      boton.setAttribute("aria-pressed", String(editando));
+    }
+    const canvas = canvasVivo();
+    if (canvas) canvas.classList.toggle("editable", editando);
+    actualizarPaleta();
+    actualizarEstadoEdicion();
+    if (visible && modo === "vivo") {
+      pintarVivo();
+      if (editando) programarVivo(0);
+    }
+  }
+
+  function conectarEditable() {
+    const boton = document.getElementById("previa-modo-editar");
+    if (boton) boton.addEventListener("click", () => aplicarEditable(!editando));
+    if (conDocumento()) {
+      for (const b of document.querySelectorAll("#previa-paleta button")) {
+        b.addEventListener("click", () => anadir(b.dataset.tipo));
+      }
+    }
+    conectarCanvasEditable();
+    conectarTecladoEditable();
   }
 
   // --- arranque -----------------------------------------------------------------------------
@@ -1259,6 +1641,7 @@ export function crearPreviaPanel({ hospedador, proyecto, estadoPestana, editor }
     conectarModos();
     conectarEntrada();
     conectarCanvas();
+    conectarEditable();
     const alternar = el("previa-alternar");
     if (alternar) alternar.addEventListener("click", () => aplicarVisible(!visible, true));
     const cerrar = el("previa-cerrar");
@@ -1307,12 +1690,18 @@ export function crearPreviaPanel({ hospedador, proyecto, estadoPestana, editor }
     repintar,
     // un clic desde fuera (la prueba de chromium): la misma orden que el puntero del canvas
     pulsar,
+    // el modo editar, para las pruebas de chromium y la consola de desarrollo
+    editar: aplicarEditable,
+    anadir,
+    borrarSeleccion,
+    seleccionar,
     // lectura para las pruebas: el modelo dibujado en el modo Vista previa (no el código)
     modeloVivo: () => modeloVivo,
     estado: () => ({
       ancho: caja.ancho, alto: caja.alto, arriba: caja.arriba,
       lado: cajaLado.ancho, ladoAlto: cajaLado.alto,
-      visible, modo, ruta: rutaViva, pulsos: [...pulsos],
+      visible, modo, ruta: rutaViva, pulsos: [...pulsos], editando,
+      seleccion: seleccion ? seleccion.slice() : null,
     }),
   };
 }
