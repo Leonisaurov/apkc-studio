@@ -9,6 +9,22 @@ enumera lo que no es propio y las condiciones con las que viaja.
 licencia MIT de Ajin Asokan (2022). El aviso original está en `apkc/LICENSE`. Los cambios de este
 fork se mantienen bajo la misma licencia MIT.
 
+## Vista previa del APK
+
+El módulo de vista previa (`apkc/preview.go`, `apkc/previewinterprete.go` y el pintor de la
+pestaña, `studio/vista-previa.js`) es **implementación propia**, publicada bajo la misma licencia
+MIT que el resto de este repositorio. No incorpora código de terceros: se apoya en los lectores
+AXML, `resources.arsc` y DEX que ya vivían en el fork y en la biblioteca estándar de Go, y lee los
+bytes del zip con `archive/zip`. No ejecuta procesos ni hace peticiones de red.
+
+Su comportamiento (qué se lee de un layout y cómo se ejecuta `onCreate` para capturar el texto) se
+contrastó como **referencia de comportamiento** con NekoDroid, publicado bajo licencia MIT: sirvió
+para saber qué esperar de una vista previa, no se copió ni se tradujo su código.
+
+**No se incorporó código de WineDroid (GPL-3.0).** La licencia del proyecto no cambia: no hay
+código GPL en este repositorio ni en el sitio publicado, y la vista previa no es un runtime de
+terceros ni un emulador.
+
 ## Go y `wasm_exec.js`
 
 El ejecutor de WebAssembly que el navegador necesita (`wasm_exec.js`) es parte de la distribución

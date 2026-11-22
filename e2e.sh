@@ -175,6 +175,46 @@ for plantilla in ciclo menu traducido; do
   fi
 done
 
+# 0c. la vista previa sobre el apk que acaba de generar este mismo gate: `apkc preview` lee un
+# paquete real y devuelve el modelo de su primera pantalla. Es el comando que la pestaña ejecuta
+# dentro de wasm, aquí en nativo, así que no depende de APKC_WASM ni de chromium y corre aunque
+# esas secciones se omitan. Lo que se comprueba es el contrato del JSON, no una traza de consola.
+vista_previa() {
+  apk=$CONTADOR/build/app.apk
+  if [ ! -f "$apk" ]; then
+    falla "vista previa: no hay apk del Contador que leer"
+    return
+  fi
+  if ! ejecutar "$APKC" preview "$apk" >"$TMP/studio-preview.json" 2>"$TMP/studio-preview.log"; then
+    falla "apkc preview no lee el apk del Contador: $(tail -2 "$TMP/studio-preview.log" | tr '\n' ' ')"
+    return
+  fi
+  if ! node -e '
+    const fs = require("node:fs");
+    let m;
+    try { m = JSON.parse(fs.readFileSync(process.argv[1], "utf8")); }
+    catch (e) { console.error("no es JSON: " + e.message); process.exit(1); }
+    const hijos = (m.raiz && m.raiz.hijos) || [];
+    const tipos = hijos.map((h) => h.tipo);
+    const total = hijos.find((h) => h.id === "id/total");
+    const problemas = [];
+    if (!Number.isInteger(m.nodos) || m.nodos < 1) problemas.push("nodos=" + m.nodos);
+    if (m.layout !== "res/layout/main.xml") problemas.push("layout=" + m.layout);
+    if (!m.raiz || m.raiz.tipo !== "LinearLayout") problemas.push("raiz=" + (m.raiz && m.raiz.tipo));
+    if (!tipos.includes("TextView") || !tipos.includes("Button")) problemas.push("hijos=" + tipos.join(","));
+    if (!total) problemas.push("sin id/total");
+    else if (total.textoDinamico !== "Pulsos: 1") problemas.push("textoDinamico=" + total.textoDinamico);
+    if (problemas.length) { console.error(problemas.join("; ")); process.exit(1); }
+    console.log(m.nodos + " nodos, " + m.layout + ", " + m.raiz.tipo + "[" + tipos.join(",") + "], "
+      + "id/total con textoDinamico " + JSON.stringify(total.textoDinamico));
+  ' "$TMP/studio-preview.json" >"$TMP/studio-preview-resumen.log" 2>&1; then
+    falla "el modelo de apkc preview no cumple el contrato: $(tail -2 "$TMP/studio-preview-resumen.log" | tr '\n' ' ')"
+    return
+  fi
+  avisa "vista previa: $(cat "$TMP/studio-preview-resumen.log")"
+}
+vista_previa
+
 # 1. el test propio de la página
 if ! node "$AQUI/prueba.js" >"$TMP/studio-prueba.log" 2>&1; then
   falla "prueba.js"; cat "$TMP/studio-prueba.log"
