@@ -10,6 +10,7 @@ import { leerZip, zipDelArbol, paqueteDelManifiesto, nombreDeZip,
   ajustesDelManifiesto, conAjustes } from "./proyecto.js";
 import { modeloDeSalida, pintarVistaPrevia, mensajeVistaPrevia } from "./vista-previa.js";
 import { crearPreviaPanel } from "./previa-panel.js";
+import { crearPanelDeps } from "./deps.js";
 
 // La pestaña que hace: editor de fuente + un arbol en OPFS + los comandos de apkc.wasm.
 //
@@ -2909,6 +2910,13 @@ if (typeof document !== "undefined") {
 
     for (const boton of document.querySelectorAll(".panel-tab")) {
       boton.addEventListener("click", () => mostrarPanel(boton.dataset.panel));
+    }
+    // La sección de dependencias solo engancha su botón: nada se pide al cargar. Si el índice no
+    // está publicado (hoy, hasta que corra el workflow), el primer clic lo dice en #deps-estado.
+    try {
+      crearPanelDeps({ hospedador });
+    } catch (err) {
+      mostrarFallo(err);
     }
     en("alternar-panel", () => {
       const panel = document.getElementById("panel-inferior");

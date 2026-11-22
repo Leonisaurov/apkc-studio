@@ -36,7 +36,7 @@ function conCabeceras(respuesta) {
 const SHELL = [
   "./", "./index.html", "./style.css", "./main.js", "./offline.js",
   "./app.js", "./historial.js", "./fusion.js", "./pestana.js", "./vistas.js",
-  "./diagnostico.js", "./temas.js", "./vista-previa.js", "./apkc.wasm", "./wasm_exec.js",
+  "./diagnostico.js", "./temas.js", "./vista-previa.js", "./deps.js", "./apkc.wasm", "./wasm_exec.js",
   "./manifest.webmanifest", "./icons/icon-192.png", "./icons/icon-512.png", "./apkc.wasm.gz",
   "./wasm-manifest.json",
 ];
@@ -44,6 +44,9 @@ const SHELL = [
 const SOLO_RED = [
   /^\/android-jar(\/|$)/, /^\/android-jar-info$/, /^\/keystore/,
   /^\/apk-ejemplo$/, /^\/aab-ejemplo$/, /^\/apkc-test\.wasm$/,
+  // el paquete de dependencias es estático y grande: se lee de la red en cada importación y no
+  // se duplica en la caché del service worker (el artefacto va a OPFS)
+  /^\/deps-index\.json$/, /^\/deps\//,
 ];
 
 self.addEventListener("install", (evento) => {
