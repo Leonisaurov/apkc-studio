@@ -50,8 +50,22 @@
       });
       return;
     }
+    // El meta CSP ya aplica en esta primera carga y `register` exige TrustedScriptURL. Esta
+    // política es solo para el literal del propio SW, antes de que cargue el módulo tt.js.
+    var urlSw = "./sw.js?v=__APKC_VERSION__";
+    if (window.trustedTypes) {
+      try {
+        var politicaSw = trustedTypes.createPolicy("apkc-sw", {
+          createScriptURL: function (s) {
+            if (s.indexOf("./sw.js?v=") !== 0) throw new Error("URL de service worker inesperada");
+            return s;
+          }
+        });
+        urlSw = politicaSw.createScriptURL(urlSw);
+      } catch (e) { /* otra política tomó el nombre: se intenta con la cadena */ }
+    }
     navigator.serviceWorker
-      .register("./sw.js?v=__APKC_VERSION__", { scope: "./", updateViaCache: "none" })
+      .register(urlSw, { scope: "./", updateViaCache: "none" })
       .then(function () { return navigator.serviceWorker.ready; })
       .then(function () {
         try { sessionStorage.setItem(CLAVE, "1"); } catch (e) { /* */ }
