@@ -1203,7 +1203,7 @@ async function conductor() {
         new TextEncoder().encode(${JSON.stringify(fuenteContador)}));
       await hospedador.limpiar("/proyecto/build");
       document.getElementById("storepass-compilar").value = "android";
-      // la vista dividida, en modo Render, y el cursor del editor en una posición conocida: compilar
+      // la vista dividida, en modo Emulador, y el cursor del editor en una posición conocida: compilar
       // no puede cambiar ni una cosa ni la otra
       document.getElementById("previa-modo-render").click();
       const area = document.getElementById("codigo");
@@ -1254,7 +1254,7 @@ async function conductor() {
       contador.lateralColores > 3 && contador.lateralAncho > 0 &&
       contador.rutaAntes === contador.rutaTras &&
       contador.seleccion[0] === 12 && contador.seleccion[1] === 12 &&
-      /Render/.test(String(contador.renderEstado)),
+      /Emulador/.test(String(contador.renderEstado)),
       JSON.stringify({ vista: contador.vista, visible: contador.lateralVisible,
         colores: contador.lateralColores, ancho: contador.lateralAncho,
         seleccion: contador.seleccion, estado: contador.renderEstado }).slice(0, 320));
@@ -1389,7 +1389,7 @@ async function conductor() {
       /Toast/.test(String(lineasLog[3] && lineasLog[3].texto)) && logContador.vacio === true,
       JSON.stringify({ clase: lineasLog[3] && lineasLog[3].clase, texto: lineasLog[3] && lineasLog[3].texto }));
     comprueba("el render del Contador pinta el texto dinámico y no solo la etiqueta",
-      logContador.colores > 3 && /Render/.test(String(logContador.render)),
+      logContador.colores > 3 && /Emulador/.test(String(logContador.render)),
       JSON.stringify({ colores: logContador.colores, estado: logContador.render }).slice(0, 240));
 
     // 12a-ter-ies. el texto de un nodo bajo (24 px de layout, 18 px pintados) no se puede suprimir:
@@ -1667,7 +1667,7 @@ async function conductor() {
     comprueba("el texto del layout se dibuja dentro de su nodo, no solo su etiqueta",
       vivo.tinta.conTexto > 20 && vivo.tinta.sinTexto === 0 && vivo.tinta.texto === "Adiós",
       JSON.stringify(vivo.tinta).slice(0, 240));
-    comprueba("alternar a Render (eventos) conserva el log y volver a En vivo conserva su dibujo",
+    comprueba("alternar a Emulador conserva el log y volver a Vista previa conserva su dibujo",
       vivo.enRender.vivo === true && vivo.enRender.render === false &&
       vivo.enRender.log >= 1 && vivo.enRender.seleccion.join(",") === "false,true" &&
       vivo.deVuelta.textos.includes("Adiós") && vivo.deVuelta.firma === vivo.adios.firma &&
@@ -1784,7 +1784,232 @@ async function conductor() {
         editor: separadorPrueba.editor }).slice(0, 320));
     comprueba("el teclado del separador respeta el mínimo y el foco del editor sigue intacto",
       separadorPrueba.minimo === 240 && separadorPrueba.desdeMinimo === 256,
-      JSON.stringify({ minimo: separadorPrueba.minimo, siguiente: separadorPrueba.desdeMinimo }));
+      JSON.stringify({ minimo: separadorPrueba.minimo, siguiente: separadorPrueba.desdeMinimo }).slice(0, 240));
+
+    // 12a-octies-bis. las cuatro aristas y las cuatro esquinas: el alto también se reparte, las
+    // medidas se guardan y el marco no deja hueco fuera de la fila.
+    const marcos = await evaluar(`(async () => {
+      const dormir = (ms) => new Promise((ok) => setTimeout(ok, ms));
+      const arrastrar = (id, dx, dy) => {
+        const el = document.getElementById(id);
+        const caja = el.getBoundingClientRect();
+        const x = Math.round(caja.left + Math.max(2, caja.width / 2));
+        const y = Math.round(caja.top + Math.max(2, caja.height / 2));
+        el.dispatchEvent(new PointerEvent("pointerdown", { bubbles: true, button: 0, pointerId: 21,
+          clientX: x, clientY: y }));
+        document.dispatchEvent(new PointerEvent("pointermove", { bubbles: true, pointerId: 21,
+          clientX: x + dx, clientY: y + dy }));
+        document.dispatchEvent(new PointerEvent("pointerup", { bubbles: true, pointerId: 21,
+          clientX: x + dx, clientY: y + dy }));
+      };
+      const doble = (id) => document.getElementById(id)
+        .dispatchEvent(new MouseEvent("dblclick", { bubbles: true }));
+      const fila = document.getElementById("editor-fila").getBoundingClientRect();
+      const techo = Math.round(fila.height);
+      const minimo = 320;
+      // los recortes se calculan sobre la fila de verdad: la ventana del gate no siempre mide 800
+      const mueve = Math.max(10, Math.min(80, techo - minimo - 20));
+      const mueveNorte = Math.max(5, Math.min(20, (techo - mueve) - minimo - 10));
+      doble("separador-previa");
+      await dormir(60);
+      const cero = PREVIA_PANEL.estado();
+      arrastrar("tirador-previa-sur", 0, -mueve);
+      await dormir(60);
+      const conSur = { ...PREVIA_PANEL.estado(),
+        caja: Math.round(document.getElementById("previa-lateral").getBoundingClientRect().height) };
+      arrastrar("tirador-previa-norte", 0, mueveNorte);
+      await dormir(60);
+      const conNorte = { ...PREVIA_PANEL.estado(),
+        caja: Math.round(document.getElementById("previa-lateral").getBoundingClientRect().top - fila.top) };
+      arrastrar("tirador-previa-noroeste", -50, -mueveNorte);
+      await dormir(60);
+      const conEsquina = { ...PREVIA_PANEL.estado(),
+        caja: Math.round(document.getElementById("previa-lateral").getBoundingClientRect().width) };
+      // las medidas tal como las guardó el arrastre, antes de que el teclado las cambie otra vez
+      const guardado = {
+        ancho: localStorage.getItem("apkc-studio/previa-ancho"),
+        alto: localStorage.getItem("apkc-studio/previa-alto"),
+        arriba: localStorage.getItem("apkc-studio/previa-arriba"),
+      };
+      const sur = document.getElementById("tirador-previa-sur");
+      sur.focus();
+      sur.dispatchEvent(new KeyboardEvent("keydown", { key: "Home", bubbles: true }));
+      const altoMinimo = PREVIA_PANEL.estado();
+      sur.dispatchEvent(new KeyboardEvent("keydown", { key: "End", bubbles: true }));
+      const altoEntero = PREVIA_PANEL.estado();
+      const guardadoEntero = localStorage.getItem("apkc-studio/previa-alto");
+      return {
+        cero, conSur, conNorte, conEsquina, altoMinimo, altoEntero,
+        techo, mueve, mueveNorte,
+        esperado: {
+          sur: Math.max(minimo, techo - mueve),
+          norteArriba: Math.min(mueveNorte, Math.max(0, Math.max(minimo, techo - mueve) - minimo)),
+        },
+        fila: Math.round(fila.height),
+        guardado, guardadoEntero,
+        tiradores: document.querySelectorAll("#marco-previa .tirador-previa").length,
+      };
+    })()`);
+    comprueba("la arista inferior cambia el alto del panel y deja el ancho quieto",
+      marcos.conSur.alto === marcos.esperado.sur && marcos.conSur.caja === marcos.conSur.alto &&
+      marcos.conSur.ancho === marcos.cero.ancho && marcos.cero.alto === null,
+      JSON.stringify({ cero: marcos.cero, conSur: marcos.conSur, esperado: marcos.esperado }).slice(0, 320));
+    comprueba("la arista superior mueve el borde de arriba y la de abajo no se mueve",
+      marcos.conNorte.arriba === marcos.esperado.norteArriba &&
+      marcos.conNorte.caja === marcos.esperado.norteArriba &&
+      marcos.conNorte.alto === marcos.conSur.alto - marcos.esperado.norteArriba &&
+      marcos.conNorte.alto + marcos.conNorte.arriba === marcos.conSur.alto,
+      JSON.stringify({ conNorte: marcos.conNorte, conSur: marcos.conSur,
+        esperado: marcos.esperado }).slice(0, 280));
+    comprueba("la esquina noroeste cambia ancho y alto a la vez y guarda las tres medidas",
+      marcos.conEsquina.ancho === marcos.cero.ancho + 50 && marcos.conEsquina.caja === marcos.conEsquina.ancho &&
+      marcos.conEsquina.arriba === Math.max(0, marcos.conNorte.arriba - marcos.mueveNorte) &&
+      marcos.conEsquina.alto + marcos.conEsquina.arriba === marcos.conNorte.alto + marcos.conNorte.arriba &&
+      Number(marcos.guardado.ancho) === marcos.conEsquina.ancho &&
+      Number(marcos.guardado.alto) === marcos.conEsquina.alto &&
+      Number(marcos.guardado.arriba) === marcos.conEsquina.arriba && marcos.tiradores === 8,
+      JSON.stringify({ conEsquina: marcos.conEsquina, conNorte: marcos.conNorte,
+        guardado: marcos.guardado, tiradores: marcos.tiradores }).slice(0, 340));
+    comprueba("el teclado de la arista inferior respeta el alto mínimo y el alto entero",
+      marcos.altoMinimo.alto === 320 &&
+      marcos.altoMinimo.alto + marcos.altoMinimo.arriba ===
+        marcos.conEsquina.alto + marcos.conEsquina.arriba &&
+      marcos.altoEntero.alto === marcos.techo && marcos.altoEntero.arriba === 0 &&
+      Number(marcos.guardadoEntero) === marcos.techo,
+      JSON.stringify({ minimo: marcos.altoMinimo, entero: marcos.altoEntero,
+        techo: marcos.techo, guardado: marcos.guardadoEntero }).slice(0, 240));
+
+    // 12a-nonies. la vista Pantalla no se queda atrás: los dos modos, la consola con el mismo
+    // contenido y sus propios tiradores, con las medidas guardadas aparte.
+    const pantalla = await evaluar(`(async () => {
+      const dormir = (ms) => new Promise((ok) => setTimeout(ok, ms));
+      const arrastrar = (id, dx, dy) => {
+        const el = document.getElementById(id);
+        const caja = el.getBoundingClientRect();
+        const x = Math.round(caja.left + Math.max(2, caja.width / 2));
+        const y = Math.round(caja.top + Math.max(2, caja.height / 2));
+        el.dispatchEvent(new PointerEvent("pointerdown", { bubbles: true, button: 0, pointerId: 41,
+          clientX: x, clientY: y }));
+        document.dispatchEvent(new PointerEvent("pointermove", { bubbles: true, pointerId: 41,
+          clientX: x + dx, clientY: y + dy }));
+        document.dispatchEvent(new PointerEvent("pointerup", { bubbles: true, pointerId: 41,
+          clientX: x + dx, clientY: y + dy }));
+      };
+      document.querySelector('nav.actividad [data-vista="vista"]').click();
+      await dormir(120);
+      const antes = PREVIA_PANEL.estado();
+      arrastrar("vista-tirador-oeste", -40, 0);
+      await dormir(60);
+      arrastrar("vista-tirador-sur", 0, -60);
+      await dormir(60);
+      const tras = PREVIA_PANEL.estado();
+      return {
+        antes, tras,
+        anchoCaja: Math.round(document.getElementById("vista-lado").getBoundingClientRect().width),
+        guardado: localStorage.getItem("apkc-studio/previa-lado"),
+        guardadoAlto: localStorage.getItem("apkc-studio/previa-lado-alto"),
+        modos: [document.getElementById("vista-modo-previa").textContent.trim(),
+          document.getElementById("vista-modo-emulador").textContent.trim()],
+        tiradores: document.querySelectorAll("#marco-vista-lado .tirador-previa").length,
+        activa: document.getElementById("vista").classList.contains("activa"),
+        cuerpo: document.body.dataset.vista,
+        titulo: document.getElementById("vista").querySelector("h1").textContent.trim(),
+      };
+    })()`);
+    comprueba("la vista Pantalla se abre con los dos modos, la consola y ocho tiradores",
+      pantalla.activa === true && pantalla.cuerpo === "vista" && pantalla.titulo === "Pantalla de la app" &&
+      pantalla.modos.join(",") === "Vista previa,Emulador" && pantalla.tiradores === 8,
+      JSON.stringify({ activa: pantalla.activa, modos: pantalla.modos, tiradores: pantalla.tiradores }).slice(0, 240));
+    comprueba("los tiradores de Pantalla cambian el ancho y el alto de su columna y se guardan",
+      pantalla.tras.lado === pantalla.antes.lado + 40 && pantalla.anchoCaja === pantalla.tras.lado &&
+      Number.isFinite(pantalla.tras.ladoAlto) && Number(pantalla.guardado) === pantalla.tras.lado &&
+      Number(pantalla.guardadoAlto) === pantalla.tras.ladoAlto,
+      JSON.stringify({ antes: pantalla.antes, tras: pantalla.tras, caja: pantalla.anchoCaja,
+        guardado: pantalla.guardado }).slice(0, 320));
+    await evaluar(`document.querySelector('nav.actividad [data-vista="pestana"]').click()`);
+
+    // 12a-decies. el rótulo de tipo/id no puede tapar el texto del botón en ninguno de los dos
+    // paneles. Se compara el mismo nodo con `id` y sin él: si el pintor dibuja el rótulo, los
+    // píxeles cambian; si no, son idénticos. El texto se comprueba aparte, con «Press me» y sin él.
+    // La lógica del rótulo es del pintor compartido: aquí solo se verifica desde el panel.
+    const rotulo = await evaluar(`(async () => {
+      const vp = await import("/vista-previa.js");
+      const boton = (conId) => ({ tipo: "Button", ...(conId ? { id: "id/pulsar" } : {}),
+        texto: "Press me", rect: { x: 0, y: 0, ancho: 200, alto: 48 } });
+      const modelo = (nodos) => ({
+        layout: "res/layout/main.xml", pantalla: { x: 0, y: 0, ancho: 360, alto: 640 },
+        aproximado: true,
+        raiz: { tipo: "LinearLayout", rect: { x: 0, y: 0, ancho: 360, alto: 640 }, hijos: nodos },
+        ejecucion: { metodo: "onCreate", pasos: 1,
+          capturas: [{ origen: "TextView.setText", id: "id/pulsar", texto: "Press me" }] },
+      });
+      const pintar = (nodos) => {
+        const cv = document.createElement("canvas");
+        vp.pintarModelo(cv, modelo(nodos), { ancho: 270, alto: 480 });
+        return cv.getContext("2d").getImageData(0, 0, cv.width, cv.height).data;
+      };
+      const distintos = (a, b) => {
+        let n = 0;
+        for (let i = 0; i < a.length; i += 4) {
+          if (a[i] !== b[i] || a[i + 1] !== b[i + 1] || a[i + 2] !== b[i + 2] || a[i + 3] !== b[i + 3]) n++;
+        }
+        return n;
+      };
+      const conId = pintar([boton(true)]);
+      const sinId = pintar([boton(false)]);
+      const conTexto = conId;
+      const sinTexto = pintar([{ ...boton(true), texto: "" }]);
+      // el modelo del emulador, por la misma entrada que un build correcto: el panel y la vista
+      vp.pintarVistaPrevia(modelo([boton(true)]));
+      document.getElementById("previa-modo-render").click();
+      document.getElementById("vista-modo-emulador").click();
+      await new Promise((ok) => setTimeout(ok, 80));
+      return {
+        rotulo: distintos(conId, sinId),
+        texto: distintos(conTexto, sinTexto),
+        cuerpo: document.body.dataset.vista,
+        logPanel: [...document.getElementById("previa-log-lista").children].map((li) => li.textContent),
+        logVista: [...document.getElementById("vista-log-lista").children].map((li) => li.textContent),
+      };
+    })()`);
+    comprueba("el canvas del Emulador no pinta el rótulo Button id/pulsar sobre el nodo",
+      rotulo.rotulo === 0,
+      JSON.stringify({ pixelesQueCambian: rotulo.rotulo, texto: rotulo.texto }).slice(0, 200));
+    comprueba("y el texto «Press me» del botón sigue visible en el canvas",
+      rotulo.texto > 20, JSON.stringify(rotulo).slice(0, 200));
+    comprueba("la consola de Pantalla enseña las mismas capturas que la del panel",
+      rotulo.logPanel.length === 1 && rotulo.logVista.length === 1 &&
+      rotulo.logVista[0] === rotulo.logPanel[0] && /Press me/.test(String(rotulo.logVista[0])),
+      JSON.stringify({ panel: rotulo.logPanel, vista: rotulo.logVista }).slice(0, 240));
+
+    // 12a-undecies. en pantalla estrecha la fila se apila, los tiradores se ocultan y hay aviso;
+    // el gesto no puede cambiar nada porque no hay nada que arrastrar.
+    await exec("Emulation.setDeviceMetricsOverride",
+      { width: 700, height: 900, deviceScaleFactor: 1, mobile: false });
+    await esperar(400);
+    const estrecho = await evaluar(`(() => {
+      const tirador = document.getElementById("tirador-previa-sur");
+      const antes = PREVIA_PANEL.estado().ancho;
+      const caja = tirador.getBoundingClientRect();
+      tirador.dispatchEvent(new PointerEvent("pointerdown", { bubbles: true, button: 0, pointerId: 51,
+        clientX: Math.round(caja.left + 3), clientY: Math.round(caja.top + 3) }));
+      document.dispatchEvent(new PointerEvent("pointermove", { bubbles: true, pointerId: 51,
+        clientX: 10, clientY: Math.round(caja.top + 3) }));
+      document.dispatchEvent(new PointerEvent("pointerup", { bubbles: true, pointerId: 51,
+        clientX: 10, clientY: Math.round(caja.top + 3) }));
+      return {
+        display: getComputedStyle(tirador).display,
+        aviso: getComputedStyle(document.getElementById("previa-aviso-estrecho")).display,
+        antes, despues: PREVIA_PANEL.estado().ancho,
+        direccion: getComputedStyle(document.getElementById("editor-fila")).flexDirection,
+      };
+    })()`);
+    await exec("Emulation.clearDeviceMetricsOverride");
+    await esperar(300);
+    comprueba("en pantalla estrecha la fila se apila, los tiradores se ocultan y el aviso aparece",
+      estrecho.display === "none" && estrecho.aviso !== "none" &&
+      estrecho.direccion === "column" && estrecho.antes === estrecho.despues,
+      JSON.stringify(estrecho).slice(0, 260));
 
     // 12a-quater. con la vista previa delante, el diagnóstico en vivo y la paleta siguen vivos:
     // los dos son document-wide y la tercera vista no puede taparlos ni romper su estado.

@@ -6,13 +6,13 @@ import { buildProject } from "./app.js";
 import {
   PROYECTO, hospedador, abrir, refrescarArbol, estaSucio,
   hayDocumentosSucios, confirmarDescartes, limpiarEstadoEditor,
-  conBloqueo, publicar,
+  conBloqueo, publicar, PREVIA_PANEL,
 } from "./pestana.js";
 import { repintarVistaPrevia } from "./vista-previa.js";
 
 (() => {
-  // tres vistas: Inicio, Editor y la vista previa del apk compilado
-  const NOMBRES = { crear: "Inicio", pestana: "Editor", vista: "Vista" };
+  // tres vistas: Inicio, Editor y Pantalla (la vista previa del apk a página completa)
+  const NOMBRES = { crear: "Inicio", pestana: "Editor", vista: "Pantalla" };
 
   function mostrar(vista) {
     if (!document.getElementById(vista)) vista = "crear";
@@ -25,9 +25,13 @@ import { repintarVistaPrevia } from "./vista-previa.js";
       else boton.classList.toggle("activo", activo);
     }
     document.body.dataset.vista = vista;
-    // al entrar en Vista se repinta con el último modelo: compilar puede ocurrir con esta pestaña
-    // oculta y entonces el canvas mide cero, así que el primer pintado usa el tamaño de respaldo
-    if (vista === "vista") repintarVistaPrevia();
+    // al entrar en Pantalla se repinta con el último modelo: compilar puede ocurrir con esta
+    // pestaña oculta y entonces el canvas mide cero, así que el primer pintado usa el tamaño de
+    // respaldo. El panel de la vista dividida pinta además su canvas y su consola.
+    if (vista === "vista") {
+      repintarVistaPrevia();
+      if (PREVIA_PANEL && typeof PREVIA_PANEL.repintar === "function") PREVIA_PANEL.repintar();
+    }
     const estado = document.getElementById("estado-general");
     if (estado) estado.textContent = NOMBRES[vista] || vista;
     const vistas = document.getElementById("vistas");

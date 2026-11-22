@@ -3051,6 +3051,7 @@ export {
   documentoActivo, documentoDe, volcarHistorial, programarHistorial,
   aplicarNodoHistorial, historialDe, conCarga, mostrarCarga, ocultarCarga,
   pintarConsola, KEYSTORES, DEBUG_KEY, RUTA_JAR, RUTA_LINAJE, RUTA_VIEJO,
+  PREVIA_PANEL,
   firmar, asegurarDebugKeystore, compilarCon, nuevoFichero,
   renombrarRuta, borrarRuta, abrirMenuArchivo, decirEstadoJar,
   consultarJarDelSdk, traerJarDelSdk, asegurarJarDelProyecto,

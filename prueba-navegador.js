@@ -112,6 +112,13 @@ const conductor = `(async () => {
   r.estadoPrevia = document.getElementById("estado-general").textContent;
   r.avisoPrevia = document.getElementById("vista-previa-estado").textContent;
   r.canvasPrevia = !!document.getElementById("vista-previa");
+  r.pantalla = {
+    modos: [document.getElementById("vista-modo-previa").textContent,
+      document.getElementById("vista-modo-emulador").textContent],
+    tiradores: document.querySelectorAll("#marco-vista-lado .tirador-previa").length,
+    log: !!document.getElementById("vista-log-lista"),
+    canvas: !!document.getElementById("vista-layout-canvas"),
+  };
   document.querySelector('.pestana-vista[data-vista="crear"]').click();
   r.vueltaInicio = document.getElementById("crear").classList.contains("activa");
 
@@ -176,6 +183,12 @@ const conductor = `(async () => {
     };
   })();
   r.previa = previa;
+  r.tiradoresPrevia = document.querySelectorAll("#marco-previa .tirador-previa").length;
+  r.modosPrevia = [document.getElementById("previa-modo-vivo").textContent,
+    document.getElementById("previa-modo-render").textContent];
+  r.avisoEstrecho = getComputedStyle(document.getElementById("previa-aviso-estrecho")).display;
+  r.cursorOeste = getComputedStyle(document.getElementById("tirador-previa-noroeste")).cursor;
+  r.cursorSur = getComputedStyle(document.getElementById("tirador-previa-sur")).cursor;
   r.canvasDeLaPrevia = document.querySelectorAll("canvas.previa-canvas").length;
 
   // sin cabeceras del servidor, el SW debió aislar la página y el create tiene que funcionar
@@ -275,16 +288,21 @@ function comprueba(cond, msg) { if (!cond) { fallos++; console.log("  FALLO:", m
     comprueba(v.lang === "es" && /Saltar/.test(v.salto) && v.principal === -1,
       "falta el enlace de salto o el destino con foco programable: " +
         JSON.stringify({ lang: v.lang, salto: v.salto, principal: v.principal }));
-    comprueba(v.vistas.join(",") === "Inicio,Editor,Vista", "las pestañas no son las tres medidas: " + v.vistas);
+    comprueba(v.vistas.join(",") === "Inicio,Editor,Pantalla", "las pestañas no son las tres medidas: " + v.vistas);
     comprueba(v.actividad.join(",") === "crear,pestana,vista", "la barra de actividad no tiene las tres vistas: " + v.actividad);
     comprueba(v.tituloTrasNombre === "Prueba", "el nombre no llegó a la barra de título: " + v.tituloTrasNombre);
     comprueba(v.paqueteLateral === "com.prueba.app", "el package no llegó al explorador: " + v.paqueteLateral);
     comprueba(v.editorVisible, "la pestaña Editor no se abrió");
     comprueba(v.estadoBarra === "Editor", "la barra de estado no dijo Editor: " + v.estadoBarra);
-    comprueba(v.vistaPreviaVisible && v.estadoPrevia === "Vista" && v.canvasPrevia,
+    comprueba(v.vistaPreviaVisible && v.estadoPrevia === "Pantalla" && v.canvasPrevia,
       "la vista previa no abre su sección: " + JSON.stringify(v));
     comprueba(/[Cc]ompila/.test(String(v.avisoPrevia)),
       "sin apk, la vista previa no pide compilar: " + JSON.stringify(v.avisoPrevia));
+    // la vista Pantalla tiene las mismas dos lecturas y la misma consola que la vista dividida,
+    // con sus ocho tiradores para redimensionar
+    comprueba(v.pantalla && v.pantalla.modos.join(",") === "Vista previa,Emulador" &&
+      v.pantalla.tiradores === 8 && v.pantalla.log === true && v.pantalla.canvas === true,
+      "la vista Pantalla no trae los dos modos, la consola y sus tiradores: " + JSON.stringify(v.pantalla));
     comprueba(v.vueltaInicio, "no se pudo volver a Inicio");
     // la vista dividida: el separador es un separador de verdad, se mueve con el teclado, se
     // recuerda, y el panel alterna entre XML y render sin perder el editor
@@ -305,14 +323,20 @@ function comprueba(cond, msg) { if (!cond) { fallos++; console.log("  FALLO:", m
     comprueba(pv.enVivo && pv.enVivo.vivo === false && pv.enVivo.render === true &&
       pv.enVivo.modoGuardado === "vivo" && pv.enVivo.canvas === true &&
       /[Aa]bre un res\/layout/.test(String(pv.enVivo.estado)),
-      "volver a «En vivo» no restaura su canvas ni guarda el modo: " + JSON.stringify(pv.enVivo).slice(0, 240));
+      "volver a «Vista previa» no restaura su canvas ni guarda el modo: " + JSON.stringify(pv.enVivo).slice(0, 240));
     comprueba(pv.codigoEnPanel === false,
       "el panel de la previa enseña código (un <pre>) en vez del layout dibujado");
     comprueba(pv.oculto && pv.oculto.panel === true && pv.oculto.separador === true &&
       pv.oculto.expandido === "false" && pv.oculto.guardado === "0" && pv.visibleOtraVez === true,
       "el botón Previa no oculta ni vuelve a mostrar el panel: " + JSON.stringify(pv.oculto));
-    comprueba(v.canvasDeLaPrevia === 3,
-      "faltan canvas: Vista, layout en vivo y render con eventos (deben ser tres): " + v.canvasDeLaPrevia);
+    comprueba(v.canvasDeLaPrevia === 4,
+      "faltan canvas (Pantalla en vivo y emulador, y la vista dividida en vivo y emulador: deben ser cuatro): " +
+      v.canvasDeLaPrevia);
+    comprueba(v.tiradoresPrevia === 8 && v.modosPrevia.join(",") === "Vista previa,Emulador" &&
+      v.cursorOeste === "nwse-resize" && v.cursorSur === "row-resize",
+      "la vista dividida no tiene sus ocho tiradores, sus nombres o sus cursores: " +
+      JSON.stringify({ tiradores: v.tiradoresPrevia, modos: v.modosPrevia,
+        cursorOeste: v.cursorOeste, cursorSur: v.cursorSur }));
     comprueba(v.icono, "falta el campo del icono");
     // Sin APKC_WASM esta prueba es solo de DOM: basta con que el SW haya aislado la página y el
     // create no culpe a OPFS. Con el binario presente (es lo que hace e2e.sh) tiene que crear.

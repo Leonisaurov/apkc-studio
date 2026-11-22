@@ -431,28 +431,76 @@ kbd {
   max-width: none;
 }
 
-/* ---- vista previa del apk -------------------------------------------------
-   Solo lectura: un canvas que pinta el modelo de `apkc preview` con los colores del tema. El
-   tamaño en CSS fija la caja; el pintor la encaja sin deformar la pantalla del modelo. */
+/* ---- la vista Pantalla ----------------------------------------------------
+   Las mismas dos lecturas que la vista dividida, a página completa: a la izquierda el teléfono y a
+   la derecha el estado y la consola, con sus ocho tiradores. Solo lectura: el canvas pinta el
+   modelo y no toca el layout del editor. */
 .previa-cab { max-width: 78ch; margin-bottom: 16px; }
-.previa-cuerpo { display: flex; gap: 18px; align-items: flex-start; flex-wrap: wrap; }
+.vista-previa.activa { display: flex; flex-direction: column; min-height: 0; }
+.previa-modos-vista { flex: 0 0 auto; margin-bottom: 10px; }
+.previa-modos-vista .previa-modo { padding: 6px 12px; font-size: 12px; }
+.previa-cuerpo-vista {
+  display: flex;
+  gap: 18px;
+  align-items: stretch;
+  flex: 1 1 auto;
+  height: min(72vh, 760px);
+  min-height: 360px;
+}
+.previa-zona-vista {
+  flex: 1 1 auto;
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  min-height: 0;
+}
+.previa-modo-vista {
+  flex: 1 1 auto;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  min-height: 0;
+}
+.previa-modo-vista[hidden] { display: none; }
 .previa-marco {
   background: var(--superficie2);
   border: 1px solid var(--borde2);
   border-radius: 6px;
   padding: 10px;
 }
+.previa-marco-vista {
+  flex: 1 1 auto;
+  display: flex;
+  justify-content: center;
+  min-height: 0;
+}
 .previa-canvas {
   display: block;
-  width: 270px;
-  height: 480px;
-  max-width: 100%;
   background: var(--superficie);
   border: 1px solid var(--borde);
   border-radius: 4px;
 }
-.previa-lado { flex: 1 1 240px; min-width: 220px; max-width: 52ch; }
-.previa-lado .nota { margin: 0 0 10px; }
+.previa-canvas-vista {
+  width: 100%;
+  height: 100%;
+  max-width: 380px;
+  min-height: 200px;
+}
+.marco-vista-lado { flex: 0 0 var(--previa-ancho, 380px); }
+.vista-lado {
+  flex: 1 1 auto;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  min-width: 0;
+  min-height: 0;
+  padding: 8px;
+  overflow: hidden;
+  background: var(--superficie2);
+  border-left: 1px solid var(--borde2);
+}
+.vista-lado .nota { margin: 0; }
+.vista-lado .previa-log { flex: 1 1 auto; }
 
 /* ---- vista dividida: editor + previa del teléfono ------------------------
    La fila sustituye al editor suelto como hijo flexible de #pestana: el editor conserva su
@@ -461,19 +509,55 @@ kbd {
 .editor-fila {
   flex: 1 1 auto;
   display: flex;
+  position: relative;
   min-height: 0;
   min-width: 0;
 }
 .editor-fila > .editor { flex: 1 1 auto; min-width: 0; }
-.separador-previa {
-  flex: 0 0 5px;
+
+/* El marco de la vista previa: un panel con ocho tiradores (cuatro aristas y cuatro esquinas) que
+   cambian su ancho y su alto. Los valores viven en variables CSS dentro del marco, así el panel y
+   sus tiradores se miden solos y nada de esto toca el documento del editor. */
+.marco-previa {
+  flex: 0 0 var(--previa-ancho, 340px);
+  display: flex;
   position: relative;
-  background: var(--borde);
-  cursor: col-resize;
+  min-width: 0;
+  min-height: 0;
+}
+.marco-previa[data-alto="propio"] {
+  align-self: flex-start;
+  height: var(--previa-alto);
+  margin-top: var(--previa-arriba, 0px);
+}
+.marco-previa[hidden] { display: none; }
+.marco-previa > .previa-lateral,
+.marco-previa > .vista-lado { flex: 1 1 auto; width: 100%; height: 100%; }
+
+.tirador-previa {
+  position: absolute;
+  z-index: 3;
+  background: transparent;
   touch-action: none;
 }
-.separador-previa[hidden] { display: none; }
-.separador-previa::after {
+.tirador-oeste,
+.tirador-este { top: 0; bottom: 0; width: 6px; cursor: col-resize; }
+.tirador-oeste { left: 0; background: var(--borde); }
+.tirador-este { right: 0; }
+.tirador-norte,
+.tirador-sur { left: 0; right: 0; height: 6px; cursor: row-resize; }
+.tirador-norte { top: 0; }
+.tirador-sur { bottom: 0; }
+.tirador-noroeste,
+.tirador-noreste,
+.tirador-suroeste,
+.tirador-sureste { width: 14px; height: 14px; }
+.tirador-noroeste { top: 0; left: 0; cursor: nwse-resize; }
+.tirador-noreste { top: 0; right: 0; cursor: nesw-resize; }
+.tirador-suroeste { bottom: 0; left: 0; cursor: nesw-resize; }
+.tirador-sureste { bottom: 0; right: 0; cursor: nwse-resize; }
+/* la arista izquierda conserva el agarre visible que tenía el separador */
+.tirador-oeste::after {
   content: "";
   position: absolute;
   top: 50%;
@@ -484,26 +568,33 @@ kbd {
   transform: translateY(-50%);
   background: var(--borde2);
 }
-.separador-previa:hover,
-.separador-previa.arrastrando { background: var(--acento); }
-.separador-previa:hover::after,
-.separador-previa.arrastrando::after { background: var(--blanco); }
-.separador-previa:focus-visible {
+.tirador-oeste:hover,
+.tirador-oeste.arrastrando { background: var(--acento); }
+.tirador-oeste:hover::after,
+.tirador-oeste.arrastrando::after { background: var(--blanco); }
+.tirador-previa:focus-visible {
   outline: 2px solid var(--foco);
   outline-offset: -2px;
 }
-body.separando-previa { cursor: col-resize; user-select: none; }
+body.separando-previa { user-select: none; cursor: col-resize; }
+body.separando-previa[data-eje="norte"],
+body.separando-previa[data-eje="sur"] { cursor: row-resize; }
+body.separando-previa[data-eje="noroeste"],
+body.separando-previa[data-eje="sureste"] { cursor: nwse-resize; }
+body.separando-previa[data-eje="noreste"],
+body.separando-previa[data-eje="suroeste"] { cursor: nesw-resize; }
 
 .previa-lateral {
-  flex: 0 0 var(--previa-ancho, 340px);
   display: flex;
   flex-direction: column;
   min-width: 0;
   min-height: 0;
+  overflow: hidden;
   background: var(--superficie2);
   border-left: 1px solid var(--borde2);
 }
 .previa-lateral[hidden] { display: none; }
+.previa-aviso-estrecho { display: none; margin: 0; padding: 4px 8px; border-top: 1px solid var(--borde2); }
 .previa-lateral-cab {
   display: flex;
   align-items: center;
@@ -1534,15 +1625,31 @@ pre {
   .vista:not(.vista-editor) { padding: 16px 16px 44px; }
   .editor-tab { max-width: 22ch; }
   .panel-inferior { height: 42vh; }
-  /* en táctil la vista previa pasa debajo del editor: sin separador que arrastrar */
+  /* en táctil la vista previa pasa debajo del editor: sin tiradores que arrastrar y con aviso */
   .editor-fila { flex-direction: column; }
-  .separador-previa { display: none; }
-  .previa-lateral {
+  .tirador-previa { display: none; }
+  .previa-aviso-estrecho { display: block; }
+  .marco-previa,
+  .marco-previa[data-alto="propio"] {
     flex: 0 0 38vh;
+    align-self: stretch;
+    height: auto;
+    margin-top: 0;
+  }
+  .previa-lateral {
     border-left: 0;
     border-top: 1px solid var(--borde2);
   }
   .previa-marco-lateral { flex: 0 1 46%; }
+  .previa-cuerpo-vista { flex-direction: column; height: auto; }
+  .marco-vista-lado,
+  .marco-vista-lado[data-alto="propio"] {
+    flex: 0 0 auto;
+    align-self: stretch;
+    height: auto;
+    margin-top: 0;
+  }
+  .vista-lado { border-left: 0; border-top: 1px solid var(--borde2); }
   .barra-titulo .titulo-derecha { display: none; }
   #estado-cursor { display: none; }
 }

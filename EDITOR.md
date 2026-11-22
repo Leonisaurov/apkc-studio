@@ -63,16 +63,34 @@ se abre, el editor se encoge y conserva su propio scroll.
 - Al arrancar, `iniciarPestana()` (en `pestana.js`) abre el `AndroidManifest.xml` si ya hay un
   proyecto en OPFS y pulsa la vista Editor. Si no hay proyecto, deja Inicio con el formulario.
 
-## Vista previa
+## Pantalla
 
-La tercera vista (`#vista`, clases `vista vista-previa`) es de **solo lectura**: pinta en un
-`<canvas>` el modelo que `apkc preview` imprime para el apk recién compilado. No se arrastra, no
-se edita el layout y no hay estado de documento.
+La tercera vista (`#vista`, clases `vista vista-previa`) es la misma pareja de lecturas que la vista
+dividida, a página completa: el teléfono a la izquierda y, a la derecha, el estado y la consola, en
+una columna redimensionable. Lleva los **dos modos** de la vista dividida (pestañas propias,
+`#vista-modo-previa` y `#vista-modo-emulador`), el canvas de cada uno y la **consola de la
+ejecución** con los mismos ids y el mismo contenido que la del panel: `previa-panel.js` pinta las
+dos superficies con el mismo modelo (`SUPERFICIES`), así que la vista no puede quedarse atrás.
 
 | Id | Qué es |
 | --- | --- |
-| `#vista-previa` | el `<canvas>`; `role="img"` y un `aria-label` que lo describen |
-| `#vista-previa-estado` | la línea de estado: «compila el proyecto» o el número de nodos del modelo |
+| `#vista` | la sección; `data-vista="vista"` en el `<body>` cuando está delante |
+| `#vista-modo-previa`, `#vista-modo-emulador` | las dos pestañas (`role="tab"`, `aria-selected`) |
+| `#vista-layout`, `#vista-layout-canvas`, `#vista-layout-estado` | el modo Vista previa: el layout del editor dibujado, sin compilar |
+| `#vista-emulador`, `#vista-previa` | el modo Emulador: el canvas del modelo de `apkc preview` |
+| `#vista-previa-estado` | la línea de estado del emulador; la escribe `vista-previa.js` con el modelo |
+| `#vista-log`, `#vista-log-cabecera`, `#vista-log-lista`, `#vista-log-vacio` | la consola de la ejecución, espejo de la del panel |
+| `#marco-vista-lado` y sus ocho `#vista-tirador-*` | la columna de estado y consola, redimensionable |
+| `#vista-lado` | la columna; su ancho y su alto viven en `--previa-ancho`/`--previa-alto` |
+
+`vista-previa.js` sigue siendo el pintor y el dueño del modelo (`pintarModelo`, `modeloActual`,
+evento `apkc:previa-actualizada`): la vista solo aporta la caja y las pestañas. Al entrar en Pantalla,
+`vistas.js` llama a `repintarVistaPrevia()` y a `PREVIA_PANEL.repintar()`: compilar puede ocurrir con
+la vista oculta y entonces el canvas mide cero.
+
+La vista se llamaba **Vista** y solo enseñaba el emulador; con los modos renombrados, el nombre
+«Vista» chocaba con el modo **Vista previa**, así que la sección pasa a llamarse **Pantalla** (el
+`data-vista="vista"` y el id `#vista` no cambian: son contrato de `vistas.js` y de las pruebas).
 
 `vista-previa.js` separa las dos mitades:
 
@@ -108,33 +126,40 @@ dentro del nodo con texto y sin él, no solo la etiqueta.
 
 La pestaña **Editor** se puede partir en dos: a la izquierda el editor de siempre y a la derecha
 un marco de teléfono con dos lecturas del mismo proyecto. Vive dentro de `#pestana`, no en la
-pestaña **Vista**, porque la utilidad es editar y ver a la vez; **Vista** sigue siendo el canvas a
-pantalla completa. El editor no cambia: mismo textarea, mismo undo tree, misma búsqueda, mismo
-diagnóstico en vivo y misma paleta. La fila es `.editor-fila`, con tres hijos:
+pestaña **Pantalla**, porque la utilidad es editar y ver a la vez; **Pantalla** es la misma pareja a
+página completa. El editor no cambia: mismo textarea, mismo undo tree, misma búsqueda, mismo
+diagnóstico en vivo y misma paleta. La fila es `.editor-fila`, con dos hijos: el editor y el marco
+del panel, que a su vez contiene los ocho tiradores y el `<aside>`:
 
 ```html
 <div id="editor-fila" class="editor-fila">
   <div class="editor">…</div>
-  <div id="separador-previa" role="separator" aria-orientation="vertical" tabindex="0" …></div>
-  <aside id="previa-lateral">
-    … #previa-modo-vivo | #previa-modo-render …
-    <div id="previa-vivo">…#previa-vivo-canvas</div>
-    <div id="previa-render">…#previa-lateral-canvas … #previa-log</div>
-  </aside>
+  <div id="marco-previa" class="marco-previa">
+    <div id="separador-previa" class="tirador-previa tirador-oeste" data-eje="oeste" role="separator" …></div>
+    … #tirador-previa-este | -norte | -sur | -noroeste | -noreste | -suroeste | -sureste …
+    <aside id="previa-lateral">
+      … #previa-modo-vivo (Vista previa) | #previa-modo-render (Emulador) …
+      <div id="previa-vivo">…#previa-vivo-canvas</div>
+      <div id="previa-render">…#previa-lateral-canvas … #previa-log</div>
+    </aside>
+  </div>
 </div>
 ```
 
 | Id | Qué es |
 | --- | --- |
-| `#editor-fila` | la fila que reparte el ancho; guarda `--previa-ancho` |
-| `#separador-previa` | el separador: `role="separator"`, `aria-orientation="vertical"`, `tabindex="0"`, `aria-valuenow/min/max` y `aria-controls="previa-lateral"` |
+| `#editor-fila` | la fila que reparte el ancho |
+| `#marco-previa` | el marco del panel; guarda `--previa-ancho`, `--previa-alto` y `--previa-arriba` |
+| `#separador-previa` | la arista **izquierda**: `role="separator"`, `aria-orientation="vertical"`, `tabindex="0"`, `aria-valuenow/min/max` y `aria-controls="previa-lateral"` |
+| `#tirador-previa-este`, `-norte`, `-sur`, `-noroeste`, `-noreste`, `-suroeste`, `-sureste` | las otras siete aristas y esquinas (`role="separator"`, `data-eje`, `tabindex="-1"` salvo la sur) |
+| `#previa-aviso-estrecho` | el aviso de que en pantalla estrecha no se redimensiona |
 | `#previa-lateral` | el panel; `hidden` cuando se oculta |
 | `#previa-alternar` | el botón **Previa** de la barra del fichero; `aria-expanded` |
 | `#previa-cerrar` | la × de la cabecera del panel |
-| `#previa-modo-vivo`, `#previa-modo-render` | las dos pestañas (`role="tab"`, `aria-selected`) |
+| `#previa-modo-vivo`, `#previa-modo-render` | las dos pestañas (**Vista previa** y **Emulador**; `role="tab"`, `aria-selected`) |
 | `#previa-vivo`, `#previa-render` | los paneles (`role="tabpanel"`) |
 | `#previa-vivo-canvas`, `#previa-vivo-estado` | el canvas del layout dibujado y su línea de estado |
-| `#previa-lateral-canvas`, `#previa-render-estado` | el canvas del modelo con eventos y su línea de estado |
+| `#previa-lateral-canvas`, `#previa-render-estado` | el canvas del emulador y su línea de estado |
 | `#previa-log`, `#previa-log-cabecera`, `#previa-log-lista`, `#previa-log-vacio` | la consola del intérprete (`role="log"`) |
 
 `previa-panel.js` es dueño de esta pieza y no importa `pestana.js`: recibe `hospedador`, la carpeta
@@ -142,22 +167,32 @@ del proyecto, `estadoPestana` y `EDITOR` desde `pestana.js` (`crearPreviaPanel`)
 gana una copia del estado y la prueba de node puede importar las funciones puras. `vista-xml.js`
 convierte el XML en modelo, también sin DOM.
 
-### El separador
+### Los ocho tiradores
 
-- **Puntero**: `pointerdown` en el separador; el `pointermove` y el `pointerup` se siguen en el
-  documento para que soltar fuera no deje el arrastre pegado. Solo cambia `--previa-ancho` y
-  `body.separando-previa`: **no toca el modelo, el fichero ni el canvas**.
-- **Teclado**: `←`/`→` mueven 16 px (48 con `Shift`), `Home` deja el mínimo y `End` el máximo.
-  `aria-valuenow` se actualiza en cada paso.
-- **Rango**: 240-900 px, y el editor nunca baja de 280 px. Si la vista Editor está oculta la fila
-  mide cero, así que el recorte real se rehace con el `ResizeObserver` al mostrarla.
-- **Persistencia**: `apkc-studio/previa-ancho` (lo elegido), `apkc-studio/previa-visible`
-  (`1`/`0`) y `apkc-studio/previa-modo` (`vivo`/`render`) en `localStorage`. Una preferencia
-  corrupta cae a 340 px, visible y en `vivo` (el valor viejo `xml` se lee como `vivo`).
-- **Pantallas estrechas** (≤760 px): el separador se oculta y el panel pasa debajo del editor con
-  el 38 % del alto; no hay arrastre en táctil.
+- **Puntero**: `pointerdown` en cualquier `.tirador-previa`; el `pointermove` y el `pointerup` se
+  siguen en el documento para que soltar fuera no deje el arrastre pegado. Una arista horizontal
+  cambia el **ancho** y una vertical el **alto**; las esquinas, las dos cosas. La arista que se
+  mueve sigue al puntero y la de enfrente se queda quieta (`cajaRedimensionada`, pura y probada en
+  node). Solo cambian variables CSS del marco y `body.separando-previa`: **no tocan el modelo, el
+  fichero ni el canvas**. El cursor es `col-resize`, `row-resize`, `nwse-resize` o `nesw-resize`
+  según el tirador, y también mientras se arrastra (`body[data-eje]`).
+- **Teclado**: `←`/`→` mueven 16 px (48 con `Shift`), `Home`/`End` van al mínimo y al máximo; en la
+  arista izquierda, `Alt+↑/↓` cambia el alto. La arista inferior (enfocable) hace lo mismo con el
+  alto: `↑`/`↓`, `Home` (320 px) y `End` (la fila entera). `aria-valuenow` se actualiza en cada paso.
+- **Rango**: 240-900 px de ancho y el editor nunca baja de 280 px; el alto mínimo es 320 px y nunca
+  deja hueco fuera de la fila. Sin alto propio el panel ocupa la fila entera (como siempre) y el
+  `ResizeObserver` rehace el recorte al cambiar de vista o de ventana.
+- **Doble clic** en cualquier tirador vuelve al tamaño de siempre.
+- **Persistencia**: `apkc-studio/previa-ancho`, `apkc-studio/previa-alto` y
+  `apkc-studio/previa-arriba` (lo elegido), `apkc-studio/previa-visible` (`1`/`0`) y
+  `apkc-studio/previa-modo` (`vivo`/`render` — el modo **Vista previa** o **Emulador**) en
+  `localStorage`. Una preferencia corrupta cae a 340 px de ancho, sin alto propio, visible y en
+  `vivo` (el valor viejo `xml` se lee como `vivo`). La vista Pantalla guarda su columna aparte:
+  `apkc-studio/previa-lado`, `-alto` y `-arriba`.
+- **Pantallas estrechas** (≤760 px): la fila se apila, los ocho tiradores se ocultan y
+  `#previa-aviso-estrecho` explica que ahí no se redimensiona; un `pointerdown` se ignora.
 
-### En vivo: el layout dibujado
+### Vista previa: el layout dibujado
 
 El panel **nunca enseña el código XML**: dibuja el layout en el canvas del teléfono. El XML del
 editor se convierte en el mismo modelo que entiende `vista-previa.js` (`pantalla` + nodos con
@@ -190,12 +225,14 @@ motivo; con un **XML a medias o inválido** se conserva el último render bueno 
 avisa con `XML inválido (línea N): se conserva el último render…` (clase `.con-aviso`), sin pintar
 nada de código en el canvas.
 
-### Render y consola de la ejecución
+### Emulador y consola de la ejecución
 
-La pestaña **Render (eventos)** pinta el modelo real de `apkc preview` en `#previa-lateral-canvas`
-(con `pintarModelo`) y debajo lleva la consola de lo que hizo la app. El modelo llega por
+La pestaña **Emulador** pinta el modelo real de `apkc preview` en `#previa-lateral-canvas` (con
+`pintarModelo`) y debajo lleva la consola de lo que hizo la app. El modelo llega por
 `apkc preview`; `vista-previa.js` publica el evento `apkc:previa-actualizada` con el modelo o con
-el motivo de no tenerlo, y el panel repinta sin volver a ejecutar nada.
+el motivo de no tenerlo, y el panel repinta sin volver a ejecutar nada. El mismo modelo y la misma
+consola se pintan en la vista **Pantalla**, sin una segunda ejecución: `SUPERFICIES` recorre los dos
+juegos de ids.
 
 `resumenEjecucion(modelo)` (puro) acota `ejecucion` antes de pintarlo: `capturas` (máximo 64,
 `origen`, `id`, `texto`), `avisos` (máximo 24), `pasos`, `interacciones`, `actividad`, `metodo` y
@@ -213,7 +250,7 @@ ni `#ultimo-codigo`. Al recargar la página arranca vacía.
 ### Congeniar con compilar
 
 Compilar no cambia de pestaña: `previsualizarLoCompilado()` pinta el modelo y publica el evento; en
-modo Render el canvas se repinta en su caja y la consola se llena, en modo XML se relee el layout.
+modo Emulador el canvas se repinta en su caja y la consola se llena, en modo Vista previa se relee el layout.
 El editor no pierde foco, cursor ni scroll porque nadie escribe en `#codigo`. La compilación corre
 en el worker como siempre y el editor sigue aceptando teclas mientras dura; el fallo del preview
 se queda en el panel (`#previa-render-estado`, `#previa-log-vacio`).
@@ -725,10 +762,10 @@ En `@media (max-width: 760px)`:
 | Comando | Que cubre |
 | --- | --- |
 | `node studio/prueba.js` | genera el zip, comprueba EOCD, plantillas, reglas, ids de `index.html` (de `diagnostico.js`, `temas.js`, `historial.js`, `vista-previa.js`, `previa-panel.js`, `autocompletado.js`), ids viejos prohibidos, sin `<pre>` en el panel, el resaltador puro, el modelo del layout dibujado en vivo y los datos del autocompletado (recursos, `R.java`, contexto y lector de zip/.class) |
-| `node studio/prueba-navegador.js` | `http` sin COOP/COEP: DOM, tres vistas, tres botones de actividad, reflejo del nombre/package, aviso de que no hay OPFS, localStorage, el diagnóstico, los temas y la paleta ANSI, y el contrato de la vista dividida (separador con teclado, alternancia En vivo/Render, que no haya `<pre>` con el XML y consola vacía con su motivo) |
+| `node studio/prueba-navegador.js` | `http` sin COOP/COEP: DOM, tres vistas, tres botones de actividad, reflejo del nombre/package, aviso de que no hay OPFS, localStorage, el diagnóstico, los temas y la paleta ANSI, y el contrato de la vista dividida (separador con teclado, alternancia Vista previa/Emulador, los dos modos y la consola de Pantalla, que no haya `<pre>` con el XML y consola vacía con su motivo) |
 | `APKC_WASM=... node studio/prueba-crear.js` | por http con OPFS: crear, escribir el proyecto, abrir el manifiesto, comprobar `data-ruta` del arbol, API 34, el árbol cerrado, subir/mover ficheros, exportar/importar el `.zip`, ajustes, pestañas, undo tree, dos ventanas y fusión/conflicto |
-| `APKC_WASM=... APK_EJEMPLO=... KS_EJEMPLO=... ANDROID_JAR=... node studio/prueba-pestana.js` | la pestaña completa: editar, guardar, recargar, jar del SDK, compilar debug/release, firmar, verificar, recargar sin red, cero peticiones fuera del origen, el autocompletado (recursos, jar por trozos, Tab/Esc/flechas y undo), el enlace `ruta:línea`, Detener, y la vista dividida: separador por puntero y teclado, compilar→pintar sin mover el cursor, el layout **dibujado** en vivo que cambia al editar `android:text` sin compilar, XML inválido que conserva el render, alternancia En vivo/Render con estado, y la consola de la ejecución con el JSON del Contador, el `<script>` escapado y el límite de 64/24 |
-| `APKC=... APKC_WASM=... sh studio/e2e.sh` | todo lo anterior más los apk/aab nativos y la plantilla Contador; en la pestaña, 127 comprobaciones |
+| `APKC_WASM=... APK_EJEMPLO=... KS_EJEMPLO=... ANDROID_JAR=... node studio/prueba-pestana.js` | la pestaña completa: editar, guardar, recargar, jar del SDK, compilar debug/release, firmar, verificar, recargar sin red, cero peticiones fuera del origen, el autocompletado (recursos, jar por trozos, Tab/Esc/flechas y undo), el enlace `ruta:línea`, Detener, y la vista dividida: separador por puntero y teclado, compilar→pintar sin mover el cursor, el layout **dibujado** en vivo que cambia al editar `android:text` sin compilar, XML inválido que conserva el render, alternancia Vista previa/Emulador con estado, las aristas y esquinas de los dos marcos (puntero, teclado, persistencia y pantalla estrecha), la consola de la ejecución con el JSON del Contador, el `<script>` escapado y el límite de 64/24 |
+| `APKC=... APKC_WASM=... sh studio/e2e.sh` | todo lo anterior más los apk/aab nativos y la plantilla Contador; en la pestaña, 147 comprobaciones |
 
 El gate completo de la pagina es `e2e.sh`; `prueba-pestana.js` solo no basta para decir que la
 pagina funciona. Los comandos de entorno estan en `tools/entorno.sh` (`test`, `wasm`, `gate`).
@@ -747,10 +784,10 @@ estan en `studio/README.md` y en `docs/evidencia.md` §140. En resumen: se copia
 - **La vista dividida es de una sola pareja.** El editor y el teléfono comparten fila; no hay dos
   grupos de pestañas ni ventanas. En pantallas de 760 px o menos el panel pasa debajo y no se
   redimensiona con el dedo.
-- **El modo en vivo es una aproximación, no Android.** Dibuja el layout desde el XML con reglas
+- **El modo Vista previa es una aproximación, no Android.** Dibuja el layout desde el XML con reglas
   propias (LinearLayout con pesos, marcos, textos, tamaños, gravedad, padding y márgenes); no
   conoce `ConstraintLayout` por sus constraints, estilos, temas, `drawable` ni medidas de fuente
-  reales. No ejecuta la app: los eventos están en **Render (eventos)**.
+  reales. No ejecuta la app: los eventos están en **Emulador**.
 - **El XML no se edita en el panel.** Se dibuja; los cambios se hacen en el editor de siempre y el
   panel los sigue con 350 ms de retardo. No sigue el cursor ni resalta el fichero.
 - **El render es el modelo de `apkc preview`, no la app ejecutándose.** La consola muestra lo que
