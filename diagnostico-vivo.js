@@ -1,8 +1,19 @@
-// Errores en vivo del fuente que se está escribiendo. No hay reglas nuevas: el texto se manda a
-// `apkc check` a través del hospedador de siempre (worker + wasm) y el JSON que vuelve se pinta en
-// el panel y como subrayado sobre el textarea. El fichero temporal se limpia después de cada paso,
-// así que el árbol del proyecto no se ensucia y nada sale del origen.
+// Errores en vivo del fichero que se está escribiendo, en dos lenguajes con dos motores distintos:
+//
+//   - `.java`: el texto se copia a `/proyecto/.apkc-check.java` y se manda a `apkc check` por el
+//     hospedador de siempre (worker + wasm). No hay reglas nuevas y el temporal se borra después
+//     de cada pasada.
+//   - `.xml`: el análisis es local y puro (`diagnosticarXml`, en `xml-editor.js`): etiquetas sin
+//     cerrar, atributos sin valor, comillas desbalanceadas, `@+id` repetidos, referencias a
+//     recursos que no existen y atributos `android:` con errata. No lanza ningún comando, así que
+//     no toca la consola ni `#ultimo-codigo`, y no necesita el wasm.
+//
+// Los errores de un lenguaje no se mezclan con los del otro: cada fila lleva su origen (`Java` o
+// `XML`) y cambiar de fichero reemplaza la lista entera. Ambos comparten el debounce de 350 ms,
+// el mismo formato `archivo:línea:columna` (§200) y la misma capa de subrayado.
 import { hospedador, estadoPestana, DOCUMENTOS, RUTA_JAR, irALinea } from "./pestana.js";
+import { cargarRecursosProyecto } from "./recursos-proyecto.js";
+import { diagnosticarXml } from "./xml-editor.js";
 
 (() => {
   const area = document.getElementById("codigo");
@@ -12,7 +23,7 @@ import { hospedador, estadoPestana, DOCUMENTOS, RUTA_JAR, irALinea } from "./pes
   if (!area || !marcas || !lista || !estado) return;
 
   const TEMPORAL = "/proyecto/.apkc-check.java";
-  const ESPERA = 350; // ms tras la última pulsación
+  const ESPERA = 350; // ms tras la última pulsación, igual para los dos lenguajes
   let temporizador = null;
   let serie = 0;
   let enCurso = false;
@@ -31,6 +42,7 @@ import { hospedador, estadoPestana, DOCUMENTOS, RUTA_JAR, irALinea } from "./pes
   //       que un carácter astral (`\uD83D\uDE00`, un rune y dos unidades) desplaza el corte;
   //   (b) el ancho no es «columnas por ancho de carácter»: un tabulador llega a su parada (`tab-size:
   //       4` en style.css) y un astral puede ocupar dos celdas. Se mide el prefijo.
+  // El linter de XML emite la columna con la misma convención (runes, desde 1).
   function indiceUTF16(texto, columna) {
     let i = 0;
     let runes = 1;
@@ -63,11 +75,11 @@ import { hospedador, estadoPestana, DOCUMENTOS, RUTA_JAR, irALinea } from "./pes
     return Number.isFinite(ancho) ? ancho : 0;
   }
 
-  // El token que hay que subrayar: desde el índice, el identificador o la cadena de accesos
-  // (`R.layout.main`) que sigue. Si el error cae en un signo, se subraya ese signo.
+  // El token que hay que subrayar: desde el índice, el identificador, la referencia `@string/x` o
+  // el atributo `android:text`. Si el error cae en un signo, se subraya ese signo.
   function tokenEn(texto, indice) {
     const resto = String(texto || "").slice(Math.max(0, indice));
-    const m = /^[A-Za-z0-9_$.]+/.exec(resto);
+    const m = /^[@+]?[A-Za-z0-9_$.:/-]+/.exec(resto);
     return m ? m[0] : resto.slice(0, 1);
   }
 
@@ -94,6 +106,7 @@ import { hospedador, estadoPestana, DOCUMENTOS, RUTA_JAR, irALinea } from "./pes
       const marca = document.createElement("span");
       marca.className = "marca-error";
       marca.dataset.linea = String(linea);
+      if (e.origen) marca.dataset.origen = e.origen;
       const columna = Number(e.columna);
       if (columna > 0) {
         const texto = lineas[linea - 1] || "";
@@ -120,6 +133,15 @@ import { hospedador, estadoPestana, DOCUMENTOS, RUTA_JAR, irALinea } from "./pes
       const item = document.createElement("li");
       const boton = document.createElement("button");
       boton.type = "button";
+      // el origen va delante para que una fila de `apkc check` y una del linter de XML no se
+      // confundan aunque compartan panel
+      if (e.origen) {
+        const origen = document.createElement("span");
+        origen.className = "origen-error";
+        origen.dataset.origen = e.origen;
+        origen.textContent = e.origen;
+        boton.appendChild(origen);
+      }
       const where = document.createElement("code");
       // `archivo:línea:columna` cuando el error nació en un token; `archivo:línea` si solo se sabe la
       // línea. Se enlaza al sitio exacto y el texto dice qué pasa, sin repetir la posición.
@@ -156,19 +178,76 @@ import { hospedador, estadoPestana, DOCUMENTOS, RUTA_JAR, irALinea } from "./pes
     temporizador = setTimeout(verificar, ESPERA);
   }
 
+  function rutaActiva() {
+    return estadoPestana.ruta || (DOCUMENTOS && DOCUMENTOS.activa) || "";
+  }
+
+  // XML: análisis local, sin worker, sin temporal y sin `apkc check`. Los recursos del proyecto
+  // (los mismos del autocompletado) dicen si un `@string/…` existe de verdad; si el barrido no
+  // pudo leer nada, el estado lo dice en vez de fingir que la referencia está bien.
+  function verificarXml(ruta) {
+    const mio = ++serie;
+    enCurso = true;
+    errores = [];
+    pintar();
+    estado.textContent = "comprobando…";
+    const texto = area.value;
+    const nombre = ruta.split("/").pop() || "AndroidManifest.xml";
+    return cargarRecursosProyecto()
+      .catch(() => ({}))
+      .then((recursos) => {
+        if (mio !== serie) return;
+        const encontrados = diagnosticarXml(texto, { archivo: ruta, recursos });
+        errores = encontrados.map((e) => ({
+          ...e,
+          origen: "XML",
+          posicion: nombre + ":" + e.linea + ":" + e.columna,
+        }));
+        const resumen = errores.length
+          ? errores.length + (errores.length === 1 ? " error" : " errores")
+          : "sin errores";
+        const notas = ["XML"];
+        if (!Object.keys(recursos || {}).length) notas.push("sin recursos del proyecto que consultar");
+        estado.textContent = resumen + " · " + notas.join(" · ");
+        pintar();
+      });
+  }
+
   async function verificar() {
     clearTimeout(temporizador);
-    if (enCurso) { pendiente = true; return; }
-    const ruta = estadoPestana.ruta || (DOCUMENTOS && DOCUMENTOS.activa) || "";
+    if (enCurso) {
+      // una pasada vieja no puede pintar su resultado encima de la nueva: se invalida su serie
+      serie++;
+      pendiente = true;
+      // mientras corre la pasada nueva no se dejan las filas de la anterior: si el fichero acaba
+      // de cambiar pueden ser del otro lenguaje (una fila XML sobre un .java, y al revés)
+      errores = [];
+      pintar();
+      estado.textContent = "comprobando…";
+      return;
+    }
+    const ruta = rutaActiva();
+    if (/\.xml$/i.test(ruta)) {
+      try {
+        await verificarXml(ruta);
+      } finally {
+        enCurso = false;
+        if (pendiente) { pendiente = false; programar(); }
+      }
+      return;
+    }
     if (!/\.java$/i.test(ruta)) {
       errores = [];
       pintar();
-      estado.textContent = "Abre un fichero .java para ver los errores mientras escribes.";
+      estado.textContent = "Abre un fichero .java o .xml para ver los errores mientras escribes.";
       return;
     }
     const texto = area.value;
     const mio = ++serie;
     enCurso = true;
+    // las filas del fichero anterior (posiblemente XML) no esperan al check: se vacían ya
+    errores = [];
+    pintar();
     estado.textContent = "comprobando…";
     try {
       const escrito = await hospedador.escribir(TEMPORAL, new TextEncoder().encode(texto));
@@ -193,13 +272,14 @@ import { hospedador, estadoPestana, DOCUMENTOS, RUTA_JAR, irALinea } from "./pes
       const dato = leerJson(r && r.consola);
       if (!dato) throw new Error("apkc check no devolvió JSON");
       if (mio !== serie) return;
-      errores = Array.isArray(dato.errores) ? dato.errores : [];
+      errores = (Array.isArray(dato.errores) ? dato.errores : [])
+        .map((e) => ({ ...e, origen: "Java" }));
       const resumen = errores.length
         ? errores.length + (errores.length === 1 ? " error" : " errores")
         : "sin errores";
       const notas = [dato.aviso, dato.recursos && /^sin R/.test(dato.recursos) ? dato.recursos : ""]
         .filter(Boolean);
-      estado.textContent = resumen + (notas.length ? " · " + notas.join(" · ") : "");
+      estado.textContent = resumen + " · Java" + (notas.length ? " · " + notas.join(" · ") : "");
       pintar();
     } catch (e) {
       if (mio === serie) {

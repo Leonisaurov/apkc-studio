@@ -236,7 +236,6 @@ export function pintarModelo(canvas, modelo, medir) {
   const bordeFuerte = colorDe("--borde2", "#3c3c3c");
   const acento = colorDe("--acento", "#007acc");
   const tinta = colorDe("--texto-fuerte", "#e7e7e7");
-  const tintaTenue = colorDe("--texto-medio", "#b0b0b0");
 
   // el fondo del panel y el rectángulo de la pantalla, que es el límite de lo que se pinta
   ctx.fillStyle = fondo;
@@ -272,31 +271,24 @@ export function pintarModelo(canvas, modelo, medir) {
     ctx.beginPath();
     ctx.rect(r.x + 1, r.y + 1, Math.max(1, r.ancho - 2), Math.max(1, r.alto - 2));
     ctx.clip();
-    // Un nodo bajo no pierde su texto: la etiqueta de tipo solo entra si sobra alto, y el texto se
-    // ajusta a la caja en vez de suprimirse. Antes había un `r.alto >= 28` que se comía el
-    // «Hello World!» del apk Hola (84×18 px con la escala 0,75): la pantalla salía vacía. El texto
-    // dinámico del Contador tenía el mismo alto y el mismo destino.
-    const etiqueta = r.id ? r.tipo + " · " + r.id : r.tipo;
-    let linea = r.y + 3;
-    let hayEtiqueta = false;
-    if (r.alto >= 30) {
-      ctx.font = "11px ui-monospace, SFMono-Regular, Menlo, Consolas, monospace";
-      ctx.fillStyle = tintaTenue;
-      ctx.fillText(etiqueta, r.x + 5, linea, Math.max(0, r.ancho - 10));
-      linea += 13;
-      hayEtiqueta = true;
-    }
+    // El nodo pinta **solo su texto**. Antes se dibujaba encima una etiqueta con el tipo y el id
+    // (`Button · id/pulsar`); sobre un botón parecía un diálogo pegado y el usuario pidió quitarlo.
+    // El tipo y el id no se pierden: siguen en el modelo, en `rectsEscalados`, en el `resumen` que
+    // devuelve `pintarModelo` y en `data-nodos` del canvas (no se pinta nada de eso).
     if (r.texto && r.alto >= 8) {
-      // una sola línea, con la fuente encogida al hueco real: 8..12 px según lo que quede
-      const disponible = (r.alto - (linea - r.y) - 2);
-      const tamano = Math.max(8, Math.min(12, Math.floor(hayEtiqueta ? disponible : r.alto - 4)));
+      // una sola línea, con la fuente encogida al hueco real: 8..12 px
+      const tamano = Math.max(8, Math.min(12, Math.floor(r.alto - 6)));
       ctx.font = tamano + "px ui-monospace, SFMono-Regular, Menlo, Consolas, monospace";
       ctx.fillStyle = tinta;
-      ctx.fillText(r.texto, r.x + 5, linea, Math.max(0, r.ancho - 10));
+      ctx.fillText(r.texto, r.x + 5, r.y + 3, Math.max(0, r.ancho - 10));
     }
     ctx.restore();
   }
-  return { ancho, alto, nodos: rects.length, escala: marcoRect.escala, valida: true, modelo };
+  // El tipo y el id de cada nodo quedan accesibles sin dibujarse: en el atributo `data-nodos`
+  // del canvas y en el objeto que devuelve esta función.
+  const resumen = rects.slice(0, 40).filter((r) => r.tipo).map((r) => (r.id ? r.tipo + " · " + r.id : r.tipo)).join(", ");
+  if (canvas.dataset) canvas.dataset.nodos = resumen;
+  return { ancho, alto, nodos: rects.length, escala: marcoRect.escala, valida: true, modelo, resumen };
 }
 
 // Pinta el modelo en el canvas de la página y actualiza la línea de estado. Sin modelo se deja el

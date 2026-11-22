@@ -1346,6 +1346,22 @@ pre {
 .diagnostico-vivo-lista button:hover { background: var(--boton-hover); }
 .diagnostico-vivo-lista code { color: var(--peligro); margin-right: 8px; }
 .diagnostico-vivo-lista .sin-errores { color: var(--acento); padding: 4px 0; }
+/* el origen de cada fila: `Java` (apkc check) o `XML` (el linter local). Sin esto, dos
+   diagnósticos de motores distintos se leen como si fueran el mismo. */
+.diagnostico-vivo-lista .origen-error {
+  display: inline-block;
+  min-width: 34px;
+  margin-right: 8px;
+  padding: 1px 5px;
+  border-radius: 3px;
+  font: 600 10px/1.4 var(--fuente-ui, inherit);
+  letter-spacing: .02em;
+  text-transform: uppercase;
+  color: var(--fondo, #1e1e1e);
+  background: var(--texto-medio, #888);
+  vertical-align: 1px;
+}
+.diagnostico-vivo-lista .origen-error[data-origen="XML"] { background: var(--acento, #007acc); }
 
 .consola {
   margin: 0;

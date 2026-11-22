@@ -3,6 +3,12 @@
 // los layouts y la `R.java` que dejó el build) y el `android.jar` que la pestaña guardó allí (los
 // nombres de clase están en su directorio central y los de método, en el propio `.class`).
 //
+// Hay **dos lenguajes y dos contextos**: un `.java` sugiere recursos de `R.` y APIs del jar
+// (`contextoDeCompletado`), y un `.xml` del proyecto sugiere etiquetas, atributos `android:`/
+// `tools:`, valores enumerados y referencias `@string/…` (`contextoXml`). Nunca se cruzan: la
+// extensión del fichero activo elige la rama, así que en un layout no aparece `R.` ni una clase
+// Java, y en un fuente no aparece una etiqueta XML. El estado del popup dice cuál es (`xml · …`).
+//
 // La parte difícil —qué se está completando, cómo se parte el zip y cómo se lee un `.class`— está en
 // autocompletado-datos.js, que es puro y se prueba en node con `prueba.js`. Este fichero lee del
 // hospedador, elige qué enseñar y pinta la lista.
@@ -14,10 +20,13 @@
 //   window.AUTOCOMPLETADO.textoSinJar() qué se puede sugerir sin el jar
 import { hospedador, EDITOR, RUTA_JAR, estadoPestana } from "./pestana.js";
 import {
-  recursosDeRutas, agregarValores, agregarIdsDeXml, recursosDeRJava,
   buscarFinDirectorio, leerEntradasDirectorio, clasesDelJar, offsetDeDatosLocales,
-  metodosDeClase, contextoDeCompletado,
+  metodosDeClase, contextoDeCompletado, agregarIdsDeXml,
 } from "./autocompletado-datos.js";
+import {
+  cargarRecursosProyecto, invalidarRecursosProyecto, recursosEnCache, totalDeNombres,
+} from "./recursos-proyecto.js";
+import { contextoXml, sugerenciasXml } from "./xml-editor.js";
 
 (() => {
   const area = document.getElementById("codigo");
@@ -27,9 +36,7 @@ import {
   if (!area || !caja || !lista || !estado) return;
 
   const MAXIMO = 50;
-  const TEXTOS = new TextDecoder();
 
-  let recursos = null;          // tipo -> Set de nombres
   let jar = null;               // { clases: Map(simple -> entrada), leidos, medida }
   let jarFallo = null;          // motivo del último fallo al leer el jar
   let jarFalloCuando = 0;       // cuándo falló: si la página trae el jar después, se reintenta
@@ -50,45 +57,9 @@ import {
 
   // ---- datos del proyecto ------------------------------------------------------------
 
-  function totalDeNombres(mapa) {
-    let total = 0;
-    for (const tipo of Object.keys(mapa)) total += (mapa[tipo] || new Set()).size;
-    return total;
-  }
-
-  async function leerRecursos() {
-    const mapa = {};
-    const arbol = await hospedador.arbol();
-    const rutas = ((arbol && arbol.nodos) || [])
-      .filter((n) => n && n.ruta && !n.dir)
-      .map((n) => n.ruta);
-    recursosDeRutas(rutas, mapa);
-    for (const ruta of rutas) {
-      const esValues = /\/res\/values[^/]*\/[^/]+\.xml$/.test(ruta);
-      const esXml = /\/res\/(layout|menu|xml)[^/]*\/[^/]+\.xml$/.test(ruta);
-      const esR = /\/src\/(?:.+\/)?R\.java$/.test(ruta);
-      if (!esValues && !esXml && !esR) continue;
-      let bytes = null;
-      try {
-        bytes = await hospedador.bytes(ruta); // el hospedador devuelve el Uint8Array, no un envoltorio
-      } catch (e) {
-        continue;
-      }
-      if (!bytes) continue;
-      const texto = TEXTOS.decode(bytes);
-      if (esValues) agregarValores(texto, mapa);
-      else if (esR) recursosDeRJava(texto, mapa);
-      else agregarIdsDeXml(texto, mapa);
-    }
-    return mapa;
-  }
-
-  async function cargarRecursos() {
-    // un barrido vacío no se cachea: el proyecto se puede crear después de la primera consulta
-    if (recursos && Object.keys(recursos).length) return recursos;
-    recursos = await leerRecursos();
-    return recursos;
-  }
+  // El barrido y su caché viven en `recursos-proyecto.js`: el linter de XML necesita el mismo mapa
+  // para saber si un `@string/…` existe, y no se recorre OPFS dos veces por pulsación.
+  const cargarRecursos = () => cargarRecursosProyecto();
 
   // Editar un res/values, un layout o la R.java cambia lo que se sugiere. No se barre por cada
   // pulsación: se marca y se relee cuando la persona deja de teclear.
@@ -96,7 +67,7 @@ import {
     const ruta = (estadoPestana && estadoPestana.ruta) || "";
     if (!/\/proyecto\/res\//.test(ruta) && !/(^|\/)R\.java$/.test(ruta)) return;
     if (limpiarRecursos) clearTimeout(limpiarRecursos);
-    limpiarRecursos = setTimeout(() => { recursos = null; limpiarRecursos = null; }, 800);
+    limpiarRecursos = setTimeout(() => { invalidarRecursosProyecto(); limpiarRecursos = null; }, 800);
   }
 
   // ---- el jar, por trozos ------------------------------------------------------------
@@ -171,11 +142,37 @@ import {
     const empiezan = [];
     const contienen = [];
     for (const item of items) {
-      const nombre = item.texto.toLowerCase();
+      // `filtro` deja que un atributo se encuentre por su nombre local (`textS`) aunque se
+      // inserte con prefijo (`android:textSize`)
+      const nombre = String(item.filtro || item.texto).toLowerCase();
       if (nombre.startsWith(p)) empiezan.push(item);
       else if (nombre.includes(p)) contienen.push(item);
     }
     return empiezan.concat(contienen);
+  }
+
+  // El fichero activo decide el lenguaje. La extensión manda: un layout no lleva Java y un
+  // fuente no lleva etiquetas XML, aunque su texto se parezca.
+  function esFicheroXml() {
+    const ruta = (estadoPestana && estadoPestana.ruta) || "";
+    return /\.xml$/i.test(ruta);
+  }
+
+  async function candidatosXml(ctx) {
+    // las etiquetas no necesitan OPFS; las referencias y los valores sí
+    const necesitaDatos = ctx.modo === "referencia" || ctx.modo === "valor";
+    let mapa = {};
+    let ids = null;
+    if (necesitaDatos) {
+      try { mapa = await cargarRecursos(); } catch (e) { mapa = {}; }
+      // los `@+id` del buffer cuentan aunque no se hayan guardado
+      ids = agregarIdsDeXml(area.value, {}).id || null;
+    }
+    return sugerenciasXml(ctx, {
+      recursos: mapa,
+      id: ids,
+      ruta: (estadoPestana && estadoPestana.ruta) || "",
+    });
   }
 
   async function candidatosPara(ctx) {
@@ -301,11 +298,14 @@ import {
 
   async function sugerir() {
     const mio = ++generacion;
-    const ctx = contextoDeCompletado(area.value, area.selectionStart);
+    const enXml = esFicheroXml();
+    const ctx = enXml
+      ? contextoXml(area.value, area.selectionStart)
+      : contextoDeCompletado(area.value, area.selectionStart);
     if (!ctx) { cerrar(); return; }
     let resultado = { estado: "", lista: [] };
     try {
-      resultado = await candidatosPara(ctx);
+      resultado = enXml ? await candidatosXml(ctx) : await candidatosPara(ctx);
     } catch (e) {
       if (mio !== generacion) return;
       contexto = null;
@@ -396,12 +396,12 @@ import {
     Object.assign(window, {
       AUTOCOMPLETADO: {
         refrescar: async () => {
-          recursos = null;
+          invalidarRecursosProyecto();
           const mapa = await cargarRecursos();
           return { nombres: totalDeNombres(mapa), tipos: Object.keys(mapa).sort() };
         },
         recursos: () => {
-          const mapa = recursos || {};
+          const mapa = recursosEnCache();
           return { nombres: totalDeNombres(mapa), tipos: Object.keys(mapa).sort() };
         },
         cargarJar: async () => {
