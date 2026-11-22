@@ -1495,91 +1495,235 @@ async function conductor() {
       escapado.restaurado === true,
       JSON.stringify(escapado.trasMensaje).slice(0, 300));
 
-    // 12a-septies. el XML en vivo: el layout tal como se escribe, con resaltado y sin compilar. Se
-    // lee del buffer del editor cuando es el documento abierto y de OPFS cuando está cerrado.
-    const xmlVivo = await evaluar(`(async () => {
+    // 12a-septies. el modo «En vivo» dibuja el layout: no hay ni un `<pre>` con el XML. Se abre el
+    // layout, se cambia su `android:text` en el editor y el canvas cambia sin compilar; un XML a
+    // medias conserva el último render bueno.
+    const vivo = await evaluar(`(async () => {
+      const vp = await import("/vista-previa.js");
+      const firma = (cv) => {
+        const d = cv.getContext("2d").getImageData(0, 0, cv.width, cv.height).data;
+        let h = 0;
+        for (let i = 0; i < d.length; i += 13) h = (h * 31 + d[i]) | 0;
+        return h;
+      };
+      const textos = (m) => {
+        const salida = [];
+        const recorrer = (n) => {
+          if (!n) return;
+          if (n.texto) salida.push(n.texto);
+          for (const h of n.hijos || []) recorrer(h);
+        };
+        if (m) recorrer(m.raiz);
+        return salida;
+      };
       marcarSucio(false);
       await abrir("/proyecto/res/layout/main.xml");
-      document.getElementById("previa-modo-xml").click();
-      await new Promise((ok) => setTimeout(ok, 500));
-      const pre = document.getElementById("previa-xml-codigo");
-      const estado = document.getElementById("previa-xml-estado");
-      const antes = {
-        lineas: pre.textContent.split("\\n").length,
-        etiquetas: pre.querySelectorAll(".etiqueta").length,
-        atributos: pre.querySelectorAll(".atributo").length,
-        estado: estado.textContent,
-        codigo: document.getElementById("ultimo-codigo").textContent,
-      };
+      document.getElementById("previa-modo-vivo").click();
+      await new Promise((ok) => setTimeout(ok, 900));
+      const panel = document.getElementById("previa-lateral");
+      const canvas = document.getElementById("previa-vivo-canvas");
+      const estado = document.getElementById("previa-vivo-estado");
       const area = document.getElementById("codigo");
-      area.value = area.value.replace("<LinearLayout", '<LinearLayout marca="en-vivo"');
-      area.dispatchEvent(new Event("input", { bubbles: true }));
-      await new Promise((ok) => setTimeout(ok, 700));
-      const despues = {
-        marca: /marca="en-vivo"/.test(pre.textContent),
-        linear: /LinearLayout/.test(pre.textContent),
+      const original = area.value;
+      const consolaAntes = document.getElementById("consola-pestana").textContent;
+      const inicial = {
+        textos: textos(PREVIA_PANEL.modeloVivo()),
+        nodos: PREVIA_PANEL.modeloVivo() ? PREVIA_PANEL.modeloVivo().nodos : 0,
+        firma: firma(canvas),
+        estado: estado.textContent,
+        pre: !!panel.querySelector("pre"),
+        codigo: document.getElementById("ultimo-codigo").textContent,
+      };
+      const ponerTexto = (valor) => {
+        const patron = new RegExp('android:text="[^"]*"');
+        area.value = area.value.replace(patron, 'android:text="' + valor + '"');
+        area.dispatchEvent(new Event("input", { bubbles: true }));
+      };
+      area.value = original;
+      ponerTexto("Hola");
+      await new Promise((ok) => setTimeout(ok, 800));
+      const hola = {
+        textos: textos(PREVIA_PANEL.modeloVivo()),
+        firma: firma(canvas),
         estado: estado.textContent,
         codigo: document.getElementById("ultimo-codigo").textContent,
-        guardado: false,
+        consolaIgual: document.getElementById("consola-pestana").textContent === consolaAntes,
       };
-      return { antes, despues, ruta: estadoPestana.ruta };
+      ponerTexto("Adiós");
+      await new Promise((ok) => setTimeout(ok, 800));
+      const adios = {
+        textos: textos(PREVIA_PANEL.modeloVivo()),
+        firma: firma(canvas),
+        estado: estado.textContent,
+        codigo: document.getElementById("ultimo-codigo").textContent,
+      };
+      // XML a medias: ni un error de texto en el canvas, ni el dibujo anterior borrado
+      const corte = original.indexOf("</LinearLayout>");
+      area.value = corte > 0 ? original.slice(0, corte) : "<LinearLayout>";
+      area.dispatchEvent(new Event("input", { bubbles: true }));
+      await new Promise((ok) => setTimeout(ok, 800));
+      const invalido = {
+        textos: textos(PREVIA_PANEL.modeloVivo()),
+        firma: firma(canvas),
+        estado: estado.textContent,
+        aviso: estado.classList.contains("con-aviso"),
+      };
+      // tinta del texto dentro de su nodo, con el modelo bueno: con texto hay, sin él no
+      const modelo = PREVIA_PANEL.modeloVivo();
+      let objetivo = null;
+      const buscar = (n) => {
+        if (!objetivo && n.texto) objetivo = n;
+        for (const h of n.hijos || []) buscar(h);
+      };
+      if (modelo) buscar(modelo.raiz);
+      const medirTinta = (conTexto) => {
+        const copia = JSON.parse(JSON.stringify(modelo));
+        let nodo = null;
+        const buscarCopia = (n) => {
+          if (!nodo && n.texto) nodo = n;
+          for (const h of n.hijos || []) buscarCopia(h);
+        };
+        buscarCopia(copia.raiz);
+        if (nodo && !conTexto) nodo.texto = "";
+        const cv = document.createElement("canvas");
+        vp.pintarModelo(cv, copia, { ancho: 270, alto: 480 });
+        const ctx = cv.getContext("2d");
+        const dpr = cv.width / 270;
+        const caja = vp.escalaPara(copia, 270, 480);
+        const r = nodo ? nodo.rect : { x: 0, y: 0, ancho: 1, alto: 1 };
+        const margen = 2 * dpr;
+        const x = Math.max(0, Math.round((caja.x + r.x * caja.escala) * dpr + margen));
+        const y = Math.max(0, Math.round((caja.y + r.y * caja.escala) * dpr + margen));
+        const ancho = Math.max(1, Math.round(r.ancho * caja.escala * dpr - 2 * margen));
+        const alto = Math.max(1, Math.round(r.alto * caja.escala * dpr - 2 * margen));
+        const datos = ctx.getImageData(x, y, ancho, alto).data;
+        const cuenta = new Map();
+        for (let i = 0; i < datos.length; i += 4) {
+          const clave = datos[i] + "," + datos[i + 1] + "," + datos[i + 2];
+          cuenta.set(clave, (cuenta.get(clave) || 0) + 1);
+        }
+        let fondo = [0, 0, 0], maximo = -1;
+        for (const [clave, n] of cuenta) {
+          if (n > maximo) { maximo = n; fondo = clave.split(",").map(Number); }
+        }
+        let tinta = 0;
+        for (let i = 0; i < datos.length; i += 4) {
+          const d = Math.abs(datos[i] - fondo[0]) + Math.abs(datos[i + 1] - fondo[1]) + Math.abs(datos[i + 2] - fondo[2]);
+          if (d > 40) tinta++;
+        }
+        return tinta;
+      };
+      const tinta = {
+        conTexto: medirTinta(true),
+        sinTexto: medirTinta(false),
+        alto: objetivo ? Math.round(objetivo.rect.alto) : 0,
+        texto: objetivo ? objetivo.texto : "",
+      };
+      // alternar no pierde el estado de ninguno de los dos
+      document.getElementById("previa-modo-render").click();
+      await new Promise((ok) => setTimeout(ok, 300));
+      const enRender = {
+        vivo: document.getElementById("previa-vivo").hidden,
+        render: document.getElementById("previa-render").hidden,
+        log: document.getElementById("previa-log-lista").children.length,
+        seleccion: [document.getElementById("previa-modo-vivo").getAttribute("aria-selected"),
+          document.getElementById("previa-modo-render").getAttribute("aria-selected")],
+      };
+      document.getElementById("previa-modo-vivo").click();
+      await new Promise((ok) => setTimeout(ok, 300));
+      const deVuelta = {
+        textos: textos(PREVIA_PANEL.modeloVivo()),
+        firma: firma(canvas),
+        estado: estado.textContent,
+      };
+      area.value = original;
+      area.dispatchEvent(new Event("input", { bubbles: true }));
+      await new Promise((ok) => setTimeout(ok, 800));
+      marcarSucio(false);
+      return { inicial, hola, adios, invalido, tinta, enRender, deVuelta,
+        restaurado: textos(PREVIA_PANEL.modeloVivo()).join("|") === inicial.textos.join("|") };
     })()`);
-    comprueba("el XML en vivo muestra el layout del proyecto con resaltado y sin compilar",
-      /res\/layout\/main\.xml/.test(String(xmlVivo.antes.estado)) &&
-      /solo lectura/.test(String(xmlVivo.antes.estado)) &&
-      xmlVivo.antes.lineas > 3 && xmlVivo.antes.etiquetas > 0 && xmlVivo.antes.atributos > 0 &&
-      xmlVivo.antes.codigo === xmlVivo.despues.codigo,
-      JSON.stringify(xmlVivo.antes).slice(0, 320));
-    comprueba("y se actualiza al escribir, sin guardar y sin lanzar otro comando de apkc",
-      xmlVivo.despues.marca === true && xmlVivo.despues.linear === true &&
-      /sin guardar/.test(String(xmlVivo.despues.estado)) &&
-      xmlVivo.despues.codigo === xmlVivo.antes.codigo,
-      JSON.stringify(xmlVivo.despues).slice(0, 320));
+    comprueba("el modo «En vivo» dibuja el layout del proyecto y no enseña ni una línea de XML",
+      vivo.inicial.pre === false && vivo.inicial.nodos >= 2 && vivo.inicial.firma !== 0 &&
+      /res\/layout\/main\.xml/.test(String(vivo.inicial.estado)) &&
+      /en vivo \(sin compilar\)/.test(String(vivo.inicial.estado)) &&
+      vivo.inicial.textos.length >= 1,
+      JSON.stringify(vivo.inicial).slice(0, 320));
+    comprueba("cambiar android:text a «Hola» cambia el dibujo sin compilar ni ensuciar la consola",
+      vivo.hola.textos.includes("Hola") && vivo.hola.firma !== vivo.inicial.firma &&
+      vivo.hola.codigo === vivo.inicial.codigo && vivo.hola.consolaIgual === true,
+      JSON.stringify({ textos: vivo.hola.textos, firma: vivo.hola.firma, antes: vivo.inicial.firma,
+        codigo: vivo.hola.codigo, consolaIgual: vivo.hola.consolaIgual }).slice(0, 320));
+    comprueba("y a «Adiós» el canvas vuelve a cambiar, con el último código intacto",
+      vivo.adios.textos.includes("Adiós") && vivo.adios.firma !== vivo.hola.firma &&
+      vivo.adios.codigo === vivo.inicial.codigo,
+      JSON.stringify({ textos: vivo.adios.textos, firma: vivo.adios.firma,
+        antes: vivo.hola.firma, codigo: vivo.adios.codigo }).slice(0, 320));
+    comprueba("un XML a medias conserva el último render bueno y lo avisa, sin pintar el error",
+      /XML inválido/.test(String(vivo.invalido.estado)) && vivo.invalido.aviso === true &&
+      vivo.invalido.textos.includes("Adiós") &&
+      vivo.invalido.firma === vivo.adios.firma,
+      JSON.stringify(vivo.invalido).slice(0, 320));
+    comprueba("el texto del layout se dibuja dentro de su nodo, no solo su etiqueta",
+      vivo.tinta.conTexto > 20 && vivo.tinta.sinTexto === 0 && vivo.tinta.texto === "Adiós",
+      JSON.stringify(vivo.tinta).slice(0, 240));
+    comprueba("alternar a Render (eventos) conserva el log y volver a En vivo conserva su dibujo",
+      vivo.enRender.vivo === true && vivo.enRender.render === false &&
+      vivo.enRender.log >= 1 && vivo.enRender.seleccion.join(",") === "false,true" &&
+      vivo.deVuelta.textos.includes("Adiós") && vivo.deVuelta.firma === vivo.adios.firma &&
+      vivo.restaurado === true,
+      JSON.stringify({ enRender: vivo.enRender, deVuelta: vivo.deVuelta, restaurado: vivo.restaurado }).slice(0, 360));
 
-    // con otro fichero abierto el panel cae al layout del modelo o al primero del árbol, y sin
-    // ningún layout lo dice en vez de quedarse en blanco
-    const xmlFuera = await evaluar(`(async () => {
+    // con otro fichero abierto el panel dibuja el layout del proyecto leído de OPFS
+    const vivoFuera = await evaluar(`(async () => {
       marcarSucio(false);
       await abrir("/proyecto/src/com/myapp/MainActivity.java");
       document.getElementById("previa-modo-render").click();
-      document.getElementById("previa-modo-xml").click();
-      await new Promise((ok) => setTimeout(ok, 800));
-      const pre = document.getElementById("previa-xml-codigo");
+      document.getElementById("previa-modo-vivo").click();
+      await new Promise((ok) => setTimeout(ok, 900));
+      const m = PREVIA_PANEL.modeloVivo();
+      const salida = [];
+      const recorrer = (n) => { if (n.texto) salida.push(n.texto); for (const h of n.hijos || []) recorrer(h); };
+      if (m) recorrer(m.raiz);
       return {
         abierto: estadoPestana.ruta,
-        estado: document.getElementById("previa-xml-estado").textContent,
-        layout: /LinearLayout/.test(pre.textContent),
-        etiquetas: pre.querySelectorAll(".etiqueta").length,
+        estado: document.getElementById("previa-vivo-estado").textContent,
+        textos: salida,
+        nodos: m ? m.nodos : 0,
       };
     })()`);
-    comprueba("sin el layout abierto, el XML en vivo lee el layout del proyecto de OPFS",
-      /MainActivity\.java$/.test(String(xmlFuera.abierto)) &&
-      /res\/layout\/main\.xml/.test(String(xmlFuera.estado)) && xmlFuera.layout === true &&
-      xmlFuera.etiquetas > 0,
-      JSON.stringify(xmlFuera).slice(0, 280));
+    comprueba("sin el layout abierto, el modo En vivo dibuja el layout del proyecto de OPFS",
+      /MainActivity\.java$/.test(String(vivoFuera.abierto)) &&
+      /res\/layout\/main\.xml/.test(String(vivoFuera.estado)) &&
+      vivoFuera.nodos >= 2 && vivoFuera.textos.length >= 1,
+      JSON.stringify(vivoFuera).slice(0, 280));
 
-    const xmlVacio = await evaluar(`(async () => {
+    const vivoVacio = await evaluar(`(async () => {
       const sano = await hospedador.texto("/proyecto/res/layout/main.xml");
       await hospedador.limpiar("/proyecto/res/layout/main.xml");
       document.getElementById("previa-modo-render").click();
-      document.getElementById("previa-modo-xml").click();
+      document.getElementById("previa-modo-vivo").click();
       await new Promise((ok) => setTimeout(ok, 900));
-      const pre = document.getElementById("previa-xml-codigo");
+      const canvas = document.getElementById("previa-vivo-canvas");
+      const d = canvas.getContext("2d").getImageData(0, 0, canvas.width, canvas.height).data;
+      let tinta = 0;
+      for (let i = 3; i < d.length; i += 4) if (d[i] !== 0) tinta++;
       const r = {
-        estado: document.getElementById("previa-xml-estado").textContent,
-        vacio: pre.textContent.trim() === "",
+        estado: document.getElementById("previa-vivo-estado").textContent,
+        tinta,
+        modelo: PREVIA_PANEL.modeloVivo() === null,
       };
       await hospedador.escribir("/proyecto/res/layout/main.xml", new TextEncoder().encode(sano));
       document.getElementById("previa-modo-render").click();
-      document.getElementById("previa-modo-xml").click();
+      document.getElementById("previa-modo-vivo").click();
       await new Promise((ok) => setTimeout(ok, 900));
-      r.restaurado = /LinearLayout/.test(document.getElementById("previa-xml-codigo").textContent);
+      r.restaurado = PREVIA_PANEL.modeloVivo() !== null;
       return r;
     })()`);
-    comprueba("sin ningún res/layout/*.xml el panel lo dice y no inventa un fichero",
-      /no tiene|No se pudo leer/.test(String(xmlVacio.estado)) && xmlVacio.vacio === true &&
-      xmlVacio.restaurado === true,
-      JSON.stringify(xmlVacio).slice(0, 280));
+    comprueba("sin ningún res/layout/*.xml el panel lo dice, deja el canvas vacío y no inventa un dibujo",
+      /no tiene ningún res\/layout/.test(String(vivoVacio.estado)) &&
+      vivoVacio.tinta === 0 && vivoVacio.modelo === true && vivoVacio.restaurado === true,
+      JSON.stringify(vivoVacio).slice(0, 280));
 
     // 12a-octies. el separador: se arrastra con puntero, se mueve con el teclado y guarda el ancho
     // sin tocar el modelo, el texto ni el cursor del editor.

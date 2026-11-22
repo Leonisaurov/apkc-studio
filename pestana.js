@@ -3090,7 +3090,7 @@ if (typeof window !== "undefined") {
   // el código de la página; los imports son la vía normal.
   Object.assign(window, {
     actualizarCursor, relativa, carpetaDe, carpetaActual, nombreDeSubida,
-    pedirSubida, subirSeleccion, hayDocumentosSucios, leerPersistencia,
+    pedirSubida, subirSeleccion, hayDocumentosSucios, leerPersistencia, PREVIA_PANEL,
     falloDocumento, renderPestanas, pintarMarcaSucio, guardarEnMemoria,
     historialDe, asegurarHistorial, volcarHistorial, programarHistorial,
     aplicarNodoHistorial, restaurarNodoHistorial, limpiarHistorial,
