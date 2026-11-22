@@ -56,6 +56,9 @@ const navegador = spawn(CHROME, [
   "--headless=new", "--no-sandbox", "--disable-setuid-sandbox", "--disable-gpu",
   "--disable-dev-shm-usage", "--remote-allow-origins=*",
   "--no-first-run", "--disable-extensions", "--disable-sync", "--user-data-dir=" + PERFIL,
+  // la vista dividida reserva 240..900 px al panel: en la ventana mínima de headless el editor no
+  // cabría y el separador no tendría recorrido
+  "--window-size=1440,900",
   "--remote-debugging-port=" + PUERTO, URL_PAGINA,
 ], { stdio: ["ignore", "pipe", "pipe"] });
 let salidaNavegador = "";
@@ -111,6 +114,66 @@ const conductor = `(async () => {
   r.canvasPrevia = !!document.getElementById("vista-previa");
   document.querySelector('.pestana-vista[data-vista="crear"]').click();
   r.vueltaInicio = document.getElementById("crear").classList.contains("activa");
+
+  // la vista dividida: editor a la izquierda y teléfono a la derecha, con un separador que se
+  // mueve con el teclado y se recuerda. Sin wasm ni OPFS esto es solo DOM: el panel avisa de que
+  // no hay layout y la consola de «sin ejecución», sin reventar.
+  const previa = (() => {
+    const separador = document.getElementById("separador-previa");
+    const panel = document.getElementById("previa-lateral");
+    const fila = document.getElementById("editor-fila");
+    const boton = document.getElementById("previa-alternar");
+    const modoXml = document.getElementById("previa-modo-xml");
+    const modoRender = document.getElementById("previa-modo-render");
+    if (!separador || !panel || !fila || !boton || !modoXml || !modoRender) return null;
+    const anchoInicial = separador.getAttribute("aria-valuenow");
+    separador.focus();
+    separador.dispatchEvent(new KeyboardEvent("keydown", { key: "ArrowLeft", bubbles: true }));
+    const trasIzquierda = Number(separador.getAttribute("aria-valuenow"));
+    separador.dispatchEvent(new KeyboardEvent("keydown", { key: "ArrowRight", bubbles: true }));
+    const trasDerecha = Number(separador.getAttribute("aria-valuenow"));
+    const guardado = localStorage.getItem("apkc-studio/previa-ancho");
+    modoRender.click();
+    const enRender = {
+      xml: document.getElementById("previa-xml").hidden,
+      render: document.getElementById("previa-render").hidden,
+      seleccion: [modoXml.getAttribute("aria-selected"), modoRender.getAttribute("aria-selected")],
+      vacio: document.getElementById("previa-log-vacio").textContent,
+      vacioVisible: !document.getElementById("previa-log-vacio").hidden,
+      cabecera: document.getElementById("previa-log-cabecera").textContent,
+      entradas: document.getElementById("previa-log-lista").children.length,
+      estado: document.getElementById("previa-render-estado").textContent,
+    };
+    modoXml.click();
+    const enXml = {
+      xml: document.getElementById("previa-xml").hidden,
+      render: document.getElementById("previa-render").hidden,
+      estado: document.getElementById("previa-xml-estado").textContent,
+      modoGuardado: localStorage.getItem("apkc-studio/previa-modo"),
+    };
+    boton.click();
+    const oculto = {
+      panel: panel.hidden,
+      separador: separador.hidden,
+      expandido: boton.getAttribute("aria-expanded"),
+      guardado: localStorage.getItem("apkc-studio/previa-visible"),
+    };
+    boton.click();
+    const visibleOtraVez = !panel.hidden && !separador.hidden &&
+      boton.getAttribute("aria-expanded") === "true";
+    return {
+      rol: separador.getAttribute("role"),
+      orientacion: separador.getAttribute("aria-orientation"),
+      enfocable: separador.tabIndex,
+      minimo: separador.getAttribute("aria-valuemin"),
+      anchoInicial, trasIzquierda, trasDerecha, guardado,
+      enRender, enXml, oculto, visibleOtraVez,
+      editorSigue: !!document.getElementById("codigo"),
+      visible: !panel.hidden,
+    };
+  })();
+  r.previa = previa;
+  r.soloUnCanvas = document.querySelectorAll("canvas.previa-canvas").length === 2;
 
   // sin cabeceras del servidor, el SW debió aislar la página y el create tiene que funcionar
   document.getElementById("crear-proyecto").click();
@@ -220,6 +283,29 @@ function comprueba(cond, msg) { if (!cond) { fallos++; console.log("  FALLO:", m
     comprueba(/[Cc]ompila/.test(String(v.avisoPrevia)),
       "sin apk, la vista previa no pide compilar: " + JSON.stringify(v.avisoPrevia));
     comprueba(v.vueltaInicio, "no se pudo volver a Inicio");
+    // la vista dividida: el separador es un separador de verdad, se mueve con el teclado, se
+    // recuerda, y el panel alterna entre XML y render sin perder el editor
+    const pv = v.previa || {};
+    comprueba(pv.rol === "separator" && pv.orientacion === "vertical" && pv.enfocable === 0 &&
+      pv.minimo === "240" && pv.visible === true && pv.editorSigue === true,
+      "el separador de la vista dividida no declara su contrato: " + JSON.stringify(pv).slice(0, 240));
+    const ancho0 = Number(pv.anchoInicial);
+    comprueba(Number.isFinite(ancho0) && pv.trasIzquierda === ancho0 + 16 &&
+      pv.trasDerecha === ancho0 && pv.guardado === String(ancho0),
+      "el separador no se mueve con las flechas ni guarda el ancho: " + JSON.stringify({ ancho0,
+        izquierda: pv.trasIzquierda, derecha: pv.trasDerecha, guardado: pv.guardado }));
+    comprueba(pv.enRender && pv.enRender.xml === true && pv.enRender.render === false &&
+      pv.enRender.seleccion.join(",") === "false,true" && pv.enRender.entradas === 0 &&
+      pv.enRender.vacioVisible === true && /[Cc]ompila/.test(String(pv.enRender.vacio)) &&
+      pv.enRender.cabecera === "sin ejecución",
+      "el modo render no esconde el XML ni deja la consola vacía con su motivo: " + JSON.stringify(pv.enRender).slice(0, 300));
+    comprueba(pv.enXml && pv.enXml.xml === false && pv.enXml.render === true &&
+      pv.enXml.modoGuardado === "xml" && String(pv.enXml.estado).length > 0,
+      "volver a XML no restaura su sección ni guarda el modo: " + JSON.stringify(pv.enXml).slice(0, 240));
+    comprueba(pv.oculto && pv.oculto.panel === true && pv.oculto.separador === true &&
+      pv.oculto.expandido === "false" && pv.oculto.guardado === "0" && pv.visibleOtraVez === true,
+      "el botón Previa no oculta ni vuelve a mostrar el panel: " + JSON.stringify(pv.oculto));
+    comprueba(v.soloUnCanvas === true, "faltan el canvas de Vista y el del panel lateral (deben ser dos)");
     comprueba(v.icono, "falta el campo del icono");
     // Sin APKC_WASM esta prueba es solo de DOM: basta con que el SW haya aislado la página y el
     // create no culpe a OPFS. Con el binario presente (es lo que hace e2e.sh) tiene que crear.

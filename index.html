@@ -258,6 +258,11 @@
                 <button id="borrar-fichero" type="button" role="menuitem" class="peligro" disabled>Borrar…</button>
               </div>
             </details>
+            <button id="previa-alternar" type="button" title="Mostrar u ocultar la vista previa del teléfono"
+                    aria-label="Vista previa del teléfono" aria-expanded="true" aria-controls="previa-lateral">
+              <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 5h16v14H4z"/><path d="M14 5v14"/></svg>
+              <span class="texto-boton">Previa</span>
+            </button>
             <button id="alternar-panel" type="button" title="Mostrar u ocultar la compilación (Ctrl+`)" aria-label="Compilar"
                     aria-expanded="false" aria-controls="panel-inferior">
               <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M14 4l6 6-3 3-6-6z"/><path d="M12 10l-8 8 2 2 8-8"/></svg>
@@ -286,15 +291,60 @@
             <span id="buscar-estado" class="nota" role="status" aria-live="polite"></span>
           </div>
 
-          <div class="editor">
-            <pre id="numeros" class="numeros" aria-hidden="true"></pre>
-            <div class="capas">
-              <pre id="resalto" class="resalto" aria-hidden="true"></pre>
-              <div id="diagnostico-marcas" class="diagnostico-marcas" aria-hidden="true"></div>
-              <textarea id="codigo" spellcheck="false" wrap="off" autocomplete="off"
-                        autocapitalize="off" autocorrect="off" aria-label="Código del fichero"
-                        placeholder="Abre un fichero del explorador o crea un proyecto en Inicio."></textarea>
+          <div id="editor-fila" class="editor-fila">
+            <div class="editor">
+              <pre id="numeros" class="numeros" aria-hidden="true"></pre>
+              <div class="capas">
+                <pre id="resalto" class="resalto" aria-hidden="true"></pre>
+                <div id="diagnostico-marcas" class="diagnostico-marcas" aria-hidden="true"></div>
+                <textarea id="codigo" spellcheck="false" wrap="off" autocomplete="off"
+                          autocapitalize="off" autocorrect="off" aria-label="Código del fichero"
+                          placeholder="Abre un fichero del explorador o crea un proyecto en Inicio."></textarea>
+              </div>
             </div>
+
+            <div id="separador-previa" class="separador-previa" role="separator" tabindex="0"
+                 aria-orientation="vertical" aria-label="Separador entre el editor y la vista previa"
+                 aria-controls="previa-lateral" aria-valuemin="240" aria-valuemax="900" aria-valuenow="340"></div>
+
+            <aside id="previa-lateral" class="previa-lateral" aria-label="Vista previa del teléfono">
+              <div class="previa-lateral-cab">
+                <div class="previa-modos" role="tablist" aria-label="Contenido de la vista previa">
+                  <button id="previa-modo-xml" class="previa-modo activo" type="button" role="tab"
+                          aria-selected="true" aria-controls="previa-xml">XML en vivo</button>
+                  <button id="previa-modo-render" class="previa-modo" type="button" role="tab"
+                          aria-selected="false" aria-controls="previa-render">Render (eventos)</button>
+                </div>
+                <button id="previa-cerrar" class="icono-boton" type="button" title="Ocultar la vista previa"
+                        aria-label="Ocultar la vista previa">
+                  <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18"/></svg>
+                </button>
+              </div>
+
+              <div id="previa-xml" class="previa-xml" role="tabpanel" aria-labelledby="previa-modo-xml">
+                <p id="previa-xml-estado" class="previa-estado" role="status" aria-live="polite">buscando el layout…</p>
+                <pre id="previa-xml-codigo" class="previa-xml-codigo" tabindex="0"
+                     aria-label="El XML del layout tal como se edita, de solo lectura"></pre>
+              </div>
+
+              <div id="previa-render" class="previa-render" role="tabpanel" aria-labelledby="previa-modo-render" hidden>
+                <div class="previa-marco previa-marco-lateral">
+                  <canvas id="previa-lateral-canvas" class="previa-canvas previa-canvas-lateral" width="360" height="640"
+                          role="img" aria-label="Vista previa aproximada de la primera pantalla del apk"></canvas>
+                </div>
+                <p id="previa-render-estado" class="previa-estado" role="status" aria-live="polite">Compila el
+                  proyecto para ver aquí la pantalla del apk.</p>
+                <section id="previa-log" class="previa-log" role="log" aria-label="Consola del intérprete">
+                  <div class="previa-log-cab">
+                    <span class="previa-log-titulo">Consola de la ejecución</span>
+                    <span id="previa-log-cabecera" class="nota">sin ejecución</span>
+                  </div>
+                  <ol id="previa-log-lista" class="previa-log-lista"></ol>
+                  <p id="previa-log-vacio" class="nota">Compila el proyecto para ver las capturas y los avisos
+                    del intérprete.</p>
+                </section>
+              </div>
+            </aside>
           </div>
 
           <div class="panel-inferior" id="panel-inferior" hidden>

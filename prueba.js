@@ -10,6 +10,7 @@ import { fusionar } from "./fusion.js";
 import { leerZip, zipDelArbol, paqueteDelManifiesto, nombreDeZip, rutaSegura,
   ajustesDelManifiesto, conAjustes } from "./proyecto.js";
 import * as vistaPrevia from "./vista-previa.js";
+import * as previaPanel from "./previa-panel.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const a = { buildProject, makeZip, analyze, RULES, crc32 };
@@ -168,7 +169,7 @@ for (const m of js.matchAll(/getElementById\("([^"]+)"\)/g))
 const pestana = fs.readFileSync(path.join(__dirname, "pestana.js"), "utf8");
 for (const m of pestana.matchAll(/getElementById\("([^"]+)"\)/g))
   if (!ids.has(m[1])) mal(`pestana.js pide #${m[1]} y index.html no lo tiene`);
-for (const fichero of ["diagnostico.js", "temas.js", "historial.js", "vista-previa.js"]) {
+for (const fichero of ["diagnostico.js", "temas.js", "historial.js", "vista-previa.js", "previa-panel.js"]) {
   const fuente = fs.readFileSync(path.join(__dirname, fichero), "utf8");
   for (const m of fuente.matchAll(/getElementById\("([^"]+)"\)/g))
     if (!ids.has(m[1])) mal(`${fichero} pide #${m[1]} y index.html no lo tiene`);
@@ -279,6 +280,141 @@ for (let i = 0; i < 600; i++) {
   punta.hijos.push(hijo); punta = hijo;
 }
 if (vistaPrevia.nodosAplanados({ raiz: cadena }).length > 512) mal("nodosAplanados no pone cota al árbol");
+
+// 6c. el texto de un nodo pintado es el dinámico si existe: el rect que va al canvas no puede
+//     quedarse con el texto del layout cuando la app ya escribió otro.
+const conDinamico = vistaPrevia.rectsEscalados({ pantalla: { ancho: 100, alto: 100 },
+  raiz: { tipo: "LinearLayout", rect: { x: 0, y: 0, ancho: 100, alto: 100 },
+    hijos: [{ tipo: "TextView", texto: "Pulsos: 0", textoDinamico: "Pulsos: 1",
+      rect: { x: 0, y: 0, ancho: 88, alto: 24 } }] } }, 100, 100);
+if (conDinamico.length !== 2 || conDinamico[1].texto !== "Pulsos: 1") {
+  mal("rectsEscalados no usa textoDinamico: " + JSON.stringify(conDinamico.map((r) => r.texto)));
+}
+
+// 6d. la vista dividida: ancho del separador, ruta del layout y bloque `ejecucion`. Son funciones
+//     puras; el DOM y los píxeles se prueban en chromium (prueba-pestana.js).
+const ancho = previaPanel.anchoValido;
+if (ancho(400, 240, 900) !== 400) mal("anchoValido no respeta un ancho dentro del rango");
+if (ancho("400", 240, 900) !== 400) mal("anchoValido no acepta un ancho guardado como cadena");
+if (ancho(10, 240, 900) !== 240 || ancho(5000, 240, 900) !== 900) mal("anchoValido no recorta a los extremos");
+if (ancho(NaN, 240, 900) !== 340 || ancho("basura", 240, 900) !== 340) mal("anchoValido no cae al respaldo");
+if (ancho(500, 600, 400) !== 600) mal("anchoValido no corrige un máximo menor que el mínimo");
+if (ancho(300, 240, 900) !== 300) mal("anchoValido redondea mal");
+
+const esLayout = previaPanel.esRutaDeLayout;
+if (!esLayout("/proyecto/res/layout/main.xml")) mal("esRutaDeLayout no reconoce res/layout");
+if (!esLayout("/proyecto/res/layout-land/girado.xml")) mal("esRutaDeLayout no reconoce layout-land");
+if (esLayout("/proyecto/res/values/strings.xml") || esLayout(null) || esLayout(3)) {
+  mal("esRutaDeLayout acepta algo que no es un layout");
+}
+
+const candidatos = previaPanel.candidatosDeLayout;
+const soloAbierta = candidatos({ abierta: "/proyecto/res/layout/x.xml", proyecto: "/proyecto" });
+if (soloAbierta.length !== 1 || soloAbierta[0] !== "/proyecto/res/layout/x.xml") {
+  mal("candidatosDeLayout no empieza por el fichero abierto: " + JSON.stringify(soloAbierta));
+}
+const conModelo = candidatos({ abierta: "/proyecto/src/A.java", layout: "main", proyecto: "/proyecto" });
+if (conModelo[0] !== "/proyecto/res/layout/main.xml") mal("candidatosDeLayout no normaliza el nombre del layout: " + JSON.stringify(conModelo));
+const conRutaModelo = candidatos({ layout: "res/layout/main.xml", proyecto: "/proyecto/" });
+if (conRutaModelo[0] !== "/proyecto/res/layout/main.xml") mal("candidatosDeLayout duplica el prefijo res/: " + JSON.stringify(conRutaModelo));
+const conArbol = candidatos({ layout: "main", proyecto: "/proyecto",
+  nodos: ["/proyecto/res/layout/zz.xml", "/proyecto/res/layout/main.xml", "/proyecto/src/A.java"] });
+if (conArbol.join(",") !== "/proyecto/res/layout/main.xml,/proyecto/res/layout/zz.xml") {
+  mal("candidatosDeLayout no ordena main primero y descarta lo que no es layout: " + JSON.stringify(conArbol));
+}
+const borrado = candidatos({ layout: "main", proyecto: "/proyecto", nodos: ["/proyecto/res/layout/otro.xml"] });
+if (borrado.join(",") !== "/proyecto/res/layout/otro.xml") {
+  mal("candidatosDeLayout insiste en un layout que ya no está: " + JSON.stringify(borrado));
+}
+if (candidatos({ proyecto: "/proyecto", nodos: ["/proyecto/src/A.java"] }).length !== 0) {
+  mal("candidatosDeLayout inventa un layout sin ninguno en el árbol");
+}
+// el árbol del fs trae todo el almacenamiento: un layout de otra carpeta no es de este proyecto
+const ajeno = candidatos({ proyecto: "/proyecto", abierta: "/estudio/build/res/layout/main.xml",
+  nodos: ["/estudio/build/res/layout/main.xml", "/proyecto/res/layout/main.xml"] });
+if (ajeno.join(",") !== "/proyecto/res/layout/main.xml") {
+  mal("candidatosDeLayout acepta un layout fuera del proyecto: " + JSON.stringify(ajeno));
+}
+// build/ es la copia generada: no se enseña como si fuera el layout que se edita
+const generado = candidatos({ proyecto: "/proyecto", abierta: "/proyecto/build/res/layout/main.xml",
+  nodos: ["/proyecto/build/res/layout/main.xml"] });
+if (generado.length !== 0) {
+  mal("candidatosDeLayout toma el layout generado de build/: " + JSON.stringify(generado));
+}
+
+// el bloque que emite el intérprete: capturas en orden, avisos aparte, cuentas y error tolerantes
+const ejecucionContador = {
+  actividad: "com.hola.contador.MainActivity", metodo: "onCreate", pasos: 128, interacciones: 1,
+  capturas: [
+    { origen: "TextView.setText", id: "id/total", idRef: "0x7f010001", texto: "Pulsos: 1" },
+    { origen: "Log.d", texto: "arrancada" },
+    { origen: "println", texto: "hola" },
+  ],
+  avisos: ["stub sin resolver: android.widget.Toast", ""],
+};
+const resumen = previaPanel.resumenEjecucion({ ejecucion: ejecucionContador });
+if (!resumen) mal("resumenEjecucion no ve el bloque ejecucion");
+else {
+  if (resumen.pasos !== 128 || resumen.interacciones !== 1 || resumen.metodo !== "onCreate") {
+    mal("resumenEjecucion pierde las cuentas: " + JSON.stringify(resumen));
+  }
+  if (resumen.capturas.length !== 3 || resumen.capturas[0].texto !== "Pulsos: 1" ||
+      resumen.capturas[0].id !== "id/total" || resumen.capturas[1].origen !== "Log.d") {
+    mal("resumenEjecucion no conserva el orden de las capturas: " + JSON.stringify(resumen.capturas));
+  }
+  if (resumen.avisos.length !== 1 || !/Toast/.test(resumen.avisos[0])) {
+    mal("resumenEjecucion no filtra los avisos vacíos: " + JSON.stringify(resumen.avisos));
+  }
+  if (resumen.error !== "") mal("resumenEjecucion inventa un error");
+}
+if (previaPanel.resumenEjecucion({ raiz: {} }) !== null) mal("resumenEjecucion inventa ejecución sin bloque");
+if (previaPanel.resumenEjecucion({ ejecucion: { capturas: [{ texto: "<script>x</script>" }] } })
+  .capturas[0].texto !== "<script>x</script>") {
+  mal("resumenEjecucion no deja el texto tal cual (lo escapa el DOM, no el modelo)");
+}
+const muchas = { ejecucion: { capturas: Array.from({ length: 90 }, (_, i) => ({ origen: "Log.d", texto: "v" + i })),
+  avisos: Array.from({ length: 40 }, (_, i) => "a" + i) } };
+const acotado = previaPanel.resumenEjecucion(muchas);
+if (acotado.capturas.length !== 64 || acotado.avisos.length !== 24) {
+  mal("resumenEjecucion no acota capturas/avisos: " + acotado.capturas.length + "/" + acotado.avisos.length);
+}
+const basura = previaPanel.resumenEjecucion({ ejecucion: { capturas: "no", avisos: [1, null, {}], pasos: -3, error: 42 } });
+if (!basura || basura.capturas.length !== 0 || basura.avisos.length !== 0 || basura.pasos !== 0 ||
+    basura.error !== "") {
+  mal("resumenEjecucion no tolera un JSON hostil: " + JSON.stringify(basura));
+}
+
+// la vista dividida es contrato: sin estos ids y roles, `previa-panel.js` no engancha y las
+// pruebas de chromium no tienen qué conducir
+for (const [id, donde] of [
+  ["editor-fila", "la fila que divide editor y previa"],
+  ["separador-previa", "el separador redimensionable"],
+  ["previa-lateral", "el panel de la vista previa"],
+  ["previa-alternar", "el botón que lo muestra y lo oculta"],
+  ["previa-modo-xml", "la pestaña del XML en vivo"],
+  ["previa-modo-render", "la pestaña del render"],
+  ["previa-xml-codigo", "el XML de solo lectura"],
+  ["previa-lateral-canvas", "el canvas del panel"],
+  ["previa-log-lista", "la consola de la ejecución"],
+  ["previa-log-cabecera", "el resumen de la ejecución"],
+  ["previa-log-vacio", "el mensaje de «sin ejecución»"],
+]) {
+  if (!ids.has(id)) mal(`${donde} (${id}) no está en index.html`);
+}
+if (!/<div[^>]*id="separador-previa"[^>]*role="separator"/.test(html) &&
+    !/<div[^>]*role="separator"[^>]*id="separador-previa"/.test(html)) {
+  mal("el separador no declara role=separator");
+}
+if (!/id="separador-previa"[^>]*tabindex="0"|tabindex="0"[^>]*id="separador-previa"/.test(html)) {
+  mal("el separador no es enfocable por teclado");
+}
+if (!/id="previa-modo-xml"[^>]*role="tab"/.test(html) || !/id="previa-modo-render"[^>]*role="tab"/.test(html)) {
+  mal("los dos modos de la previa no son role=tab");
+}
+if (!/id="previa-log"[^>]*role="log"/.test(html)) mal("la consola de la ejecución no es role=log");
+if (!/id="previa-xml"[^>]*role="tabpanel"/.test(html) || !/id="previa-render"[^>]*role="tabpanel"/.test(html)) {
+  mal("los paneles de XML y render no son role=tabpanel");
+}
 
 // 7. el resaltador del editor es puro y se puede probar sin DOM; si se rompe, el código se
 // queda sin color o, peor, el HTML del resaltado se come el texto

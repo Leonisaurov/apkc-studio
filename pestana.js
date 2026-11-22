@@ -9,6 +9,7 @@ import { CONSOLA, pintarConsola, consolaHtml, textoHtml, enlazarSalidas,
 import { leerZip, zipDelArbol, paqueteDelManifiesto, nombreDeZip,
   ajustesDelManifiesto, conAjustes } from "./proyecto.js";
 import { modeloDeSalida, pintarVistaPrevia, mensajeVistaPrevia } from "./vista-previa.js";
+import { crearPreviaPanel } from "./previa-panel.js";
 
 // La pestaña que hace: editor de fuente + un arbol en OPFS + los comandos de apkc.wasm.
 //
@@ -342,10 +343,16 @@ const EDITOR = {
   },
 };
 
+// La vista dividida (editor + teléfono) se monta desde aquí porque necesita el hospedador y el
+// documento activo, pero su lógica vive en previa-panel.js: este fichero no gana otra copia del
+// estado del editor ni del modelo de la vista previa.
+const PREVIA_PANEL = crearPreviaPanel({
+  hospedador, proyecto: PROYECTO, estadoPestana, editor: EDITOR,
+});
+
 // Ln/Col del cursor, en la barra de estado. Se cuenta sobre el valor real, no sobre el HTML
 // resaltado: el resaltado tiene spans y no sirve para medir posiciones.
-function actualizarCursor() {
-  const area = document.getElementById("codigo");
+function actualizarCursor() {  const area = document.getElementById("codigo");
   const salida = document.getElementById("estado-cursor");
   if (!area || !salida) return;
   const antes = area.value.slice(0, area.selectionStart);
@@ -2750,6 +2757,8 @@ if (typeof document !== "undefined") {
     };
     EDITOR.inicializar();
     actualizarAccionesFichero();
+    // el panel lateral se engancha una vez; sus ids son contrato con las pruebas
+    PREVIA_PANEL.iniciar();
 
     // soltar en el hueco del explorador mueve a la raíz del proyecto
     const cajaArbol = document.getElementById("arbol-pestana");
