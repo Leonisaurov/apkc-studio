@@ -1,6 +1,7 @@
 import { Historial } from "./historial.js";
 import { fusionar } from "./fusion.js";
 import { esXml, resaltar } from "./editor.js";
+import { htmlConfiable } from "./tt.js";
 import { crearBusqueda } from "./busqueda.js";
 import { crearAjustes } from "./ajustes.js";
 import { CONSOLA, pintarConsola, consolaHtml, textoHtml, enlazarSalidas,
@@ -218,7 +219,7 @@ const EDITOR = {
     const resaltado = document.getElementById("resalto");
     if (!area || !resaltado) return;
     const valor = area.value;
-    resaltado.innerHTML = resaltar(valor, esXml(valor) ? "xml" : "java") + "\n";
+    resaltado.innerHTML = htmlConfiable(resaltar(valor, esXml(valor) ? "xml" : "java") + "\n");
     EDITOR.numeros(valor);
   },
 
@@ -2170,7 +2171,7 @@ async function generarClaveRelease() {
     if (campoPass) campoPass.value = pass;
     const select = document.getElementById("keyalias-compilar");
     if (select) {
-      select.innerHTML = "";
+      select.replaceChildren();
       select.add(new Option(alias, alias, true, true));
     }
     actualizarEstadoClave(true);
@@ -2235,7 +2236,7 @@ async function inspeccionarKeystore(cfg) {
     return null;
   }
   const select = document.getElementById(cfg.alias);
-  select.innerHTML = "";
+  select.replaceChildren();
   if (info.keys === 1 && info.entries.length === 1) {
     const e = info.entries[0];
     select.add(new Option(e.alias, e.alias, true, true));
@@ -2269,7 +2270,7 @@ async function olvidarKeystore(cfg) {
   document.getElementById(cfg.pass).value = "";
   if (document.getElementById(cfg.fichero)) document.getElementById(cfg.fichero).value = "";
   const select = document.getElementById(cfg.alias);
-  select.innerHTML = "";
+  select.replaceChildren();
   select.add(new Option("— pulsa «ver certificado» —", ""));
   estadoKeystore(cfg, "keystore olvidado: se borró de esta pestaña");
 }

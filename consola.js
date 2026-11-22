@@ -1,5 +1,6 @@
 // La consola de apkc: colores ANSI, enlaces `ruta:línea` y el buffer que pinta la página.
 // Vive aparte de pestana.js para que el editor no cargue con todo el orquestador.
+import { htmlConfiable } from "./tt.js";
 
 function textoHtml(s) {
   return s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
@@ -104,7 +105,7 @@ const CONSOLA = {
 function pintarConsola() {
   const cuadro = document.getElementById("consola-pestana");
   if (!cuadro) return;
-  cuadro.innerHTML = consolaHtml(CONSOLA.texto);
+  cuadro.innerHTML = htmlConfiable(consolaHtml(CONSOLA.texto));
   cuadro.scrollTop = cuadro.scrollHeight;
 }
 
