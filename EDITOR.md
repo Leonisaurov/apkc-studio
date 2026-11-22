@@ -787,6 +787,7 @@ o lo cierra, y ``Ctrl + ` `` conserva la pestaña activa.
     <button class="panel-tab" data-panel="historial">Historial</button>
     <button class="panel-tab" data-panel="compilar">Compilar</button>
     <button class="panel-tab" data-panel="firmar">Firmar otra apk</button>
+    <button class="panel-tab" data-panel="deps">Dependencias</button>
     <span id="estado-pestana"></span>
     <button id="cerrar-panel">...</button>
   </div>
@@ -796,6 +797,7 @@ o lo cierra, y ``Ctrl + ` `` conserva la pestaña activa.
     <div id="panel-historial" class="panel-vista">...</div>
     <div id="panel-compilar" class="panel-vista">...</div>
     <div id="panel-firmar" class="panel-vista">...</div>
+    <div id="panel-deps" class="panel-vista">...</div>
   </div>
 </div>
 ```
@@ -867,6 +869,19 @@ o lo cierra, y ``Ctrl + ` `` conserva la pestaña activa.
   `#keyalias-firmar`, `#apk-a-firmar`, `#firmar-aqui`, `#keystore-viejo`, `#storepass-viejo`,
   `#keyalias-viejo`, `#rotation-min-sdk`, `#usar-rotacion`, `#crear-linaje`, `#olvidar-linaje` y
   `#estado-linaje`.
+- `#panel-deps` es la sección de **Dependencias Maven**, aparte de Consola, Diagnóstico,
+  Historial, Compilar y Firmar. Sus ids son `#deps-coordenada` (por defecto
+  `com.google.code.gson:gson:2.10.1`, de ejemplo), `#deps-resolver`, `#deps-estado`,
+  `#deps-resultado`, `#deps-nombre`, `#deps-bytes`, `#deps-hash`, `#deps-ruta` y `#deps-indice`.
+  `crearPanelDeps()` de `deps.js` solo engancha el botón y el Enter del campo: al cargar y al
+  compilar no se pide nada. Al pulsar, `deps.js` lee `./deps-index.json` **del propio origen**,
+  busca la coordenada, descarga `./deps/<grupo>/<artefacto>/<versión>/<fichero>` también del
+  origen, comprueba tamaño y SHA-256 contra el índice y solo entonces escribe en OPFS bajo
+  `/deps/`, con un `deps.json` al lado (coordenada, fichero, bytes, sha256, fecha del índice).
+  Ningún `.pom`, `.aar` o `.jar` se pide a Maven: ese paquete lo genera el workflow
+  `.github/workflows/deps-maven.yml` en el runner y se sirve estático. Si el índice no existe,
+  `#deps-estado` lo dice y manda al workflow; no se inventan coordenadas ni hashes. La sección no
+  resuelve el grafo: importa lo que el índice publicó, sin transitivas.
 
 Las acciones concretas de compilar y firmar se documentan en `studio/README.md` y en
 `docs/evidencia.md` (§44-§47, §55, §117-§136). Este documento solo cubre la interfaz.

@@ -15,6 +15,7 @@ import * as autocompletado from "./autocompletado-datos.js";
 import * as xmlEditor from "./xml-editor.js";
 import * as vistaXml from "./vista-xml.js";
 import * as layoutEditor from "./layout-editor.js";
+import * as depsMod from "./deps.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const a = { buildProject, makeZip, analyze, RULES, crc32 };
@@ -174,7 +175,7 @@ const pestana = fs.readFileSync(path.join(__dirname, "pestana.js"), "utf8");
 for (const m of pestana.matchAll(/getElementById\("([^"]+)"\)/g))
   if (!ids.has(m[1])) mal(`pestana.js pide #${m[1]} y index.html no lo tiene`);
 for (const fichero of ["diagnostico.js", "temas.js", "historial.js", "vista-previa.js",
-  "previa-panel.js", "autocompletado.js", "diagnostico-vivo.js", "layout-editor.js"]) {
+  "previa-panel.js", "autocompletado.js", "diagnostico-vivo.js", "layout-editor.js", "deps.js"]) {
   const fuente = fs.readFileSync(path.join(__dirname, fichero), "utf8");
   for (const m of fuente.matchAll(/getElementById\("([^"]+)"\)/g))
     if (!ids.has(m[1])) mal(`${fichero} pide #${m[1]} y index.html no lo tiene`);
@@ -1267,6 +1268,156 @@ public final class R {
       { archivo: "/proyecto/res/layout/m.xml", recursos: { string: new Set(["f"]) } });
     if (fueraCdata.length !== 1 || !/@string\/noexiste/.test(fueraCdata[0].mensaje)) {
       mal(`el CDATA silencia errores de fuera: ${JSON.stringify(fueraCdata)}`);
+    }
+  }
+
+  // 13. la sección de dependencias (R4): importa a OPFS un paquete estático del propio origen.
+  //     Aquí se prueban el índice, la validación, el hash y el camino completo con un fetch y un
+  //     hospedador de mentira; en `prueba-pestana.js` se conduce el panel real en chromium y se
+  //     cuenta que no salga ni una petición del origen.
+  {
+    // el rechazo del proxy se queda como regresión: el usuario no quiere red en tiempo de ejecución
+    const fuenteDeps = fs.readFileSync(path.join(__dirname, "deps.js"), "utf8");
+    const servidor = fs.readFileSync(path.join(__dirname, "servidor.js"), "utf8");
+    if (/deps-proxy/.test(fuenteDeps) || /deps-proxy/.test(servidor)) {
+      mal("sigue habiendo un endpoint /deps-proxy; la red en tiempo de ejecución está descartada");
+    }
+    for (const fichero of ["index.html", "main.js", "vistas.js", "hospedador.js", "sw.js"]) {
+      if (/deps-proxy/.test(fs.readFileSync(path.join(__dirname, fichero), "utf8"))) {
+        mal(fichero + " menciona /deps-proxy");
+      }
+    }
+
+    // rutas del índice: relativas y siempre dentro de deps/
+    const ficheroBueno = "deps/com.example/prueba/1.0/prueba-1.0.jar";
+    if (!depsMod.ficheroDelOrigenSeguro(ficheroBueno)) mal("el cargador rechaza un fichero válido de deps/");
+    for (const malo of ["../fuera.jar", "/deps/x.jar", "deps/../../x.jar", "deps\\x.jar",
+      "deps/x.jar?x", "deps/x.jar#y", "otra/x.jar", "deps//x.jar", "deps/./x.jar", ""]) {
+      if (depsMod.ficheroDelOrigenSeguro(malo)) mal("el cargador acepta un fichero fuera de deps/: " + JSON.stringify(malo));
+    }
+
+    const bytesFalsos = new TextEncoder().encode("PK\u0003\u0004prueba de dependencias de apkc studio\n");
+    const hashFalso = await depsMod.sha256Hex(bytesFalsos);
+    const entradaBuena = {
+      coordenada: "com.example:prueba:1.0", grupo: "com.example", artefacto: "prueba",
+      version: "1.0", extension: "jar", fichero: ficheroBueno,
+      bytes: bytesFalsos.length, sha256: hashFalso,
+    };
+    if (depsMod.validarEntrada(entradaBuena) !== "") mal("validarEntrada rechaza una entrada correcta: " + depsMod.validarEntrada(entradaBuena));
+    for (const rota of [
+      { ...entradaBuena, sha256: "arriba" },
+      { ...entradaBuena, bytes: 0 },
+      { ...entradaBuena, fichero: "../x.jar" },
+      { ...entradaBuena, extension: "apk" },
+      { ...entradaBuena, grupo: "com/example" },
+      { ...entradaBuena, version: ".." },
+      {},
+    ]) if (!depsMod.validarEntrada(rota)) mal("validarEntrada acepta una entrada rota: " + JSON.stringify(rota).slice(0, 120));
+
+    // fetch de mentira: el índice y el artefacto, del mismo origen, sin tocar la red de verdad
+    const llamadas = [];
+    const respuesta = (cuerpo, tipo) => ({
+      ok: true, status: 200,
+      headers: { get: (n) => (String(n).toLowerCase() === "content-type" ? tipo : null) },
+      text: async () => (typeof cuerpo === "string" ? cuerpo : new TextDecoder().decode(cuerpo)),
+      arrayBuffer: async () => cuerpo.buffer.slice(cuerpo.byteOffset, cuerpo.byteOffset + cuerpo.byteLength),
+    });
+    const indice = { version: 1, generado: "2026-11-22T00:00:00Z", artefactos: [entradaBuena] };
+    const fetchMentira = async (ruta) => {
+      llamadas.push(ruta);
+      if (ruta === "./deps-index.json") return respuesta(JSON.stringify(indice), "application/json");
+      if (ruta === "./" + ficheroBueno) return respuesta(bytesFalsos, "application/java-archive");
+      return { ok: false, status: 404, headers: { get: () => null }, text: async () => "no" };
+    };
+    const escritos = new Map();
+    const hospedadorMentira = {
+      escribir: async (ruta, datos) => { escritos.set(ruta, datos); return { tipo: "montado", ruta, bytes: datos.length }; },
+    };
+    const leido = await depsMod.leerIndice({ fetchImpl: fetchMentira });
+    if (leido.artefactos.length !== 1 || leido.generado !== "2026-11-22T00:00:00Z") mal("leerIndice no devuelve el índice válido");
+    if (!depsMod.buscarArtefacto(leido, "com.example:prueba:1.0") || depsMod.buscarArtefacto(leido, "com.example:otra:1.0")) {
+      mal("buscarArtefacto no distingue la coordenada del índice");
+    }
+    const baseLlamadas = llamadas.length;
+    const importado = await depsMod.resolverDependencia({
+      coord: "com.example:prueba:1.0", hospedador: hospedadorMentira, fetchImpl: fetchMentira,
+    });
+    const llamadasImport = llamadas.slice(baseLlamadas);
+    const rutaEsperada = "/deps/com.example/prueba/1.0/prueba-1.0.jar";
+    if (importado.ruta !== rutaEsperada || importado.hash !== hashFalso ||
+        importado.bytes !== bytesFalsos.length || importado.nombre !== "prueba-1.0.jar") {
+      mal("resolverDependencia no importa el artefacto con su hash y su ruta: " + JSON.stringify(importado).slice(0, 240));
+    }
+    if (!escritos.has(rutaEsperada) || escritos.get(rutaEsperada).length !== bytesFalsos.length) {
+      mal("resolverDependencia no escribe el artefacto en OPFS bajo /deps/");
+    }
+    const descriptor = JSON.parse(new TextDecoder().decode(escritos.get("/deps/com.example/prueba/1.0/deps.json") || new Uint8Array([123, 125])));
+    if (descriptor.sha256 !== hashFalso || descriptor.bytes !== bytesFalsos.length || descriptor.coordenada !== "com.example:prueba:1.0") {
+      mal("el descriptor de OPFS no repite coordenada, tamaño y sha256");
+    }
+    if (llamadasImport.length !== 2 || llamadasImport[0] !== "./deps-index.json" || llamadasImport[1] !== "./" + ficheroBueno) {
+      mal("la importación no lee exactamente el índice y su fichero, del propio origen: " + JSON.stringify(llamadasImport));
+    }
+    if (llamadasImport.some((u) => /^https?:|^\/\//.test(u))) mal("la importación construye una URL absoluta: " + JSON.stringify(llamadasImport));
+
+    // un índice ausente no se inventa: 404 con mensaje que manda al workflow
+    let falloIndice = "";
+    try { await depsMod.leerIndice({ fetchImpl: async () => ({ ok: false, status: 404, headers: { get: () => null }, text: async () => "" }) }); }
+    catch (e) { falloIndice = String(e && e.message ? e.message : e); }
+    if (!/no hay deps-index\.json/.test(falloIndice) || !/workflow/.test(falloIndice)) {
+      mal("sin índice el cargador no explica que hay que ejecutar el workflow: " + falloIndice);
+    }
+    // un 200 con HTML no es un índice
+    let falloHtml = "";
+    try { await depsMod.leerIndice({ fetchImpl: async () => respuesta("<html></html>", "text/html") }); }
+    catch (e) { falloHtml = String(e && e.message ? e.message : e); }
+    if (!/HTML/.test(falloHtml)) mal("el cargador acepta HTML como índice");
+    // un artefacto con otro hash no entra en OPFS
+    const escritosMalos = new Map();
+    const fetchAlterado = async (ruta) => {
+      if (ruta === "./deps-index.json") return respuesta(JSON.stringify(indice), "application/json");
+      return respuesta(new TextEncoder().encode("otro contenido"), "application/java-archive");
+    };
+    let falloHash = "";
+    try {
+      await depsMod.resolverDependencia({ coord: "com.example:prueba:1.0", fetchImpl: fetchAlterado,
+        hospedador: { escribir: async (r, d) => { escritosMalos.set(r, d); return { tipo: "montado", bytes: d.length }; } } });
+    } catch (e) { falloHash = String(e && e.message ? e.message : e); }
+    if (!/tamaño no coincide|sha256 no coincide/.test(falloHash) || escritosMalos.size) {
+      mal("un artefacto alterado no se rechaza antes de escribir en OPFS: " + falloHash);
+    }
+
+    // ids contrato de la sección, y la pestaña propia separada de Compilar/Diagnóstico/Historial
+    for (const id of ["deps-coordenada", "deps-resolver", "deps-estado", "deps-resultado",
+      "deps-nombre", "deps-bytes", "deps-hash", "deps-ruta", "deps-indice"]) {
+      if (!ids.has(id)) mal("index.html no tiene el id de dependencias #" + id);
+    }
+    if (!/data-panel="deps"/.test(html) || !/id="panel-deps"/.test(html)) {
+      mal("la sección de dependencias no tiene su pestaña data-panel=deps");
+    }
+    // deps.js viaja en el shell del service worker o la recarga sin red se queda sin módulo
+    if (!fs.readFileSync(path.join(__dirname, "sw.js"), "utf8").includes('"./deps.js"')) {
+      mal("sw.js no cachea deps.js en el shell");
+    }
+    // el paquete de dependencias no se duplica en la caché del SW
+    const sw = fs.readFileSync(path.join(__dirname, "sw.js"), "utf8");
+    if (!sw.includes("/^\\/deps-index\\.json$/") || !sw.includes("/^\\/deps\\//")) {
+      mal("sw.js no deja el índice y los artefactos fuera de su caché (SOLO_RED)");
+    }
+
+    // el workflow es quien descarga de Maven; el índice tiene que salir con hash y tamaño
+    const workflow = path.join(__dirname, "..", ".github", "workflows", "deps-maven.yml");
+    if (!fs.existsSync(path.join(__dirname, "..", ".github"))) {
+      console.log("  (sin el .github del repo padre: la comprobación del workflow se omite)");
+    } else if (!fs.existsSync(workflow)) {
+      mal("falta .github/workflows/deps-maven.yml: sin él no hay índice que importar");
+    } else {
+      const yml = fs.readFileSync(workflow, "utf8");
+      for (const pieza of ["workflow_dispatch", "deps-index.json", "sha256sum", "repo1.maven.org",
+        "dl.google.com", "upload-artifact"]) {
+        if (!yml.includes(pieza)) mal("deps-maven.yml no menciona " + pieza);
+      }
+      if (/deps-proxy/.test(yml)) mal("deps-maven.yml habla de un proxy en tiempo de ejecución");
     }
   }
 

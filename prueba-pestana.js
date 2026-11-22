@@ -5,6 +5,7 @@
 // uso: sh -c 'APKC_WASM=$PREFIX/tmp/apkc-wasm.wasm APK_EJEMPLO=/ruta/app.apk KS_EJEMPLO=$HOME/.android/debug.keystore node prueba-pestana.js'
 // levanta servidor.js, lanza chromium headless por CDP, conduce la página y apaga todo.
 import { spawn } from "node:child_process";
+import { createHash } from "node:crypto";
 import fs from "node:fs";
 import net from "node:net";
 import path from "node:path";
@@ -59,7 +60,29 @@ if (await puertoOcupado(PUERTO)) falta("el puerto " + PUERTO + " ya está ocupad
 if (await puertoOcupado(Number(CDP))) falta("el puerto CDP " + CDP + " ya está ocupado: usa STUDIO_PORT");
 
 // --- el servidor y el navegador -----------------------------------------------------------
-  const envServidor = { ...process.env, APKC_WASM: path.resolve(WASM), APK_EJEMPLO: path.resolve(APK), KS_EJEMPLO: path.resolve(KS) };
+  // La sección de dependencias lee `./deps-index.json` del propio origen. Para probarla sin red
+  // externa, se sirve una copia del árbol de studio con un índice y un artefacto falsos pero bien
+  // formados; el árbol real no trae ese índice hasta que el workflow `deps-maven` publique uno.
+  const SITIO_PRUEBA = path.join(TMP, "pestana-sitio");
+  fs.rmSync(SITIO_PRUEBA, { recursive: true, force: true });
+  fs.cpSync(__dirname, SITIO_PRUEBA, { recursive: true });
+  const depFalso = Buffer.concat([Buffer.from("PK\u0003\u0004", "binary"), Buffer.alloc(2048, 0x41)]);
+  depFalso.write("prueba de dependencias de apkc studio", 4, "utf8");
+  const hashDepFalso = createHash("sha256").update(depFalso).digest("hex");
+  const coordFalsa = "com.example:prueba:1.0";
+  fs.mkdirSync(path.join(SITIO_PRUEBA, "deps/com.example/prueba/1.0"), { recursive: true });
+  fs.writeFileSync(path.join(SITIO_PRUEBA, "deps/com.example/prueba/1.0/prueba-1.0.jar"), depFalso);
+  fs.writeFileSync(path.join(SITIO_PRUEBA, "deps-index.json"), JSON.stringify({
+    version: 1,
+    generado: "2026-11-22T00:00:00Z",
+    artefactos: [{
+      coordenada: coordFalsa, grupo: "com.example", artefacto: "prueba", version: "1.0",
+      extension: "jar", fichero: "deps/com.example/prueba/1.0/prueba-1.0.jar",
+      bytes: depFalso.length, sha256: hashDepFalso,
+    }],
+  }, null, 2));
+  const envServidor = { ...process.env, SITIO_DIR: SITIO_PRUEBA,
+    APKC_WASM: path.resolve(WASM), APK_EJEMPLO: path.resolve(APK), KS_EJEMPLO: path.resolve(KS) };
   if (KS_RELEASE) envServidor.KS_RELEASE = path.resolve(KS_RELEASE);
   if (AAB) envServidor.AAB_EJEMPLO = path.resolve(AAB);
   if (JAR_SRC) envServidor.ANDROID_JAR = path.resolve(JAR_SRC);
@@ -3294,6 +3317,123 @@ async function conductor() {
     await exec("Network.emulateNetworkConditions", {
       offline: false, latency: 0, downloadThroughput: -1, uploadThroughput: -1,
     });
+  }
+
+  // 30. dependencias: importa un paquete estático del propio origen. `peticiones` es lo que ve el
+  //     navegador: aquí no puede aparecer ni Maven, ni un proxy, ni un CDN. El índice y el
+  //     artefacto falsos los sirve `servidor.js` desde una copia de studio (ver el arranque).
+  {
+    const esDeDeps = (u) => {
+      try {
+        const x = new URL(u);
+        return x.pathname === "/deps-index.json" || x.pathname.startsWith("/deps/");
+      } catch (e) { return false; }
+    };
+    const cuantasDeps = () => peticiones.filter(esDeDeps).length;
+    const antesDeps = cuantasDeps();
+    comprueba("la carga y las compilaciones no leen el paquete de dependencias",
+      antesDeps === 0, antesDeps + " peticiones al índice o a /deps/ antes de esta sección");
+
+    // abrir la pestaña tampoco pide nada: el panel solo engancha el botón
+    const antesAbrir = peticiones.length;
+    const abierta = await evaluar(`(() => {
+      mostrarPanel("deps");
+      return {
+        activa: document.getElementById("panel-deps").classList.contains("activa"),
+        estado: document.getElementById("deps-estado").textContent,
+        plegado: document.getElementById("deps-resultado").hidden,
+        coordenada: document.getElementById("deps-coordenada").value,
+      };
+    })()`);
+    comprueba("la pestaña Dependencias se abre vacía y sin pedir nada",
+      abierta.activa === true && abierta.plegado === true &&
+      /sin resolver/.test(String(abierta.estado)) &&
+      abierta.coordenada === "com.google.code.gson:gson:2.10.1" &&
+      peticiones.length === antesAbrir,
+      JSON.stringify(abierta) + " | " + (peticiones.length - antesAbrir) + " peticiones al abrir");
+
+    // un clic importa el artefacto del índice falso y lo deja en OPFS bajo /deps/
+    const antesResolver = peticiones.length;
+    await evaluar(`(() => {
+      document.getElementById("deps-coordenada").value = ${JSON.stringify(coordFalsa)};
+      document.getElementById("deps-resolver").click();
+      return true;
+    })()`);
+    let resuelto = null;
+    for (let i = 0; i < 120; i++) {
+      resuelto = await evaluar(`(() => ({
+        estado: document.getElementById("deps-estado").textContent,
+        nombre: document.getElementById("deps-nombre").textContent,
+        bytes: document.getElementById("deps-bytes").textContent,
+        hash: document.getElementById("deps-hash").textContent,
+        ruta: document.getElementById("deps-ruta").textContent,
+        indice: document.getElementById("deps-indice").textContent,
+        visible: !document.getElementById("deps-resultado").hidden,
+      }))()`);
+      if (/^(listo|error)/.test(String(resuelto.estado))) break;
+      await esperar(500);
+    }
+    const delResolver = peticiones.slice(antesResolver);
+    const rutasResolver = delResolver.map((u) => { try { return new URL(u).pathname; } catch (e) { return u; } });
+    comprueba("Resolver lee solo el índice y su fichero, los dos del mismo origen",
+      delResolver.length === 2 &&
+      rutasResolver[0] === "/deps-index.json" &&
+      rutasResolver[1] === "/deps/com.example/prueba/1.0/prueba-1.0.jar" &&
+      delResolver.every((u) => u.startsWith("http://127.0.0.1:" + PUERTO)),
+      rutasResolver.join(", ") || "sin peticiones");
+    comprueba("el artefacto importado muestra nombre, tamaño y hash del índice",
+      resuelto && resuelto.visible === true && resuelto.nombre === "prueba-1.0.jar" &&
+      /2052 bytes/.test(String(resuelto.bytes)) && resuelto.hash === hashDepFalso &&
+      resuelto.ruta === "/deps/com.example/prueba/1.0/prueba-1.0.jar" &&
+      /2026-11-22/.test(String(resuelto.indice)),
+      JSON.stringify(resuelto).slice(0, 360));
+
+    // no basta con lo que pinta la página: los bytes de OPFS tienen que ser el artefacto
+    const enOpfs = await evaluar(`(async () => {
+      const b = await hospedador.bytes("/deps/com.example/prueba/1.0/prueba-1.0.jar");
+      if (!b) return { bytes: 0 };
+      const h = await crypto.subtle.digest("SHA-256", b);
+      const descriptor = await hospedador.texto("/deps/com.example/prueba/1.0/deps.json");
+      return {
+        bytes: b.length,
+        firma: String.fromCharCode(b[0], b[1], b[2], b[3]),
+        hash: [...new Uint8Array(h)].map((x) => x.toString(16).padStart(2, "0")).join(""),
+        descriptor,
+      };
+    })()`);
+    let descriptor = null;
+    try { descriptor = JSON.parse(enOpfs.descriptor || "null"); } catch (e) { descriptor = null; }
+    comprueba("los bytes guardados en OPFS son el artefacto con su descriptor",
+      enOpfs.bytes === depFalso.length && enOpfs.firma === "PK\u0003\u0004" &&
+      enOpfs.hash === hashDepFalso && descriptor && descriptor.sha256 === hashDepFalso &&
+      descriptor.bytes === depFalso.length && descriptor.fichero === "deps/com.example/prueba/1.0/prueba-1.0.jar",
+      JSON.stringify({ bytes: enOpfs.bytes, firma: enOpfs.firma, hash: enOpfs.hash,
+        descriptor: descriptor && descriptor.coordenada }).slice(0, 360));
+
+    // una coordenada que no está en el índice se dice, no se inventa
+    await evaluar(`(() => {
+      document.getElementById("deps-coordenada").value = "com.google.code.gson:gson:2.10.1";
+      document.getElementById("deps-resolver").click();
+      return true;
+    })()`);
+    let ausente = null;
+    for (let i = 0; i < 60; i++) {
+      ausente = await evaluar(`(() => ({
+        estado: document.getElementById("deps-estado").textContent,
+        visible: !document.getElementById("deps-resultado").hidden,
+      }))()`);
+      if (/^error/.test(String(ausente.estado))) break;
+      await esperar(300);
+    }
+    comprueba("una coordenada ausente del índice se rechaza con el motivo, sin datos inventados",
+      /^error/.test(String(ausente.estado)) && /no está en deps-index\.json/.test(String(ausente.estado)) &&
+      ausente.visible === false, JSON.stringify(ausente).slice(0, 300));
+
+    // y nada de esto ha sacado una petición del origen (el gate global lo repite al final)
+    const ajenasDeps = peticiones.slice(antesDeps).filter((u) =>
+      !u.startsWith("http://127.0.0.1:" + PUERTO) && !/^(?:data|blob):/.test(u));
+    comprueba("la sección de dependencias no pide nada fuera del origen",
+      ajenasDeps.length === 0, ajenasDeps.slice(0, 3).join(", ") || "cero peticiones ajenas");
   }
 
   // requisito del proyecto, escrito como comprobación: la pestaña no puede pedir nada fuera de

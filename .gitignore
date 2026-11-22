@@ -3,3 +3,7 @@ wasm_exec.js
 node_modules/
 *.log
 studio-test.zip
+# el paquete de dependencias lo publica el workflow deps-maven (son binarios): no se versiona.
+# Se copia en studio/ solo para servirlo desde el propio origen.
+deps/
+deps-index.json

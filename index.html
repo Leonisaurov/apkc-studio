@@ -434,6 +434,7 @@
               <button class="panel-tab" type="button" role="tab" aria-selected="false" data-panel="historial">Historial</button>
               <button class="panel-tab" type="button" role="tab" aria-selected="false" data-panel="compilar">Compilar</button>
               <button class="panel-tab" type="button" role="tab" aria-selected="false" data-panel="firmar">Firmar otra apk</button>
+              <button class="panel-tab" type="button" role="tab" aria-selected="false" data-panel="deps">Dependencias</button>
               <span class="espacio"></span>
               <span id="estado-pestana" class="nota"></span>
               <button id="cerrar-panel" class="icono-boton" type="button" title="Cerrar el panel" aria-label="Cerrar el panel">
@@ -593,6 +594,33 @@
                   </div>
                   <p class="nota" id="estado-linaje">sin linaje</p>
                 </details>
+              </div>
+
+              <div id="panel-deps" class="panel-vista" role="tabpanel">
+                <p class="nota"><strong>Dependencias Maven</strong>: el botón <strong>Resolver</strong>
+                  importa a OPFS un artefacto que ya está publicado en el propio origen, guiándose por
+                  <code>deps-index.json</code>. Ese índice y los <code>.jar</code>/<code>.aar</code> los
+                  genera y firma el workflow <code>deps-maven</code> de GitHub Actions, que descarga de
+                  Maven en el runner y publica tamaños y SHA-256. La página no habla con Maven ni con
+                  ningún tercero: carga inicial y compilación no piden nada, y solo este botón lee el
+                  índice y el fichero, ambos del mismo origen. Si el índice no existe todavía, se dice.</p>
+                <div class="panel-form">
+                  <label>coordenada Maven
+                    <input type="text" id="deps-coordenada" value="com.google.code.gson:gson:2.10.1"
+                           autocomplete="off" spellcheck="false" class="ruta">
+                  </label>
+                  <div class="acciones">
+                    <button id="deps-resolver" class="primario" type="button">Resolver</button>
+                  </div>
+                  <p class="nota" id="deps-estado" role="status" aria-live="polite">sin resolver todavía</p>
+                </div>
+                <dl id="deps-resultado" class="deps-datos" hidden>
+                  <dt>artefacto</dt><dd id="deps-nombre"></dd>
+                  <dt>tamaño</dt><dd id="deps-bytes"></dd>
+                  <dt>sha256</dt><dd id="deps-hash" class="deps-hash"></dd>
+                  <dt>en OPFS</dt><dd id="deps-ruta" class="deps-ruta"></dd>
+                  <dt>origen</dt><dd id="deps-indice"></dd>
+                </dl>
               </div>
             </div>
           </div>

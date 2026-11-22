@@ -1536,6 +1536,20 @@ pre {
 .panel-form > label input:not([type=checkbox]):not([type=file]) { width: 100%; max-width: 24rem; }
 .panel-form .acciones, .panel-form .nota { grid-column: 1 / -1; margin: 2px 0; }
 .panel-vista > .acciones { margin: 10px 0; }
+/* Sección de dependencias: el resultado es una lista de definición, no un formulario. El hash y
+   la ruta van en monoespaciada y con salto para que un sha256 no ensanche el panel. */
+.deps-datos {
+  display: grid;
+  grid-template-columns: max-content minmax(0, 1fr);
+  gap: 4px 14px;
+  margin: 10px 0 0;
+  font-size: 12px;
+}
+.deps-datos dt { color: var(--texto-medio); }
+.deps-datos dd { margin: 0; overflow-wrap: anywhere; }
+.deps-datos .deps-hash,
+.deps-datos .deps-ruta { font-family: var(--mono, ui-monospace, monospace); }
+.deps-datos .deps-ruta { color: var(--texto-medio); }
 .diagnostico-vivo-cab { margin: 0 0 8px; }
 .diagnostico-vivo-lista { list-style: none; margin: 0 0 10px; padding: 0; }
 .diagnostico-vivo-lista li { margin: 0 0 4px; }
