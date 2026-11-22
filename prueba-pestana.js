@@ -2112,6 +2112,274 @@ async function conductor() {
       irConAuto.linea === 1 && escapeFinal === true,
       JSON.stringify({ paletaConAuto, irConAuto, escapeFinal }).slice(0, 240));
 
+    // 12a-sexies (D4). autocompletado y linter de XML. El fichero activo elige el lenguaje: en un
+    // `.xml` del proyecto la lista sugiere etiquetas y el estado dice `xml`; en un `.java` no
+    // aparece ni una etiqueta XML; y un `@string` que no existe se marca con el linter local, sin
+    // pasar por `apkc check` (se cuenta la llamada) ni por el fichero temporal.
+    const xmlPrep = await evaluar(`(async () => {
+      if (!window.AUTOCOMPLETADO) return { error: "sin AUTOCOMPLETADO" };
+      await hospedador.escribir("/proyecto/res/values/xmlauto.xml", new TextEncoder().encode(
+        '<resources><string name="xmlauto_hola">Hola</string></resources>'));
+      await hospedador.escribir("/proyecto/res/layout/xmlauto.xml", new TextEncoder().encode(
+        '<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"' +
+        ' android:orientation="vertical">\\n  <TextView android:text="@string/xmlauto_hola"/>\\n</LinearLayout>\\n'));
+      await hospedador.escribir("/proyecto/xmlundo.java", new TextEncoder().encode(
+        "package p;\\npublic class XmlUndo { int x = 1; }\\n"));
+      await AUTOCOMPLETADO.refrescar();
+      marcarSucio(false);
+      await abrir("/proyecto/res/layout/xmlauto.xml");
+      document.querySelector('[data-vista="pestana"]').click();
+      const area = document.getElementById("codigo");
+      EDITOR.poner('<LinearLayout>\\n  <TextVie');
+      area.focus();
+      area.setSelectionRange(area.value.length, area.value.length);
+      area.dispatchEvent(new Event("input", { bubbles: true }));
+      return { ruta: estadoPestana.ruta };
+    })()`);
+    await esperar(900);
+    const listaXml = await evaluar(`({
+      visible: !document.getElementById("autocompletado").hidden,
+      opciones: [...document.querySelectorAll("#autocompletado-lista .autocompletado-opcion")]
+        .map((b) => b.firstChild ? b.firstChild.textContent : b.textContent),
+      estado: document.getElementById("autocompletado-estado").textContent
+    })`);
+    comprueba("en un .xml la lista sugiere etiquetas Android y el estado dice xml",
+      xmlPrep.ruta === "/proyecto/res/layout/xmlauto.xml" && listaXml.visible === true &&
+      listaXml.opciones.includes("TextView") && /^xml ·/.test(String(listaXml.estado)) &&
+      !/android\\.jar|R\\./.test(String(listaXml.estado)),
+      JSON.stringify({ ruta: xmlPrep.ruta, estado: listaXml.estado,
+        primeras: listaXml.opciones.slice(0, 4) }).slice(0, 300));
+
+    // Tab acepta la sugerencia en el XML, entra en el deshacer de ese documento y no toca el
+    // historial del Java que estaba abierto antes.
+    const trasTabXml = await evaluar(`(async () => {
+      const area = document.getElementById("codigo");
+      area.dispatchEvent(new KeyboardEvent("keydown", { key: "Tab", bubbles: true, cancelable: true }));
+      const texto = area.value;
+      const deshacer = document.execCommand("undo");
+      const trasDeshacer = area.value;
+      const javaAntes = DOCUMENTOS.lista
+        .filter((d) => /\\.java$/.test(d.ruta)).map((d) => d.ruta);
+      marcarSucio(false);
+      await abrir("/proyecto/xmlundo.java");
+      const areaJava = document.getElementById("codigo");
+      const javaTexto = areaJava.value;
+      areaJava.focus();
+      const javaDeshacer = document.execCommand("undo");
+      return { texto, deshacer, trasDeshacer, javaAntes, javaTexto, javaDeshacer,
+        popup: document.getElementById("autocompletado").hidden,
+        javaTras: areaJava.value };
+    })()`);
+    comprueba("Tab inserta TextView en el XML sin tocar el deshacer del Java",
+      /<TextView$/.test(String(trasTabXml.texto)) && trasTabXml.popup === true &&
+      !/ +$/.test(String(trasTabXml.texto)) &&
+      trasTabXml.javaTexto === "package p;\npublic class XmlUndo { int x = 1; }\n" &&
+      trasTabXml.javaTras === trasTabXml.javaTexto,
+      JSON.stringify({ texto: String(trasTabXml.texto).slice(-40),
+        popup: trasTabXml.popup, trasDeshacer: String(trasTabXml.trasDeshacer).slice(-20),
+        javaIgual: trasTabXml.javaTras === trasTabXml.javaTexto }).slice(0, 320));
+
+    // en un .java no aparece ni una etiqueta XML, y en un .xml no aparece `R.`
+    const javaSinXml = await evaluar(`(async () => {
+      const area = document.getElementById("codigo");
+      EDITOR.poner("class XmlUndo { <TextVie");
+      area.focus();
+      area.setSelectionRange(area.value.length, area.value.length);
+      area.dispatchEvent(new Event("input", { bubbles: true }));
+      await new Promise((ok) => setTimeout(ok, 500));
+      const enJava = { ruta: estadoPestana.ruta,
+        visible: !document.getElementById("autocompletado").hidden,
+        estado: document.getElementById("autocompletado-estado").textContent,
+        opciones: [...document.querySelectorAll("#autocompletado-lista .autocompletado-opcion")]
+          .map((b) => b.firstChild ? b.firstChild.textContent : b.textContent) };
+      marcarSucio(false);
+      await abrir("/proyecto/res/layout/xmlauto.xml");
+      const areaXml = document.getElementById("codigo");
+      EDITOR.poner("<LinearLayout>\\n  int x = R.");
+      areaXml.focus();
+      areaXml.setSelectionRange(areaXml.value.length, areaXml.value.length);
+      areaXml.dispatchEvent(new Event("input", { bubbles: true }));
+      await new Promise((ok) => setTimeout(ok, 500));
+      const enXml = { ruta: estadoPestana.ruta,
+        visible: !document.getElementById("autocompletado").hidden,
+        estado: document.getElementById("autocompletado-estado").textContent,
+        opciones: [...document.querySelectorAll("#autocompletado-lista .autocompletado-opcion")]
+          .map((b) => b.firstChild ? b.firstChild.textContent : b.textContent) };
+      return { enJava, enXml };
+    })()`);
+    // `TextView` es también una clase del android.jar: en un .java la lista sale por el jar
+    // (`clases del android.jar`), no por el catálogo de etiquetas, y su estado no dice `xml`.
+    // En el .xml, `R.` no abre nada: ni recursos ni clases.
+    comprueba("el contexto no se cruza: ni etiquetas XML en .java ni R. en .xml",
+      javaSinXml.enJava.visible === true && /^clases del android\.jar/.test(String(javaSinXml.enJava.estado)) &&
+      !/^xml/.test(String(javaSinXml.enJava.estado)) &&
+      javaSinXml.enXml.visible === false &&
+      !javaSinXml.enXml.opciones.some((o) => /^R\./.test(String(o))) &&
+      !/^xml ·/.test(String(javaSinXml.enXml.estado)),
+      JSON.stringify({ java: javaSinXml.enJava, xml: javaSinXml.enXml }).slice(0, 300));
+
+    // linter en vivo: `@string/noexiste` con línea y columna, subrayado propio y sin `apkc check`.
+    // Se parte de un XML sano para que el resultado nuevo no se confunda con el de la prueba
+    // anterior (los dos dirían «1 error · XML»).
+    const lintXml = await evaluar(`(async () => {
+      const area = document.getElementById("codigo");
+      const original = hospedador.ejecutar;
+      window.__checksDeXml = 0;
+      const ultimoAntes = document.getElementById("ultimo-codigo").textContent;
+      hospedador.ejecutar = (argv, ...resto) => {
+        if (argv && argv[0] === "check") window.__checksDeXml++;
+        return original.call(hospedador, argv, ...resto);
+      };
+      const estadoActual = () => document.getElementById("diagnostico-vivo-estado").textContent.trim();
+      const esperarHasta = async (prueba, ms) => {
+        const t0 = Date.now();
+        let ultimo = "";
+        while (Date.now() - t0 < ms) {
+          ultimo = estadoActual();
+          if (prueba(ultimo)) return ultimo;
+          await new Promise((ok) => setTimeout(ok, 150));
+        }
+        return ultimo;
+      };
+      EDITOR.poner("<LinearLayout>\\n  <TextView/>\\n</LinearLayout>");
+      area.focus();
+      area.dispatchEvent(new Event("input", { bubbles: true }));
+      const sano = await esperarHasta((e) => /^sin errores/.test(e) && /XML/.test(e), 8000);
+      EDITOR.poner('<LinearLayout>\\n  <TextView android:text="@string/noexiste"/>\\n</LinearLayout>\\n');
+      area.dispatchEvent(new Event("input", { bubbles: true }));
+      const t0 = Date.now();
+      const antes = sano;
+      let estado = "";
+      while (Date.now() - t0 < 20000) {
+        const e = estadoActual();
+        if (e !== antes && /^[0-9]+ error/.test(e) && /XML/.test(e)) { estado = e; break; }
+        await new Promise((ok) => setTimeout(ok, 150));
+      }
+      const marca = document.querySelector('#diagnostico-marcas .marca-error[data-origen="XML"]');
+      const salida = {
+        sano,
+        estado,
+        ms: Date.now() - t0,
+        ultimoAntes,
+        lista: document.getElementById("diagnostico-vivo-lista").textContent,
+        origen: (document.querySelector("#diagnostico-vivo-lista .origen-error") || {}).textContent || "",
+        posicion: (document.querySelector("#diagnostico-vivo-lista code") || {}).textContent || "",
+        marca: marca ? Object.assign({}, marca.dataset) : null,
+        checks: window.__checksDeXml,
+        ultimo: document.getElementById("ultimo-codigo").textContent,
+        consola: String(document.getElementById("consola-pestana").textContent).slice(-200)
+      };
+      hospedador.ejecutar = original;
+      return salida;
+    })()`);
+    comprueba("el linter de XML marca @string/noexiste con archivo:línea:columna y origen XML",
+      /^sin errores/.test(String(lintXml.sano)) &&
+      /^[0-9]+ error/.test(String(lintXml.estado)) && /XML/.test(String(lintXml.estado)) &&
+      /no existe @string\/noexiste/.test(String(lintXml.lista)) &&
+      lintXml.origen === "XML" && /^xmlauto\.xml:2:[0-9]+$/.test(String(lintXml.posicion)) &&
+      lintXml.marca && Number(lintXml.marca.columna) > 0 && Number(lintXml.marca.ancho) > 40,
+      JSON.stringify({ sano: lintXml.sano, estado: lintXml.estado, posicion: lintXml.posicion,
+        marca: lintXml.marca }).slice(0, 320));
+    comprueba("el linter de XML no lanza apkc check y responde en el debounce, no en 1,6 s",
+      lintXml.checks === 0 && lintXml.ms < 6000 &&
+      lintXml.ultimo === lintXml.ultimoAntes,
+      JSON.stringify({ checks: lintXml.checks, ms: lintXml.ms,
+        ultimo: lintXml.ultimo, antes: lintXml.ultimoAntes }).slice(0, 240));
+
+    // volver al .java devuelve el diagnóstico de Java y retira las filas del XML
+    const antesJava = await evaluar(`document.getElementById("diagnostico-vivo-estado").textContent.trim()`);
+    await evaluar(`(async () => { marcarSucio(false); await abrir("/proyecto/xmlundo.java"); return true; })()`);
+    const estadoJava = await esperarResumen(30000, antesJava);
+    const trasJava = await evaluar(`({
+      estado: document.getElementById("diagnostico-vivo-estado").textContent,
+      xml: document.querySelectorAll('#diagnostico-vivo-lista .origen-error[data-origen="XML"]').length,
+      java: document.querySelectorAll('#diagnostico-vivo-lista .origen-error[data-origen="Java"]').length,
+      marcas: document.querySelectorAll('#diagnostico-marcas .marca-error').length
+    })`);
+    comprueba("al pasar a .java el error XML desaparece y vuelve el diagnóstico de Java",
+      estadoJava && /\bJava\b/.test(String(estadoJava.estado)) && trasJava.xml === 0 &&
+      /\bJava\b/.test(String(trasJava.estado)) && trasJava.marcas === 0,
+      JSON.stringify({ estadoJava, trasJava }).slice(0, 300));
+
+    // y al volver al .xml, los errores XML vuelven con su etiqueta. El fichero estaba limpio en
+    // OPFS (el buffer roto no se guardó), así que se vuelve a escribir el `@string` que falta.
+    const antesXml = await evaluar(`document.getElementById("diagnostico-vivo-estado").textContent.trim()`);
+    await evaluar(`(async () => {
+      marcarSucio(false);
+      await abrir("/proyecto/res/layout/xmlauto.xml");
+      const area = document.getElementById("codigo");
+      EDITOR.poner('<LinearLayout>\\n  <TextView android:text="@string/noexiste"/>\\n</LinearLayout>\\n');
+      area.focus();
+      area.dispatchEvent(new Event("input", { bubbles: true }));
+      return true;
+    })()`);
+    const estadoXml = await esperarResumen(30000, antesXml);
+    const trasXml = await evaluar(`({
+      estado: document.getElementById("diagnostico-vivo-estado").textContent,
+      xml: document.querySelectorAll('#diagnostico-vivo-lista .origen-error[data-origen="XML"]').length
+    })`);
+    comprueba("al volver al .xml el error del linter reaparece etiquetado XML",
+      estadoXml && /XML/.test(String(estadoXml.estado)) && trasXml.xml >= 1 &&
+      !/Java/.test(String(trasXml.estado)),
+      JSON.stringify({ estadoXml, trasXml }).slice(0, 240));
+
+    // 12a-septies-bis. el canvas no rotula los nodos: sobre el Button no se pinta `Button` ni
+    // `id/pulsar`, solo su texto. Se mide la tinta del nodo con texto y sin él; el rótulo viejo
+    // dejaba tinta aun sin texto. El tipo y el id siguen accesibles en `data-nodos` y en el modelo.
+    const rotulo = await evaluar(`(async () => {
+      const vp = await import("/vista-previa.js");
+      const modelo = (texto) => ({ layout: "res/layout/main.xml",
+        pantalla: { ancho: 360, alto: 640 }, aproximado: true,
+        raiz: { tipo: "LinearLayout", rect: { x: 0, y: 0, ancho: 360, alto: 640 }, hijos: [
+          { tipo: "Button", id: "id/pulsar", texto, rect: { x: 0, y: 0, ancho: 200, alto: 48 } }] } });
+      const medir = (texto) => {
+        const canvas = document.createElement("canvas");
+        const pintado = vp.pintarModelo(canvas, modelo(texto), { ancho: 270, alto: 480 });
+        const ctx = canvas.getContext("2d");
+        const nodo = vp.rectsEscalados(modelo(texto), 270, 480)[1];
+        const dpr = canvas.width / 270;
+        const margen = 3 * dpr;
+        const x = Math.max(0, Math.round(nodo.x * dpr + margen));
+        const y = Math.max(0, Math.round(nodo.y * dpr + margen));
+        const ancho = Math.max(1, Math.round(nodo.ancho * dpr - 2 * margen));
+        const alto = Math.max(1, Math.round(nodo.alto * dpr - 2 * margen));
+        const datos = ctx.getImageData(x, y, ancho, alto).data;
+        const cuenta = new Map();
+        for (let i = 0; i < datos.length; i += 4) {
+          const clave = datos[i] + "," + datos[i + 1] + "," + datos[i + 2];
+          cuenta.set(clave, (cuenta.get(clave) || 0) + 1);
+        }
+        let fondo = [0, 0, 0], maximo = -1;
+        for (const [clave, n] of cuenta) {
+          if (n > maximo) { maximo = n; fondo = clave.split(",").map(Number); }
+        }
+        let tinta = 0;
+        for (let i = 0; i < datos.length; i += 4) {
+          const d = Math.abs(datos[i] - fondo[0]) + Math.abs(datos[i + 1] - fondo[1]) + Math.abs(datos[i + 2] - fondo[2]);
+          if (d > 40) tinta++;
+        }
+        return { tinta, resumen: pintado.resumen, dato: canvas.dataset.nodos || "", texto: nodo.texto,
+          alto: Math.round(nodo.alto) };
+      };
+      return { conTexto: medir("Press me"), sinTexto: medir("") };
+    })()`);
+    comprueba("sobre el Button no se pinta el rótulo «Button · id/pulsar» y sí su texto",
+      rotulo.sinTexto.tinta === 0 && rotulo.conTexto.tinta > 20 &&
+      rotulo.conTexto.alto >= 30 && rotulo.conTexto.texto === "Press me" &&
+      /Button · id\/pulsar/.test(String(rotulo.conTexto.dato)) &&
+      /Button · id\/pulsar/.test(String(rotulo.conTexto.resumen)),
+      JSON.stringify({ sinTexto: rotulo.sinTexto.tinta, conTexto: rotulo.conTexto.tinta,
+        dato: rotulo.conTexto.dato }).slice(0, 260));
+
+    // limpieza: los recursos y el fuente de la prueba no se quedan en el proyecto que compilan
+    await evaluar(`(async () => {
+      marcarSucio(false);
+      await hospedador.limpiar("/proyecto/xmlundo.java");
+      await hospedador.limpiar("/proyecto/res/layout/xmlauto.xml");
+      await hospedador.limpiar("/proyecto/res/values/xmlauto.xml");
+      return true;
+    })()`);
+
     // limpieza: los recursos y el fuente de la prueba no se quedan en el proyecto que compilan
     await evaluar(`(async () => {
       marcarSucio(false);

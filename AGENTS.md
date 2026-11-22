@@ -56,8 +56,10 @@ dar el editor por probado, comprueba en la salida `pestaña: N comprobaciones` y
 | `pestana.js` | editor, pestañas, árbol de OPFS, comandos y el puente `hospedador`; `export` de lo que consumen `vistas.js`, `main.js` y las pruebas. |
 | `consola.js` | salida ANSI, enlaces `ruta:línea`, buffer de la consola y velo de carga. |
 | `editor.js` | `resaltar()` y `esXml()`: puros, sin DOM, probados en node. |
-| `autocompletado.js` | la lista de sugerencias del editor (recursos y APIs del `android.jar`), sus atajos y la lectura por trozos de `/sdk/android.jar` en OPFS. |
+| `autocompletado.js` | la lista de sugerencias del editor (recursos y APIs del `android.jar` en `.java`; etiquetas, atributos, valores y referencias en `.xml`), sus atajos y la lectura por trozos de `/sdk/android.jar` en OPFS. |
 | `autocompletado-datos.js` | datos puros del autocompletado: recursos de `res/` y `R.java`, contexto de tecleo, EOCD/directorio central del zip y nombres de método de un `.class`. |
+| `xml-editor.js` | puro: contexto de tecleo del XML (`contextoXml`), catálogo de etiquetas/atributos/valores por tipo de fichero (`sugerenciasXml`) y linter (`diagnosticarXml`, con línea y columna en runes). |
+| `recursos-proyecto.js` | el barrido de `res/` + `R.java` y su caché, compartido por el autocompletado (Java y XML) y el linter de XML. |
 | `busqueda.js` | barra de buscar/reemplazar y `Ctrl+G`; se monta con `EDITOR` e `irALinea`. |
 | `ajustes.js` | ajustes del proyecto leídos y escritos en el manifiesto. |
 | `historial.js` | undo tree por documento: deltas, checkpoints, poda, IndexedDB por ventana. |
@@ -145,6 +147,18 @@ los imports y no debe depender de ese puente.
   `style.css` resuelve las variables. No metas colores nuevos a mano fuera de un bloque de tema;
   la paleta ANSI se cambia con `--ansi-0..15`. El modo **Solo iconos** pone `data-botones="iconos"`
   y oculta `.texto-boton`; los botones deben conservar `title`/`aria-label`.
+- **Dos contextos de autocompletado, nunca cruzados.** La extensión del fichero activo elige la
+  rama: `.java` → `contextoDeCompletado` (recursos y jar) y `.xml` → `contextoXml` (etiquetas,
+  atributos, valores y referencias). En un `.xml` no puede salir `R.` ni una clase Java; en un
+  `.java`, ni una etiqueta. El estado del popup dice `xml · …` en la rama XML. `prueba-pestana.js`
+  lo comprueba en las dos direcciones.
+- **El linter de XML es local y etiqueta su origen.** `diagnosticarXml` no lanza `apkc check`, no
+  escribe `.apkc-check.java` y no toca la consola; sus filas llevan `origen: "XML"` (y las de
+  `apkc`, `Java`), y cambiar de fichero reemplaza la lista entera. La columna va en runes y desde
+  1, como la de `apkc`. Si el barrido de `res/` no leyó nada, no se acusan referencias.
+- **El canvas no rotula los nodos.** `pintarModelo` dibuja solo el texto del nodo; el tipo y el id
+  van en el modelo, en `rectsEscalados`, en el `resumen` devuelto y en `data-nodos` del canvas.
+  No vuelvas a pintar `Button · id/pulsar` encima: la prueba cuenta tinta y exige cero sin texto.
 - **La barra separa consola de compilación.** El botón `#alternar-panel` se llama **Compilar** y
   abre la pestaña Compilar; la pestaña de salida se llama **Consola** y lleva el icono de terminal.
   No vuelvas a poner «Salida» ni un botón de build clásico: ese build no corre en wasm.

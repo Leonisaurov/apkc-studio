@@ -12,6 +12,7 @@ import { leerZip, zipDelArbol, paqueteDelManifiesto, nombreDeZip, rutaSegura,
 import * as vistaPrevia from "./vista-previa.js";
 import * as previaPanel from "./previa-panel.js";
 import * as autocompletado from "./autocompletado-datos.js";
+import * as xmlEditor from "./xml-editor.js";
 import * as vistaXml from "./vista-xml.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -172,7 +173,7 @@ const pestana = fs.readFileSync(path.join(__dirname, "pestana.js"), "utf8");
 for (const m of pestana.matchAll(/getElementById\("([^"]+)"\)/g))
   if (!ids.has(m[1])) mal(`pestana.js pide #${m[1]} y index.html no lo tiene`);
 for (const fichero of ["diagnostico.js", "temas.js", "historial.js", "vista-previa.js",
-  "previa-panel.js", "autocompletado.js"]) {
+  "previa-panel.js", "autocompletado.js", "diagnostico-vivo.js"]) {
   const fuente = fs.readFileSync(path.join(__dirname, fichero), "utf8");
   for (const m of fuente.matchAll(/getElementById\("([^"]+)"\)/g))
     if (!ids.has(m[1])) mal(`${fichero} pide #${m[1]} y index.html no lo tiene`);
@@ -798,6 +799,133 @@ public final class R {
     if (metodos.length !== 1 || metodos[0].nombre !== "hola" || metodos[0].descriptor !== "()V" ||
         !metodos[0].publico || !metodos[0].estatico) {
       mal(`metodosDeClase no lee el método del .class: ${JSON.stringify(metodos)}`);
+    }
+  }
+
+  // 11b. el XML del editor: contexto de tecleo, catálogo y linter. Es la parte pura de la rama
+  // XML de `autocompletado.js` y de `diagnostico-vivo.js`; sin DOM se prueba aquí. Las
+  // comprobaciones de que la lista y el subrayado se pintan van en `prueba-pestana.js`.
+  {
+    const ruta = "/proyecto/res/layout/main.xml";
+    const ctxDe = (texto) => xmlEditor.contextoXml(texto, texto.length);
+
+    const etiqueta = ctxDe("<LinearLayout>\n  <TextVie");
+    if (!etiqueta || etiqueta.modo !== "etiqueta" || etiqueta.prefijo !== "TextVie" ||
+        etiqueta.desde !== "<LinearLayout>\n  <".length) {
+      mal(`contextoXml no ve la etiqueta a medio escribir: ${JSON.stringify(etiqueta)}`);
+    }
+    const atributo = ctxDe("<LinearLayout android:te");
+    if (!atributo || atributo.modo !== "atributo" || atributo.prefijo !== "android:te" ||
+        atributo.desde !== "<LinearLayout ".length) {
+      mal(`contextoXml no ve el atributo a medio escribir: ${JSON.stringify(atributo)}`);
+    }
+    const valor = ctxDe('<TextView android:layout_width="wrap');
+    if (!valor || valor.modo !== "valor" || valor.atributo !== "android:layout_width" ||
+        valor.prefijo !== "wrap") {
+      mal(`contextoXml no ve el valor entre comillas: ${JSON.stringify(valor)}`);
+    }
+    const referencia = ctxDe('<TextView android:text="@string/ap');
+    if (!referencia || referencia.modo !== "referencia" || referencia.tipo !== "string" ||
+        referencia.prefijo !== "ap") {
+      mal(`contextoXml no ve la referencia @string/: ${JSON.stringify(referencia)}`);
+    }
+    if (ctxDe('<TextView android:text="@')?.tipo !== "") {
+      mal("contextoXml no ofrece los tipos de recurso tras una @ suelta");
+    }
+    for (const fuera of ['<TextView>Hola', "<!-- <TextVie -->", "<TextView></TextV",
+      "<?xml version=\"1.0\"?>"]) {
+      if (ctxDe(fuera)) mal(`contextoXml sugiere XML donde no toca: ${JSON.stringify(fuera)}`);
+    }
+
+    const etiquetas = xmlEditor.sugerenciasXml(
+      { modo: "etiqueta", prefijo: "Text", desde: 0, hasta: 4 }, { ruta });
+    if (!etiquetas.lista.some((i) => i.texto === "TextView") || !/^xml ·/.test(etiquetas.estado)) {
+      mal(`las etiquetas del layout no incluyen TextView o el estado no dice xml: ${etiquetas.estado}`);
+    }
+    const deValores = xmlEditor.sugerenciasXml(
+      { modo: "etiqueta", prefijo: "", desde: 0, hasta: 0 },
+      { ruta: "/proyecto/res/values/strings.xml" });
+    if (!deValores.lista.some((i) => i.texto === "string") ||
+        deValores.lista.some((i) => i.texto === "LinearLayout")) {
+      mal("un res/values ofrece etiquetas de layout en vez de las suyas");
+    }
+    const deManifiesto = xmlEditor.sugerenciasXml(
+      { modo: "etiqueta", prefijo: "", desde: 0, hasta: 0 },
+      { ruta: "/proyecto/AndroidManifest.xml" });
+    if (!deManifiesto.lista.some((i) => i.texto === "uses-permission")) {
+      mal("el manifiesto no ofrece <uses-permission>");
+    }
+    const atributos = xmlEditor.sugerenciasXml(
+      { modo: "atributo", prefijo: "", desde: 0, hasta: 0 }, { ruta });
+    if (!atributos.lista.some((i) => i.insertar === "android:layout_width") ||
+        !atributos.lista.some((i) => i.insertar === "tools:text")) {
+      mal("faltan android:/tools: en la lista de atributos");
+    }
+    const porLocal = xmlEditor.sugerenciasXml(
+      { modo: "atributo", prefijo: "textS", desde: 0, hasta: 5 }, { ruta });
+    if (!porLocal.lista.some((i) => i.insertar === "android:textSize" && i.filtro === "textSize")) {
+      mal("un atributo sin prefijo no se encuentra por su nombre local");
+    }
+    const enumerados = xmlEditor.sugerenciasXml(
+      { modo: "valor", atributo: "android:layout_width", prefijo: "", desde: 0, hasta: 0 },
+      { ruta, recursos: {} });
+    if (!enumerados.lista.some((i) => i.texto === "match_parent") ||
+        !enumerados.lista.some((i) => i.texto === "wrap_content")) {
+      mal("layout_width no ofrece match_parent/wrap_content");
+    }
+    const visibilidad = xmlEditor.sugerenciasXml(
+      { modo: "valor", atributo: "android:visibility", prefijo: "", desde: 0, hasta: 0 },
+      { ruta, recursos: {} });
+    if (!["visible", "gone", "invisible"].every((v) => visibilidad.lista.some((i) => i.texto === v))) {
+      mal("visibility no ofrece visible/invisible/gone");
+    }
+    const propios = xmlEditor.sugerenciasXml(
+      { modo: "referencia", tipo: "string", prefijo: "", desde: 0, hasta: 0 },
+      { ruta, recursos: { string: new Set(["app_name", "saludo"]) } });
+    if (!propios.lista.some((i) => i.texto === "app_name") || !/@string/.test(propios.estado)) {
+      mal(`las referencias @string no salen del proyecto: ${JSON.stringify(propios)}`);
+    }
+
+    const recursos = { string: new Set(["app_name"]), layout: new Set(["main"]) };
+    const errores = xmlEditor.diagnosticarXml(
+      "<LinearLayout>\n  <TextView\n  <Button android:id=\"@+id/a\"/>\n" +
+      "<Button android:id=\"@+id/a\" android:layout_widht=\"3dp\"\n" +
+      "  android:text=\"@string/noexiste\"/>\n", { archivo: ruta, recursos });
+    if (!errores.length || !errores.every((e) => e.origen === "XML" && e.linea > 0 && e.columna > 0)) {
+      mal(`el linter no devuelve diagnósticos con línea y columna: ${JSON.stringify(errores)}`);
+    }
+    const texto = (e) => e.mensaje;
+    if (!errores.some((e) => /no se cierra/.test(texto(e)))) mal("el linter no ve una etiqueta sin cerrar");
+    if (!errores.some((e) => /no lleva valor/.test(texto(e)))) mal("el linter no ve un atributo sin valor");
+    if (!errores.some((e) => /layout_widht/.test(texto(e)) && /layout_width/.test(texto(e)))) {
+      mal("el linter no propone layout_width para layout_widht");
+    }
+    if (!errores.some((e) => /@string\/noexiste/.test(texto(e)))) {
+      mal("el linter no ve un @string que no existe");
+    }
+    const duplicado = xmlEditor.diagnosticarXml(
+      "<LinearLayout>\n<TextView android:id=\"@+id/a\"/>\n<TextView android:id=\"@+id/a\"/>\n</LinearLayout>",
+      { archivo: ruta, recursos });
+    if (duplicado.length !== 1 || duplicado[0].linea !== 3 || !/el id a ya se declaró/.test(duplicado[0].mensaje)) {
+      mal(`el linter no ve el @+id repetido: ${JSON.stringify(duplicado)}`);
+    }
+    // sin datos del proyecto no se acusa una referencia: no se puede saber si existe
+    if (xmlEditor.diagnosticarXml("<TextView android:text=\"@string/x\"/>", { archivo: ruta, recursos: {} }).length) {
+      mal("el linter acusa @string sin haber barrido res/values");
+    }
+    // el `<string>` que se acaba de escribir en el propio buffer cuenta como declarado
+    if (xmlEditor.diagnosticarXml(
+      "<resources><string name=\"nuevo\">N</string><color name=\"c\">#fff</color></resources>",
+      { archivo: "/proyecto/res/values/mia.xml", recursos: {} }).length) {
+      mal("el linter no acepta los recursos declarados en el propio fichero");
+    }
+    // la columna va en runes: un astral delante del token cuenta una sola celda
+    const conAstral = "<Button android:text=\"@string/noexiste\"/>";
+    const lineaAstral = "/* \uD83D\uDE00 */ " + conAstral;
+    const astral = xmlEditor.diagnosticarXml(lineaAstral, { archivo: ruta, recursos });
+    const columnaEsperada = Array.from("/* \uD83D\uDE00 */ <Button android:text=\"").length + 1;
+    if (astral.length !== 1 || astral[0].columna !== columnaEsperada) {
+      mal(`la columna del linter no cuenta runes: ${JSON.stringify(astral)} (esperado ${columnaEsperada})`);
     }
   }
 

@@ -98,11 +98,17 @@ persona, así que no pisa `#ultimo-codigo` ni la consola, y si el comando falla 
 mensaje del panel sin tocar el resultado de la compilación. Un campo nuevo en el JSON (por
 ejemplo el texto dinámico de la Fase 2) no rompe nada: se ignoran las claves que no se usan.
 
-El pintor no esconde el texto de un nodo bajo: la etiqueta de tipo solo entra si el nodo pasa de
-30 px y, si no, el texto se pinta con la fuente encogida al hueco (8-12 px) y recortado al
-rectángulo. Antes había un `alto >= 28` que dejaba sin pintar el «Hello World!» del apk Hola y el
-«Pulsos: 1» del Contador, que llegan con 18 px a la escala 0,75. `prueba-pestana.js` cuenta tinta
-dentro del nodo con texto y sin él, no solo la etiqueta.
+El pintor no esconde el texto de un nodo bajo: el texto se pinta con la fuente encogida al hueco
+(8-12 px) y recortado al rectángulo. Antes había un `alto >= 28` que dejaba sin pintar el
+«Hello World!» del apk Hola y el «Pulsos: 1» del Contador, que llegan con 18 px a la escala 0,75.
+`prueba-pestana.js` cuenta tinta dentro del nodo con texto y sin él, no solo la etiqueta.
+
+**El nodo no lleva rótulo.** Antes se dibujaba encima una etiqueta con el tipo y el id
+(`Button · id/pulsar`) cuando el nodo pasaba de 30 px; sobre un botón parecía un diálogo pegado y
+se quitó. El tipo y el id no se pierden: siguen en el modelo (`raiz`/`hijos`), en `rectsEscalados`
+y en el `resumen` que devuelve `pintarModelo`, que además se deja en `data-nodos` del canvas para
+las pruebas y para inspeccionar el DOM. La comprobación de la pestaña mide que sin texto no queda
+ni una mota de tinta en el `Button` y que con «Press me» sí hay texto.
 
 ## Vista dividida: editor y teléfono
 
@@ -275,6 +281,30 @@ UTF-16 y a píxeles es del editor.
 El diagnóstico no pasa por `correr()`: no escribe en la consola ni cambia `#ultimo-codigo`, y
 `prueba-pestana.js` lo comprueba junto con el caso de `R.layout.main` (§200). `diagnostico.js` no
 participa en esto: pinta la salida pegada de `apkc`, no los errores del editor.
+
+### Diagnóstico en vivo de XML
+
+El mismo panel atiende los `.xml` del proyecto (`res/layout/*.xml`, `res/values/*.xml`,
+`AndroidManifest.xml`), pero con **motor propio y local**: `diagnosticarXml` de `xml-editor.js`, sin
+worker y sin `apkc check`. Un `.xml` no escribe el temporal `.apkc-check.java`, no lanza ningún
+comando y no toca la consola; el debounce son los mismos **350 ms**. Qué comprueba:
+
+- etiquetas sin cerrar y cierres que no casan (`cierra </A> pero estaba abierto <B>`);
+- atributos sin valor y comillas sin cerrar;
+- `@+id/…` repetido en el mismo fichero;
+- `@string/…`, `@color/…`, `@layout/…` que no existen en el proyecto (los datos salen del mismo
+  barrido de `recursos-proyecto.js` que usa el autocompletado; si el barrido no leyó nada, el
+  estado lo dice en vez de acusar en falso; `@android:` y `@null` no se comprueban);
+- atributos `android:` con errata **cuando hay un parecido a distancia ≤ 2** con uno conocido
+  (`android:layout_widht` → `layout_width`). Un atributo desconocido sin parecido no se marca: la
+  lista de atributos del módulo no es el framework entero y no se inventan errores.
+
+Cada fila lleva delante su origen, `Java` o `XML` (`.origen-error[data-origen]`), y las marcas de
+`#diagnostico-marcas` lo llevan en `data-origen`. **Los dos lenguajes no se mezclan**: cambiar de
+fichero reemplaza la lista entera, y una pasada vieja de `apkc check` no puede pintar su resultado
+encima de la nueva (se invalida su serie). El estado acaba en `· Java` o `· XML`, y conserva el
+formato `archivo:línea:columna` del §200: la columna del linter también va en **runes** y desde 1,
+y el editor la traduce a UTF-16 y a píxeles como la de `apkc`.
 
 ## Explorador
 
@@ -509,7 +539,9 @@ la barra de estado y se actualiza al teclear, al hacer clic y con `selectionchan
 ### Autocompletado
 
 `autocompletado.js` completa **recursos del proyecto** y **nombres de API del `android.jar`** sin
-salir del origen. Se abre al teclear y solo actúa en ficheros `.java`; en XML o texto no toca Tab.
+salir del origen. Se abre al teclear; en un fichero `.java` (recursos y jar) y en un `.xml` del
+proyecto (etiquetas, atributos, valores y referencias) con **dos contextos separados**. En texto
+plano no toca Tab.
 
 | Id | Papel |
 | --- | --- |
@@ -580,6 +612,33 @@ es puro y se prueba en `prueba.js`.
 Límites escritos: no hay completado tras una variable (`v.`, `this.`) porque haría falta saber su
 tipo; un comentario de bloque de varias líneas no se detecta (solo los de línea y las cadenas); y un
 recurso creado después de la primera lectura no aparece hasta `refrescar()` o recargar.
+
+### Autocompletado de XML
+
+La extensión del fichero activo elige la rama, y **no se cruzan**: en un `.xml` nunca sale `R.` ni
+una clase Java, y en un `.java` nunca sale una etiqueta XML. El detector de contexto es
+`contextoXml` (en `xml-editor.js`, separado del `contextoDeCompletado` de Java) y distingue cuatro
+posiciones dentro de una etiqueta, con `desde`/`hasta` sobre el textarea:
+
+| Lo que se escribe | Qué sugiere | El estado dice |
+| --- | --- | --- |
+| `<TextVie` | etiquetas Android | `xml · etiquetas de vista · N` |
+| `android:te` (o `textS` sin prefijo) | atributos `android:*` y `tools:*` | `xml · atributos android: · N` |
+| `android:layout_width="wrap` | valores enumerados (`match_parent`, `wrap_content`, `center`, `visible`/`gone`…) | `xml · valores de android:layout_width · N` |
+| `android:text="@string/ap` | nombres del proyecto de ese tipo | `xml · @string · N nombres` |
+
+- Las etiquetas cambian con el fichero: un `res/values` ofrece `<string>`, `<color>`, `<item>`…, el
+  manifiesto ofrece `<uses-permission>`, `<activity>`… y un layout, vistas.
+- Los atributos se insertan completos (`android:textSize`) aunque se busquen por su nombre local; un
+  `android:` mal escrito se completa por el nombre completo, sin duplicar el prefijo.
+- Las referencias salen del mapa de `recursos-proyecto.js` (el mismo del autocompletado Java), más
+  los `@+id` del buffer aunque no se hayan guardado. Los colores se ofrecen como `@color/…` y los
+  atributos de color (`background`, `textColor`, `tint`…) enlazan con ellos.
+- Aceptar con `Tab`/`Enter` pasa por `EDITOR.cambiar`, igual que en Java: entra en el deshacer del
+  documento XML y no toca el de otro fichero. Esc y las flechas se comportan igual.
+- `#autocompletado-estado` empieza por `xml` en esta rama para que no se confunda con la lista Java.
+- Límites: no se completa dentro de comentarios, de `<?xml …?>` ni de un cierre `</…>`; y un valor
+  `@tipo/` de un recurso que aún no se ha guardado no aparece hasta que el barrido lo relea.
 
 ### Estado del fichero
 
@@ -724,11 +783,11 @@ En `@media (max-width: 760px)`:
 
 | Comando | Que cubre |
 | --- | --- |
-| `node studio/prueba.js` | genera el zip, comprueba EOCD, plantillas, reglas, ids de `index.html` (de `diagnostico.js`, `temas.js`, `historial.js`, `vista-previa.js`, `previa-panel.js`, `autocompletado.js`), ids viejos prohibidos, sin `<pre>` en el panel, el resaltador puro, el modelo del layout dibujado en vivo y los datos del autocompletado (recursos, `R.java`, contexto y lector de zip/.class) |
+| `node studio/prueba.js` | genera el zip, comprueba EOCD, plantillas, reglas, ids de `index.html` (de `diagnostico.js`, `temas.js`, `historial.js`, `vista-previa.js`, `previa-panel.js`, `autocompletado.js`, `diagnostico-vivo.js`), ids viejos prohibidos, sin `<pre>` en el panel, el resaltador puro, el modelo del layout dibujado en vivo, los datos del autocompletado (recursos, `R.java`, contexto y lector de zip/.class) y el XML del editor: contexto de tecleo, catálogo por tipo de fichero y linter (etiqueta sin cerrar, atributo sin valor, comillas, `@+id` repetido, `@string` inexistente, errata `android:` y columna en runes) |
 | `node studio/prueba-navegador.js` | `http` sin COOP/COEP: DOM, tres vistas, tres botones de actividad, reflejo del nombre/package, aviso de que no hay OPFS, localStorage, el diagnóstico, los temas y la paleta ANSI, y el contrato de la vista dividida (separador con teclado, alternancia En vivo/Render, que no haya `<pre>` con el XML y consola vacía con su motivo) |
 | `APKC_WASM=... node studio/prueba-crear.js` | por http con OPFS: crear, escribir el proyecto, abrir el manifiesto, comprobar `data-ruta` del arbol, API 34, el árbol cerrado, subir/mover ficheros, exportar/importar el `.zip`, ajustes, pestañas, undo tree, dos ventanas y fusión/conflicto |
-| `APKC_WASM=... APK_EJEMPLO=... KS_EJEMPLO=... ANDROID_JAR=... node studio/prueba-pestana.js` | la pestaña completa: editar, guardar, recargar, jar del SDK, compilar debug/release, firmar, verificar, recargar sin red, cero peticiones fuera del origen, el autocompletado (recursos, jar por trozos, Tab/Esc/flechas y undo), el enlace `ruta:línea`, Detener, y la vista dividida: separador por puntero y teclado, compilar→pintar sin mover el cursor, el layout **dibujado** en vivo que cambia al editar `android:text` sin compilar, XML inválido que conserva el render, alternancia En vivo/Render con estado, y la consola de la ejecución con el JSON del Contador, el `<script>` escapado y el límite de 64/24 |
-| `APKC=... APKC_WASM=... sh studio/e2e.sh` | todo lo anterior más los apk/aab nativos y la plantilla Contador; en la pestaña, 127 comprobaciones |
+| `APKC_WASM=... APK_EJEMPLO=... KS_EJEMPLO=... ANDROID_JAR=... node studio/prueba-pestana.js` | la pestaña completa: editar, guardar, recargar, jar del SDK, compilar debug/release, firmar, verificar, recargar sin red, cero peticiones fuera del origen, el autocompletado (recursos, jar por trozos, Tab/Esc/flechas y undo), el autocompletado de XML (etiquetas con estado `xml`, Tab sin tocar el undo del Java, y que los dos contextos no se crucen), el linter de XML (`@string` inexistente con `archivo:línea:columna`, origen `XML`, sin `apkc check` ni temporal, y el ida y vuelta XML↔Java), el enlace `ruta:línea`, Detener, y la vista dividida: separador por puntero y teclado, compilar→pintar sin mover el cursor, el layout **dibujado** en vivo que cambia al editar `android:text` sin compilar, XML inválido que conserva el render, alternancia En vivo/Render con estado, la consola de la ejecución con el JSON del Contador, el `<script>` escapado y el límite de 64/24, y que el nodo pinta su texto sin el rótulo `Button · id/pulsar` |
+| `APKC=... APKC_WASM=... sh studio/e2e.sh` | todo lo anterior más los apk/aab nativos y la plantilla Contador; en la pestaña, 145 comprobaciones |
 
 El gate completo de la pagina es `e2e.sh`; `prueba-pestana.js` solo no basta para decir que la
 pagina funciona. Los comandos de entorno estan en `tools/entorno.sh` (`test`, `wasm`, `gate`).
