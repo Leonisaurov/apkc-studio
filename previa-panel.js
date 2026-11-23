@@ -465,6 +465,15 @@ export function crearPreviaPanel({ hospedador, proyecto, estadoPestana, editor }
   let coloresEn = 0;
   let arbolEn = 0;
   let cuadro = 0;
+  // Medidas del lienzo que ya se aplicaron: la misma caja y el mismo tamaño de pantalla dan el
+  // mismo canvas, así que repetir el ajuste por un aviso de tamaño que no cambió nada no lo toca.
+  const medidasCanvasAplicadas = new Map();
+  // Un gesto de la consola (moverla, acoplarla, minimizarla, abrirla o cerrarla) no puede
+  // reescalar el lienzo: el `ResizeObserver` de la fila se despierta con el cambio de la capa y
+  // `ajustarCanvas` encogería el dibujo. Mientras dura el gesto se ignora ese aviso; el ajuste
+  // legítimo (tamaño de la ventana o preset de pantalla) sigue pasando.
+  let pausaCanvas = false;
+  let turnoPausa = 0;
   let iniciado = false;
   // la lista de clics entregados desde la última compilación: se repite entera en cada `--pulsar`,
   // que es lo que hace reproducible la pantalla (el comando no guarda estado entre invocaciones)
@@ -841,6 +850,8 @@ export function crearPreviaPanel({ hospedador, proyecto, estadoPestana, editor }
     if (borde) estado.borde = borde;
     if (modo !== MODO_MINIMIZADO && estado.modo !== MODO_MINIMIZADO) estado.anterior = modo;
     estado.modo = modo;
+    // acoplar o cambiar de modo es un gesto de la consola: no puede reescalar el lienzo
+    pausarAjusteCanvas();
     aplicarModoFlotante(nombre, true);
   }
 
@@ -1531,6 +1542,8 @@ export function crearPreviaPanel({ hospedador, proyecto, estadoPestana, editor }
 
   function aplicarInspector(superficie, abierto, persistir = true) {
     inspectorAbierto[superficie] = !!abierto;
+    // abrir o cerrar la capa es un gesto de la consola: no puede reescalar el lienzo
+    if (persistir) pausarAjusteCanvas();
     const contenedor = superficie === "panel" ? el("previa-inspector") : el("marco-vista-lado");
     const abrir = el(superficie === "panel" ? "previa-inspector-abrir" : "vista-inspector-abrir");
     if (contenedor) contenedor.hidden = !abierto;
@@ -1567,12 +1580,14 @@ export function crearPreviaPanel({ hospedador, proyecto, estadoPestana, editor }
 
     const restaurar = () => {
       estado.modo = estado.anterior === MODO_ACOPLADO ? MODO_ACOPLADO : MODO_LIBRE;
+      pausarAjusteCanvas();
       aplicarModoFlotante(nombre, true);
     };
     const minimizar = () => {
       if (estado.modo === MODO_MINIMIZADO) { restaurar(); return; }
       estado.anterior = estado.modo;
       estado.modo = MODO_MINIMIZADO;
+      pausarAjusteCanvas();
       aplicarModoFlotante(nombre, true);
     };
     const acoplar = (borde) => aplicarModoFlotantePorModo(nombre, MODO_ACOPLADO, borde);
@@ -1599,6 +1614,8 @@ export function crearPreviaPanel({ hospedador, proyecto, estadoPestana, editor }
 
     document.addEventListener("pointermove", (e) => {
       if (!mover) return;
+      // mover la capa es un gesto: tampoco puede reescalar el lienzo mientras se arrastra
+      pausarAjusteCanvas();
       const medidas = ventana();
       estado.x = Math.round(acotar(mover.left + e.clientX - mover.x, 0,
         Math.max(0, medidas.ancho - mover.ancho)));
@@ -1614,6 +1631,7 @@ export function crearPreviaPanel({ hospedador, proyecto, estadoPestana, editor }
     const soltar = () => {
       if (!mover) return;
       mover = null;
+      pausarAjusteCanvas();
       aplicarModoFlotante(nombre, true);
     };
     document.addEventListener("pointerup", soltar);
@@ -1818,6 +1836,11 @@ export function crearPreviaPanel({ hospedador, proyecto, estadoPestana, editor }
     const marco = canvas.parentElement;
     const caja = cajaUtil(marco);
     if (!caja) return;
+    // la misma caja y el mismo tamaño de pantalla dan el mismo lienzo: repetir el ajuste por un
+    // aviso de tamaño que no cambió nada movería el dibujo sin motivo (un cambio de capa lo provoca)
+    const clave = caja.ancho + "x" + caja.alto + "|" + anchoDp + "x" + altoDp;
+    if (medidasCanvasAplicadas.get(canvas) === clave) return;
+    medidasCanvasAplicadas.set(canvas, clave);
     const relacion = anchoDp / altoDp;
     let ancho = caja.ancho;
     let alto = ancho / relacion;
@@ -1831,6 +1854,19 @@ export function crearPreviaPanel({ hospedador, proyecto, estadoPestana, editor }
   function ajustarPantallas() {
     ajustarCanvas(el("previa-lateral-canvas"), pantalla.ancho, pantalla.alto);
     ajustarCanvas(el("vista-previa"), pantalla.ancho, pantalla.alto);
+  }
+
+  // Pausa el ajuste del lienzo mientras dura un gesto de la consola. El aviso del observador llega
+  // después de pintar, así que la pausa se levanta dos cuadros más tarde (y el turno invalida las
+  // pausas viejas si el gesto se repite, como en un arrastre).
+  function pausarAjusteCanvas() {
+    const turno = ++turnoPausa;
+    pausaCanvas = true;
+    if (typeof requestAnimationFrame !== "function") { pausaCanvas = false; return; }
+    requestAnimationFrame(() => requestAnimationFrame(() => {
+      const soltar = () => { if (turno === turnoPausa) pausaCanvas = false; };
+      if (typeof setTimeout === "function") setTimeout(soltar, 0); else soltar();
+    }));
   }
 
   // La pantalla apagada: un lienzo negro con el rótulo, sin tocar la última apk ni el modelo que
@@ -3625,7 +3661,11 @@ export function crearPreviaPanel({ hospedador, proyecto, estadoPestana, editor }
         aplicarPanel(false);
         aplicarLado(false);
         aplicarModoFlotante("panel", false);
-        ajustarPantallas();
+        // El lienzo no se reescala por mover o cambiar de modo la consola: ese cambio despierta este
+        // observador y el ajuste se salta mientras dura el gesto (la pausa la pone el propio gesto).
+        // Con el emulador apagado manda la caja del lienzo (lo pinta `dibujarApagado`). El ajuste
+        // por tamaño de ventana o por preset sigue pasando: cambia la caja o el par de dp.
+        if (!apagado && !pausaCanvas) ajustarPantallas();
         if (!visible && !vistaActiva()) return;
         programarPintado();
       });

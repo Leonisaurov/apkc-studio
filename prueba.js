@@ -384,6 +384,22 @@ for (const clave of ["apkc-studio/previa-inspector-modo", "apkc-studio/previa-in
     mal(`previa-panel.js no persiste el registro desprendido del panel (${clave})`);
   }
 }
+// Un gesto de la consola no reescala el lienzo. El `ResizeObserver` de la fila se despierta con el
+// cambio de la capa, así que el ajuste se salta mientras dura el gesto y `ajustarCanvas` es
+// idempotente para la misma caja y el mismo par de dp. El ajuste por ventana o por preset sigue
+// pasando porque cambia la caja o el par de dp. La geometría se verifica con navegador; esto fija
+// el mecanismo.
+if (!/medidasCanvasAplicadas/.test(fuentePreviaEstado) ||
+    !/if \(!apagado && !pausaCanvas\) ajustarPantallas\(\)/.test(fuentePreviaEstado)) {
+  mal("previa-panel.js no protege el lienzo del aviso de tamaño que provoca la capa flotante");
+}
+if (!/function aplicarModoFlotantePorModo[\s\S]{0,600}?pausarAjusteCanvas\(\)/.test(fuentePreviaEstado)) {
+  mal("previa-panel.js no pausa el ajuste del lienzo al acoplar o cambiar de modo la consola");
+}
+const pausasCanvas = (fuentePreviaEstado.match(/pausarAjusteCanvas\(\)/g) || []).length;
+if (pausasCanvas < 6) {
+  mal("previa-panel.js no pausa el ajuste del lienzo en todos los gestos de la consola: " + pausasCanvas);
+}
 
 // 6c. el texto de un nodo pintado es el dinámico si existe: el rect que va al canvas no puede
 //     quedarse con el texto del layout cuando la app ya escribió otro.
