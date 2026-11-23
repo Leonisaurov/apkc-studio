@@ -659,6 +659,34 @@ if (enTextoPropio.ok || !/no es un contenedor/.test(String(enTextoPropio.error))
 if (vistaXml.tipoDeContenedor("Lienzo") !== "") {
   mal("un tipo desconocido sin paquete se trata como contenedor");
 }
+// la precedencia es del PAQUETE, no del sufijo: `MiLayout` cualificado reparte aunque acabe en
+// «Layout», y el mismo nombre sin paquete sigue siendo hoja porque la herencia no se adivina.
+if (vistaXml.tipoDeContenedor("com.ejemplo.MiLayout") !== "lineal") {
+  mal("un tipo cualificado que acaba en Layout no se reconoce como contenedor: " +
+    vistaXml.tipoDeContenedor("com.ejemplo.MiLayout"));
+}
+if (vistaXml.tipoDeContenedor("MiLayout") !== "") {
+  mal("un tipo sin paquete que acaba en Layout se adivina contenedor: " +
+    vistaXml.tipoDeContenedor("MiLayout"));
+}
+// el modelo con raíz `com.ejemplo.MiLinearLayout` reparte a sus hijos: es el caso que el sufijo
+// `Layout` tumbaba al evaluarse antes que el paquete.
+const layoutMiLineal = `<com.ejemplo.MiLinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent" android:layout_height="match_parent">
+    <TextView android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="Uno"/>
+    <Button android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="Dos"/>
+</com.ejemplo.MiLinearLayout>`;
+const miLineal = vistaXml.modeloDeLayout(layoutMiLineal);
+if (!miLineal.ok) {
+  mal("modeloDeLayout no lee una raíz MiLinearLayout: " + miLineal.error);
+} else {
+  const raiz = miLineal.modelo.raiz;
+  const [uno, dos] = raiz.hijos;
+  if (raiz.contenedor !== "lineal" || !uno || !dos || dos.rect.y !== uno.rect.alto) {
+    mal("la raíz MiLinearLayout no reparte a sus hijos: " +
+      JSON.stringify({ contenedor: raiz.contenedor, uno: uno && uno.rect, dos: dos && dos.rect }));
+  }
+}
 
 // 6b-bis. el editor de layout del modo editar: añadir, mover, reordenar y borrar son operaciones
 // de TEXTO sobre el XML. Se prueban aquí porque son puras; que el panel las aplique con el canvas

@@ -255,16 +255,19 @@ const CONTENEDORES_MARCO = /^(FrameLayout|RelativeLayout|ScrollView|HorizontalSc
 const HOJAS_CONOCIDAS = /^(View|Space|TextView|EditText|AutoCompleteTextView|MultiAutoCompleteTextView|CheckedTextView|TextInputEditText|MaterialTextView|AppCompatTextView|Button|CompoundButton|ImageButton|MaterialButton|AppCompatButton|CheckBox|RadioButton|MaterialCheckBox|MaterialRadioButton|AppCompatCheckBox|AppCompatRadioButton|Switch|SwitchCompat|SwitchMaterial|MaterialSwitch|ToggleButton|ImageView|AppCompatImageView|MaterialImageView|AppCompatImageButton|ProgressBar|SeekBar|AppCompatSeekBar|MaterialSeekBar|RatingBar|Spinner|AppCompatSpinner|WebView|VideoView|SurfaceView|TextureView|Chronometer|AnalogClock|CalendarView|DatePicker|TimePicker|NumberPicker|ViewStub|SearchView|Toolbar|ScrollBar)$/;
 
 // El tipo de contenedor de una etiqueta, por su nombre tal como aparece en el XML: "lineal", "marco"
-// o "" (una vista que no admite hijos). Los tipos del framework se reconocen por el nombre simple.
-// Un tipo TOTALMENTE CUALIFICADO que no es conocido se trata como contenedor por declaración: no
-// hay forma de resolver la herencia de Java desde el editor, y el nombre con paquete es la señal de
-// que es una clase del proyecto. Se dibuja como lineal, que es lo único que reparte a los hijos en
-// vez de apilarlos en el origen; `android:orientation` decide el eje.
+// o "" (una vista que no admite hijos). Los tipos del framework se reconocen por el nombre simple
+// (lista explícita). Precedencia: el PAQUETE manda sobre el sufijo. Un tipo TOTALMENTE CUALIFICADO
+// que no sea conocido se trata como contenedor por declaración: no hay forma de resolver la
+// herencia de Java desde el editor y el nombre con paquete es la señal de que es una clase del
+// proyecto; se dibuja como lineal, que es lo único que reparte a los hijos en vez de apilarlos en el
+// origen (`android:orientation` decide el eje). Un nombre desconocido SIN paquete no se adivina: se
+// queda hoja aunque acabe en `Layout`, porque el sufijo no dice de qué hereda (`MiLayout extends
+// View` es legal) y la frontera declarada es que solo lo cualificado se asume contenedor.
 export function tipoDeContenedor(nombre) {
   const completo = String(nombre == null ? "" : nombre).trim();
   const tipo = completo.replace(/^.*\./, "");
   if (esLineal(tipo)) return "lineal";
-  if (CONTENEDORES_MARCO.test(tipo) || /Layout$/.test(tipo)) return "marco";
+  if (CONTENEDORES_MARCO.test(tipo)) return "marco";
   if (HOJAS_CONOCIDAS.test(tipo)) return "";
   if (completo.includes(".")) return "lineal";
   return "";
