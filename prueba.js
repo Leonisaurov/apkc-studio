@@ -2202,8 +2202,11 @@ public final class R {
     if (!/medida: \(\) =>/.test(fuenteAuto)) {
       mal("el autocompletado no expone las lecturas para poder medir el overhead");
     }
-    if (!/if \(listo\) return cache/.test(fuenteRecursos)) {
+    if (!/if \(listoRecursos\) return cache/.test(fuenteRecursos)) {
       mal("el barrido de recursos no se cachea: se recorrería OPFS por tecla");
+    }
+    if (!/if \(listoClases\) return cacheClases/.test(fuenteRecursos)) {
+      mal("la lista de clases del proyecto no se cachea");
     }
     if (!/apkc:proyecto-cambio/.test(fuenteRecursos)) {
       mal("la caché de recursos no se invalida con los cambios del proyecto");
@@ -2248,6 +2251,54 @@ public final class R {
     console.log(`  (medida: 20000 contextos Java en ${msJava} ms y 20000 de XML en ${msXml} ms; ` +
       `${contextos + xml} con resultado)`);
     if (msJava > 3000 || msXml > 3000) mal(`el contexto por pulsación es demasiado caro: ${msJava} ms Java, ${msXml} ms XML`);
+  }
+
+  // 11d. la lista de clases se invalida sin `refrescar()`: crear o renombrar un `.java` publica
+  // `apkc:proyecto-cambio` (lo mismo que hace `pestana.js` al guardar/crear/mover) y el siguiente
+  // `cargarClasesProyecto()` vuelve a mirar el árbol. Se conduce con un OPFS de mentira y un
+  // `document` mínimo, porque el módulo registra el oyente al importarse.
+  {
+    const hospedador = pestanaMod.hospedador;
+    const arbolReal = hospedador.arbol;
+    const bytesReal = hospedador.bytes;
+    let nodos = ["/proyecto/src/Vieja.java"];
+    hospedador.arbol = async () => ({ nodos: nodos.map((ruta) => ({ ruta, dir: false })) });
+    hospedador.bytes = async () => null;
+    const oyentes = [];
+    globalThis.document = {
+      addEventListener(tipo, fn) { if (tipo === "apkc:proyecto-cambio") oyentes.push(fn); },
+      dispatchEvent(evento) { for (const fn of oyentes) fn(evento); return true; },
+    };
+    try {
+      const recursos = await import("./recursos-proyecto.js");
+      if (!oyentes.length) mal("recursos-proyecto.js no escucha apkc:proyecto-cambio");
+      const publicar = (detalle) =>
+        globalThis.document.dispatchEvent(
+          new CustomEvent("apkc:proyecto-cambio", { detail: detalle }));
+      recursos.invalidarRecursosProyecto();
+      const antes = await recursos.cargarClasesProyecto();
+      if (!antes.has("Vieja") || antes.has("Nueva")) {
+        mal(`la caché de clases no parte del árbol falso: ${[...antes].join(", ")}`);
+      }
+      nodos.push("/proyecto/src/Nueva.java");
+      publicar({ tipo: "mutacion", accion: "crear", rutas: ["/proyecto/src/Nueva.java"] });
+      const trasCrear = await recursos.cargarClasesProyecto();
+      if (!trasCrear.has("Nueva")) {
+        mal(`crear un .java no invalida la caché de clases sin refrescar(): ${[...trasCrear].join(", ")}`);
+      }
+      nodos = nodos.filter((r) => r !== "/proyecto/src/Vieja.java")
+        .concat("/proyecto/src/Renombrada.java");
+      publicar({ tipo: "mutacion", accion: "renombrar",
+        origen: "/proyecto/src/Vieja.java", destino: "/proyecto/src/Renombrada.java" });
+      const trasRenombrar = await recursos.cargarClasesProyecto();
+      if (!trasRenombrar.has("Renombrada") || trasRenombrar.has("Vieja")) {
+        mal(`renombrar un .java no invalida la caché de clases: ${[...trasRenombrar].join(", ")}`);
+      }
+    } finally {
+      hospedador.arbol = arbolReal;
+      hospedador.bytes = bytesReal;
+      delete globalThis.document;
+    }
   }
 
   // 13. la sección de dependencias (R4): importa a OPFS un paquete estático del propio origen.

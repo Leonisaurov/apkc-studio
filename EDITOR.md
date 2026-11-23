@@ -860,8 +860,9 @@ dependencias. Los datos salen de dos sitios que ya están en el propio origen:
 
 - **el proyecto**: `res/` (los nombres de fichero dan `R.layout`, `R.drawable`…; los `<string>`,
   `<color>`, `<style>`… de `res/values` y los `@+id/` de los layouts dan los nombres) y la
-  `R.java` que dejó el build, si está. Los tipos y los nombres se recalculan al guardar o cambiar
-  un fichero de `res/`, al crear/importar un proyecto y con `AUTOCOMPLETADO.refrescar()`.
+  `R.java` que dejó el build, si está. Los tipos y los nombres se recalculan al guardar, crear,
+  renombrar o borrar un fichero de `res/`/`.java`, al importar un proyecto y con
+  `AUTOCOMPLETADO.refrescar()`; un `.java` no obliga a repetir el barrido de `res/`.
 - **el `android.jar` de OPFS**: las clases salen de su **directorio central** y los métodos, del
   `.class` de la clase que se está completando, descomprimido en la página con `deflate-raw`. El jar
   no se baja ni se copia: se leen por rango su cola (EOCD) y su directorio central —1,35 MB de los
