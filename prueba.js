@@ -1138,6 +1138,23 @@ if (previaPanel.oyenteEnPunto(modeloEmulador, 270, 480, 20, 5) !== null) {
   mal("oyenteEnPunto devuelve una vista sin listener");
 }
 
+// la lista de clics solo se borra ante una ejecución nueva: un repintado del mismo modelo que
+// devolvió el clic (entrar en Pantalla, cambiar el tamaño) llega con `pulsando` en false y no puede
+// tirar los clics ya entregados. Es la causa del contador que se quedaba en «Pulsos: 1».
+const modeloDeUnClic = { ...modeloEmulador };
+if (previaPanel.reiniciaPulsos({ pulsando: true, modelo: modeloDeUnClic, modeloDeClics: null })) {
+  mal("reiniciaPulsos borra la lista mientras el clic está en vuelo");
+}
+if (previaPanel.reiniciaPulsos({ pulsando: false, modelo: modeloDeUnClic, modeloDeClics: modeloDeUnClic })) {
+  mal("reiniciaPulsos borra la lista al repintar el modelo que devolvió el clic");
+}
+if (!previaPanel.reiniciaPulsos({ pulsando: false, modelo: { ...modeloEmulador }, modeloDeClics: modeloDeUnClic })) {
+  mal("reiniciaPulsos no reinicia con un modelo distinto (build nuevo)");
+}
+if (!previaPanel.reiniciaPulsos({ pulsando: false, modelo: null, modeloDeClics: modeloDeUnClic })) {
+  mal("reiniciaPulsos no reinicia cuando el aviso no trae modelo");
+}
+
 // la vista dividida es contrato: sin estos ids y roles, `previa-panel.js` no engancha y las
 // pruebas de chromium no tienen qué conducir
 for (const [id, donde] of [

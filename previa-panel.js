@@ -367,6 +367,16 @@ export function oyenteEnPunto(modelo, ancho, alto, x, y) {
   return elegido;
 }
 
+// ¿Un modelo que llega por `EVENTO_PREVIA` empieza una ejecución nueva y por tanto borra la lista
+// de clics? Solo si no lo pidió un clic (`pulsando`) y no es el MISMO modelo que devolvió el último
+// `--pulsar`. La identidad es la clave: `repintarVistaPrevia` vuelve a avisar con el modelo que ya
+// estaba en memoria, y ese repintado no puede tirar los clics entregados aunque el evento llegue
+// después de que `pulsando` haya vuelto a false (era el «Pulsos: 1» de cada toque).
+export function reiniciaPulsos({ pulsando, modelo, modeloDeClics } = {}) {
+  if (pulsando) return false;
+  return modelo == null || modelo !== modeloDeClics;
+}
+
 function leerClave(clave, respaldo) {
   try {
     const valor = localStorage.getItem(clave);
@@ -479,6 +489,10 @@ export function crearPreviaPanel({ hospedador, proyecto, estadoPestana, editor }
   // que es lo que hace reproducible la pantalla (el comando no guarda estado entre invocaciones)
   let pulsos = [];
   let pulsando = false;
+  // el modelo que produjo el último clic, por identidad. Un repintado del MISMO modelo —entrar en
+  // Pantalla, cambiar el tamaño, mover la consola— llega con `pulsando` ya en false y antes se
+  // confundía con un build nuevo: borraba `pulsos` y el primer toque volvía a «Pulsos: 1».
+  let modeloDeClics = null;
   // Energía del emulador y tamaño de su lienzo. Apagar no borra nada: solo deja la pantalla en
   // negro y evita ejecutar; encender vuelve a pedir `apkc preview` sobre la copia estable.
   let apagado = leerClave(CLAVE_ENERGIA, "encendido") === "apagado";
@@ -1328,7 +1342,10 @@ export function crearPreviaPanel({ hospedador, proyecto, estadoPestana, editor }
         mensajeVistaPreviaRender(lineas.length ? lineas[lineas.length - 1].trim() : "el clic no devolvió un modelo legible");
         return null;
       }
-      // `pintarVistaPrevia` avisa por el evento; el panel se repinta con el modelo nuevo
+      // `pintarVistaPrevia` avisa por el evento; el panel se repinta con el modelo nuevo. La
+      // identidad se guarda ANTES de avisar: el listener del evento ya puede reconocerlo como
+      // «modelo de un clic» y no reiniciar `pulsos`, ni siquiera si el repintado llega más tarde.
+      modeloDeClics = modelo;
       return pintarVistaPrevia(modelo);
     } catch (e) {
       pulsos.length = antes;
@@ -1451,6 +1468,7 @@ export function crearPreviaPanel({ hospedador, proyecto, estadoPestana, editor }
     guardarClave(CLAVE_ENERGIA, "encendido");
     actualizarEnergiaBotones();
     pulsos = [];
+    modeloDeClics = null;
     limpiarLog("Encendiendo desde la última APK guardada…");
     mensajeEmulador("Encendiendo desde la última APK guardada…");
     return ejecutarPreviewDe(RUTA_ULTIMA_APK);
@@ -1487,6 +1505,7 @@ export function crearPreviaPanel({ hospedador, proyecto, estadoPestana, editor }
     guardarClave(CLAVE_ENERGIA, "encendido");
     actualizarEnergiaBotones();
     pulsos = [];
+    modeloDeClics = null;
     apkActual = RUTA_ULTIMA_APK;
     limpiarLog("Reiniciando el emulador desde onCreate…");
     for (const superficie of SUPERFICIES) limpiarCanvas(el(superficie.canvasRender));
@@ -2157,9 +2176,12 @@ export function crearPreviaPanel({ hospedador, proyecto, estadoPestana, editor }
     document.addEventListener(EVENTO_PREVIA, (e) => {
       if (!visible && !vistaActiva()) return;
       const detalle = e && e.detail ? e.detail : {};
-      // un modelo que no viene de un clic es un build nuevo: la lista de clics vuelve a empezar
-      if (!pulsando) {
+      // un modelo que no viene de un clic es un build nuevo: la lista de clics vuelve a empezar.
+      // Un repintado del mismo modelo que devolvió el clic (entrar en Pantalla, cambiar el tamaño,
+      // mover la consola) llega con `pulsando` en false y NO puede borrar los clics ya entregados.
+      if (reiniciaPulsos({ pulsando, modelo: detalle.modelo, modeloDeClics })) {
         pulsos = [];
+        modeloDeClics = null;
         apkActual = origenPrevia === "ultima" ? RUTA_ULTIMA_APK : "build/app.apk";
       }
       // el modelo cambió: el canvas y los dos paneles se pintan ya. Un rAF dejaría la consola con
