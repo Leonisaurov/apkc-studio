@@ -474,6 +474,13 @@ paso el comando salía 0 y el Emulador seguía con el texto anterior aunque el e
 nuevo (el síntoma «compilo y el Emulador no recarga la última APK»). Si un guardado falla no se
 compila a medias: el motivo queda en la barra y `compilarCon()` devuelve `null`.
 
+`#ultimo-codigo` es del **build**, no de cualquier orden. Si el build ni siquiera empieza (guardado,
+jar o keystore) dice `no compilé` y la consola guarda el motivo (C1); el `verify` interno corre con
+`{recordar:false}` y no pisa el código del build ni lo que repite `Ctrl+Enter` (C2). `Ctrl+Enter`
+repite el último `build` por `compilarDebug()`/`compilarDelTodo()` —vuelve a pedir la clave—, así que
+también guarda los sucios antes (C3). `ULTIMO.argv` guarda solo la copia redactada: una orden con
+contraseña (`sign`, `keystore`, `rotate`) no se repite desde el atajo y lo dice en la barra (C4).
+
 Compilar no cambia de pestaña: `previsualizarLoCompilado()` pinta el modelo y publica el evento; en
 en modo Emulador el canvas se repinta en su caja, el registro y la consola de la app se llenan, y en
 modo Vista previa se relee el layout. El editor no pierde foco, cursor ni scroll porque nadie escribe
@@ -674,6 +681,10 @@ El editor ya no tiene un solo documento. `DOCUMENTOS = { lista, activa }` guarda
   puede reconstruir desde OPFS y no ocupa memoria.
 - `activacion` es un contador de turno: si una lectura lenta termina después de que se pulse otra
   pestaña, no pisa el editor.
+- `cargandoDocumento` cuenta las activaciones en vuelo: la pestaña activa se marca antes de leer
+  OPFS para que responda aunque la lectura quede en cola detrás de un build, y mientras el contador
+  esté alto `guardar()` no escribe (lo dice en la barra). Sin ese bloqueo, un `Ctrl+S` en esa
+  ventana guardaba el buffer del fichero anterior en la ruta nueva (F1).
 - `VENTANA` es un id estable en sessionStorage; indexa el undo tree en IndexedDB.
 
 ### Undo tree
@@ -983,7 +994,8 @@ o lo cierra, y ``Ctrl + ` `` conserva la pestaña activa.
   `#verificar-apk`, `#descargar-debug-keystore`) y deja el resto en desplegables:
   `#detalle-ajustes` (`#ajustes-minsdk`, `#ajustes-targetsdk`, `#ajustes-versioncode`,
   `#ajustes-versionname`, `#leer-ajustes`, `#guardar-ajustes`, `#estado-ajustes`; avisa si
-  targetSdk < 34), `#detalle-sdk`
+  targetSdk < 34 y aplica los ajustes sobre el buffer del manifiesto si está abierto, no sobre la
+  copia de OPFS, para no pisar cambios sin guardar), `#detalle-sdk`
   (`#abrir-dialogo-sdk`, `#dialogo-sdk`, `#sdk-entiendo`, `#sdk-terminos`, `#sdk-descarga`,
   `#sdk-elegir-archivo`, `#sdk-usar-servidor`, `#sdk-cerrar`, `#traer-android-jar`,
   `#estado-jar-sdk`, `#android-jar`, `#usar-android-jar`, `#estado-jar`), `#detalle-release`

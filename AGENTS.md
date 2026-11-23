@@ -144,7 +144,9 @@ los imports y no debe depender de ese puente.
   limpia inactiva tiene `texto = null` y se relee de OPFS al activarla. `PERSISTENCIA`
   (`apkc-studio/editor-v1`) va en **sessionStorage** (vista por ventana, no compartida) y guarda
   rutas y `ARBOL.abiertos`, nunca contenido. La activa se restaura al cargar, las demás al
-  pulsarlas; `activacion` evita que una lectura lenta pise otra pestaña.
+  pulsarlas; `activacion` evita que una lectura lenta pise otra pestaña y `cargandoDocumento`
+  bloquea `guardar()` mientras el textarea todavía tiene el buffer anterior (F1: un `Ctrl+S` en esa
+  ventana escribía el fichero viejo en la ruta nueva).
 - **Undo tree persistente.** `historial.js` guarda deltas, checkpoints cada 24 niveles y poda
   (240 nodos / 4 MB). Se hidrata por documento al activarlo y se guarda en IndexedDB con clave
   `VENTANA|ruta`; `VENTANA` sale de sessionStorage. No persistas `cache` (se reconstruye). Las

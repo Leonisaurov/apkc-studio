@@ -16,6 +16,7 @@ import * as xmlEditor from "./xml-editor.js";
 import * as vistaXml from "./vista-xml.js";
 import * as layoutEditor from "./layout-editor.js";
 import * as depsMod from "./deps.js";
+import { bufferDelManifiesto } from "./ajustes.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const a = { buildProject, makeZip, analyze, RULES, crc32 };
@@ -1612,6 +1613,9 @@ if (fusionar(baseFusion, "uno\nDOS\ntres\n", baseFusion).estado !== "nuestro") m
   if (argv[4] !== "saludo" || argv[7] !== "--old-storepass=anterior") {
     mal("redactarArgv cambia el argv real que se ejecuta");
   }
+  // una contraseña que empieza por guion también es una contraseña (y viaja a `ULTIMO.argv`)
+  const raro = pestanaMod.redactarArgv(["--storepass", "-clave-rara"]);
+  if (raro[1] !== "***") mal("redactarArgv deja una contraseña que empieza por -");
 
 
   // 11. autocompletado: la parte que no necesita DOM. Los recursos salen del árbol y de los XML,
@@ -2026,6 +2030,66 @@ public final class R {
         if (!yml.includes(pieza)) mal("deps-maven.yml no menciona " + pieza);
       }
       if (/deps-proxy/.test(yml)) mal("deps-maven.yml habla de un proxy en tiempo de ejecución");
+    }
+  }
+
+  // 13. F1, C1-C4 y F2: contratos del editor que no se pueden conducir sin DOM. Aquí se fija la
+  //     decisión pura y el orden del fuente; la carrera real de pestañas y el panel
+  //     `#ultimo-codigo` se conducen en `prueba-pestana.js`, que necesita chromium.
+  {
+    // F2: los ajustes se aplican sobre el buffer abierto, no sobre la copia de OPFS
+    const manifiestoSucio = { ruta: "/proyecto/AndroidManifest.xml", texto: "<manifest/>", sucio: true };
+    if (bufferDelManifiesto(manifiestoSucio, true, "<manifest a/>") !== "<manifest a/>") {
+      mal("bufferDelManifiesto ignora el buffer del documento activo");
+    }
+    if (bufferDelManifiesto(manifiestoSucio, false, null) !== "<manifest/>") {
+      mal("bufferDelManifiesto pierde el texto de una pestaña sucia inactiva");
+    }
+    if (bufferDelManifiesto({ texto: null, sucio: false }, false, null) !== null ||
+        bufferDelManifiesto(null, false, null) !== null) {
+      mal("bufferDelManifiesto no cae a OPFS cuando no hay buffer");
+    }
+
+    // C1: la frase del panel cuando el build ni siquiera empieza
+    if (pestanaMod.mensajeNoCompile("falta el android.jar") !== "no compilé: falta el android.jar" ||
+        pestanaMod.mensajeNoCompile("") !== "no compilé") {
+      mal("mensajeNoCompile no dice «no compilé» con y sin motivo");
+    }
+
+    // F1/C1-C4: el orden del fuente es el contrato que las pruebas CDP no pueden fijar
+    const entre = (inicio, fin) => {
+      const i = pestana.indexOf(inicio);
+      const j = i < 0 ? -1 : pestana.indexOf(fin, i + inicio.length);
+      return i < 0 || j < 0 ? "" : pestana.slice(i, j);
+    };
+    const guardarFn = entre("async function guardar()", "async function guardarParaCompilar()");
+    const guardaIdx = guardarFn.indexOf("if (cargandoDocumento)");
+    const primerAwaitGuardar = guardarFn.indexOf("await");
+    if (guardaIdx < 0 || (primerAwaitGuardar > 0 && guardaIdx > primerAwaitGuardar)) {
+      mal("F1: guardar() no se bloquea antes de su primer await mientras una pestaña lee OPFS");
+    }
+    const activarFn = entre("async function activarDocumento(", "async function cerrarDocumento(");
+    const marcaIdx = activarFn.indexOf("cargandoDocumento += 1");
+    const primerAwaitActivar = activarFn.indexOf("await");
+    if (marcaIdx < 0 || primerAwaitActivar < 0 || marcaIdx > primerAwaitActivar ||
+        !/finally/.test(activarFn)) {
+      mal("F1: activarDocumento no marca la carga antes de leer OPFS con try/finally");
+    }
+    const compilarFn = entre("async function compilarCon(", "async function previsualizarLoCompilado(");
+    if (!/noCompile\(/.test(compilarFn) || !/build: tipo/.test(compilarFn)) {
+      mal("C1/C3: compilarCon no dice «no compilé» o no recuerda el build para Ctrl+Enter");
+    }
+    const verificarFn = entre("async function verificarLoCompilado(", "// --- ajustes del proyecto");
+    if (!/recordar: false/.test(verificarFn)) {
+      mal("C2: el verify interno sigue pisando #ultimo-codigo");
+    }
+    const correrFn = entre("async function correr(argv", "// Go wasm no se puede matar");
+    if (!/ULTIMO\.argv = redactarArgv\(argv\)/.test(correrFn) || /ULTIMO\.argv = argv/.test(correrFn)) {
+      mal("C4: correr guarda el argv con la contraseña en ULTIMO.argv");
+    }
+    const ejecutarFn = entre("async function ejecutarUltimo(", "// La línea que se pinta");
+    if (!/ULTIMO\.build/.test(ejecutarFn) || !/compilarDebug\(\)/.test(ejecutarFn)) {
+      mal("C3: Ctrl+Enter no repite un build por el camino que guarda los sucios");
     }
   }
 

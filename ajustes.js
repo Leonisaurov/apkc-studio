@@ -1,12 +1,30 @@
 // Ajustes del proyecto: se leen y se guardan en el propio AndroidManifest.xml. Se monta con
 // las piezas del orquestador para no importarlo desde aquí.
 
+// F2: los ajustes se aplican sobre lo que hay en el editor. Si el manifiesto está abierto, su
+// buffer manda —también el de una pestaña sucia inactiva, que conserva `texto`—: leer OPFS y
+// reescribir el fichero tiraría los cambios sin guardar. Una pestaña limpia inactiva tiene
+// `texto = null` y se relee de disco, igual que hace el editor al activarla.
+export function bufferDelManifiesto(doc, activa, textoEditor) {
+  if (!doc) return null;
+  const buffer = activa ? textoEditor : doc.texto;
+  return typeof buffer === "string" ? buffer : null;
+}
+
 export function crearAjustes({ hospedador, rutaManifiesto, conBloqueo, claveRevision,
   nuevaRevision, documentoDe, DOCUMENTOS, EDITOR, renderPestanas, refrescarArbol,
   publicar, nota, ajustesDelManifiesto, conAjustes }) {
+  // El manifiesto que manda es el del editor si está abierto; si no, la copia de OPFS.
+  async function textoDelManifiesto() {
+    const doc = documentoDe(rutaManifiesto);
+    const activo = DOCUMENTOS.activa === rutaManifiesto;
+    const enBuffer = bufferDelManifiesto(doc, activo, activo ? EDITOR.texto() : null);
+    return { doc, texto: enBuffer !== null ? enBuffer : await hospedador.texto(rutaManifiesto) };
+  }
+
   async function leerAjustes(silencioso) {
     const aviso = document.getElementById("estado-ajustes");
-    const texto = await hospedador.texto(rutaManifiesto);
+    const { texto } = await textoDelManifiesto();
     if (!texto) {
       if (aviso) aviso.textContent = "no hay AndroidManifest.xml todavía";
       return null;
@@ -35,7 +53,7 @@ export function crearAjustes({ hospedador, rutaManifiesto, conBloqueo, claveRevi
     };
     const aviso = document.getElementById("estado-ajustes");
     try {
-      const texto = await hospedador.texto(rutaManifiesto);
+      const { doc, texto } = await textoDelManifiesto();
       if (!texto) { nota("no hay AndroidManifest.xml que ajustar"); return; }
       const nuevo = conAjustes(texto, {
         minSdk: valor("ajustes-minsdk"),
@@ -48,9 +66,9 @@ export function crearAjustes({ hospedador, rutaManifiesto, conBloqueo, claveRevi
         if (r && r.tipo === "error") throw new Error(r.error);
       });
       try { localStorage.setItem(claveRevision(rutaManifiesto), nuevaRevision()); } catch (e) { /* sin revisión */ }
-      const doc = documentoDe(rutaManifiesto);
       if (doc) {
         doc.texto = nuevo;
+        doc.base = nuevo;
         doc.sucio = false;
         if (DOCUMENTOS.activa === rutaManifiesto) EDITOR.poner(nuevo);
         renderPestanas();

@@ -114,6 +114,10 @@ const CONFLICTO = { doc: null, datos: null };
 const PERSISTENCIA = "apkc-studio/editor-v1";
 // una activación lenta no puede pisar a la pestaña que se pulsó después
 let activacion = 0;
+// F1: la lectura de OPFS puede quedar en cola detrás de un build, y hasta que termina el
+// textarea sigue con el buffer del documento anterior. Mientras este contador esté alto,
+// `guardar` no escribe: la ruta activa ya es la nueva pero el contenido todavía no es suyo.
+let cargandoDocumento = 0;
 
 // Identidad de esta ventana/pestaña del navegador. sessionStorage sobrevive a recargar y no se
 // comparte entre ventanas nuevas; el árbol de deshacer se indexa por ella.
@@ -1100,12 +1104,25 @@ function quitarDocumento(doc) {
   return false;
 }
 
+// F1: la activación fija la pestaña activa antes de leer OPFS para que la pestaña se marque al
+// instante aunque la lectura quede en cola detrás de un build. El precio es que durante la carga
+// el textarea todavía tiene el buffer anterior, así que `guardar` se bloquea con el contador
+// `cargandoDocumento`; sin eso, un Ctrl+S en esa ventana escribía el buffer viejo en la ruta nueva.
 async function activarDocumento(ruta) {
   const doc = documentoDe(ruta);
   if (!doc) return false;
   if (DOCUMENTOS.activa === ruta) { renderPestanas(); return true; }
   const turno = ++activacion;
   guardarEnMemoria();
+  cargandoDocumento += 1;
+  try {
+    return await cargarDocumentoEnEditor(doc, ruta, turno);
+  } finally {
+    cargandoDocumento -= 1;
+  }
+}
+
+async function cargarDocumentoEnEditor(doc, ruta, turno) {
   DOCUMENTOS.activa = ruta;
   estadoPestana.ruta = ruta;
   revelarRuta(ruta);
@@ -1123,16 +1140,16 @@ async function activarDocumento(ruta) {
     } catch (e) {
       if (turno !== activacion) return false;
       nota("no se pudo abrir " + ruta + ": " + (e && e.message ? e.message : e));
-      return quitarDocumento(doc);
+      return await quitarDocumento(doc);
     }
     if (turno !== activacion) return false;
     if (!bytes) {
       nota("no existe " + ruta);
-      return quitarDocumento(doc);
+      return await quitarDocumento(doc);
     }
     if (bytes.includes(0)) {
       nota(ruta + " parece un binario; el editor solo abre texto");
-      return quitarDocumento(doc);
+      return await quitarDocumento(doc);
     }
     doc.texto = new TextDecoder().decode(bytes);
     doc.base = doc.texto;
@@ -1742,6 +1759,12 @@ function avisarManifiestoInvalido(ruta) {
 }
 
 async function guardar() {
+  // F1: con una pestaña a medio abrir, el textarea todavía no es suyo. Escribir ahora guardaría
+  // el buffer anterior en la ruta nueva; el motivo va a la barra, que es donde se mira.
+  if (cargandoDocumento) {
+    nota("espera a que termine de abrirse la pestaña antes de guardar");
+    return false;
+  }
   let doc = documentoActivo();
   if (!doc) {
     // compatibilidad con quien fija estadoPestana.ruta a mano (las pruebas lo hacen) y con el
@@ -1965,27 +1988,65 @@ function cerrarPanel() {
 }
 
 // --- los comandos ------------------------------------------------------------------------
-const ULTIMO = { argv: ["create", PROYECTO] };
+// C4: `argv` guarda la copia redactada, nunca la contraseña. `build` se recuerda aparte porque
+// una orden con `--storepass ***` no se puede relanzar tal cual.
+const ULTIMO = { argv: ["create", PROYECTO], build: null, secreto: false };
 
-async function ejecutarUltimo() { await correr(ULTIMO.argv); }
+// C3/C4: Ctrl+Enter repite la última orden, pero un `build` vuelve por su camino real: pide la
+// clave otra vez y `compilarCon` guarda los documentos sucios antes de compilar. Una orden con
+// contraseña no se repite desde aquí, porque lo guardado está redactado y fallaría con `***`.
+async function ejecutarUltimo() {
+  if (ULTIMO.build) {
+    return ULTIMO.build === "debug" ? compilarDebug() : compilarDelTodo();
+  }
+  if (ULTIMO.secreto) {
+    nota("no repito «" + ULTIMO.argv[0] + "» con Ctrl+Enter: lleva una contraseña que no se guarda");
+    return null;
+  }
+  return correr(ULTIMO.argv);
+}
 
 // La línea que se pinta en la consola no puede repetir una contraseña: el buffer de CONSOLA
 // guarda muchos caracteres y limpiar el campo del formulario no borra lo ya escrito. Se redacta
 // solo la copia que se muestra; `argv` sigue intacto para hospedador.ejecutar. Cubre tanto
-// `--storepass saludo` como `--storepass=saludo` y nombres como `--old-storepass`.
+// `--storepass saludo` como `--storepass=saludo` y nombres como `--old-storepass`. El valor se
+// redacta aunque empiece por `-`: una contraseña así también es una contraseña.
 function redactarArgv(argv) {
   return argv.map((arg, i) => {
     const s = String(arg);
     const igual = s.indexOf("=");
     if (igual > 0 && /pass/i.test(s.slice(0, igual))) return s.slice(0, igual + 1) + "***";
     const anterior = String(argv[i - 1] || "");
-    if (anterior.startsWith("-") && /pass/i.test(anterior) && !s.startsWith("-")) return "***";
+    if (anterior.startsWith("-") && /pass/i.test(anterior)) return "***";
     return s;
   });
 }
 
-async function correr(argv) {
-  ULTIMO.argv = argv;
+// El estado de `#ultimo-codigo` es de la compilación, no de cualquier orden: C1 dice «no compilé»
+// cuando el build ni siquiera empezó y C2 evita que el `verify` posterior pise el código del
+// build. Las órdenes internas se lanzan con `{ recordar: false }`.
+function codigoUltimo(valor) {
+  const codigo = document.getElementById("ultimo-codigo");
+  if (codigo) codigo.textContent = String(valor);
+}
+
+function mensajeNoCompile(motivo) {
+  return "no compilé" + (motivo ? ": " + motivo : "");
+}
+
+function noCompile(motivo) {
+  codigoUltimo("no compilé");
+  CONSOLA.escribir(mensajeNoCompile(motivo) + "\n");
+}
+
+async function correr(argv, opciones = {}) {
+  const recordar = opciones.recordar !== false;
+  if (recordar) {
+    // C4: lo que se puede repetir va redactado; `argv` entero sigue yendo al hospedador
+    ULTIMO.argv = redactarArgv(argv);
+    ULTIMO.secreto = ULTIMO.argv.some((arg, i) => arg !== String(argv[i]));
+    ULTIMO.build = opciones.build || null;
+  }
   // la salida vive en el panel del editor: un atajo lanzado desde Inicio no puede dejarla oculta
   const vistaEditor = document.querySelector('[data-vista="pestana"]');
   if (vistaEditor && document.body.dataset.vista !== "pestana") vistaEditor.click();
@@ -2018,10 +2079,7 @@ async function correr(argv) {
   }
   const completa = String(r.consola || "");
   CONSOLA.escribir(completa.slice(recibido) + (r.error ? "FALLO DEL HOSPEDADOR: " + r.error + "\n" : ""));
-  if (r.tipo === "terminado") {
-    const codigo = document.getElementById("ultimo-codigo");
-    if (codigo) codigo.textContent = String(r.codigo);
-  }
+  if (recordar && r.tipo === "terminado") codigoUltimo(r.codigo);
   await refrescarArbol();
   return r;
 }
@@ -2084,7 +2142,8 @@ async function firmar() {
   const campoViejo = document.getElementById("storepass-viejo");
   if (campoViejo) campoViejo.value = "";
   if (r && r.codigo === 0) {
-    const v = await correr(["verify", destino]);
+    // el verify es un paso interno: no pisa `#ultimo-codigo` ni cambia lo que repite Ctrl+Enter
+    const v = await correr(["verify", destino], { recordar: false });
     await descargar(destino);
     await ofrecerDescarga(destino + ".idsig", "descargar-idsig");
     if (v && v.codigo === 0) nota("firmado y verificado: " + destino.split("/").pop());
@@ -2717,7 +2776,8 @@ async function compilarCon(k, tipo, opciones = {}) {
   // lo que se ve en el editor es lo que se compila: el build no lee el textarea (ver
   // guardarParaCompilar). El motivo de un fallo al guardar ya lo dejó en la barra.
   const guardados = await guardarParaCompilar();
-  if (guardados < 0) return null;
+  // C1: un build que no llega a empezar no puede dejar el `0` del anterior en la barra
+  if (guardados < 0) { noCompile("no se pudieron guardar los cambios"); return null; }
   if (guardados > 0) CONSOLA.escribir("guardados " + guardados + " fichero(s) con cambios antes de compilar\n");
   await hospedador.cwd(PROYECTO);
   const argv = ["build"];
@@ -2726,7 +2786,8 @@ async function compilarCon(k, tipo, opciones = {}) {
     "--android-jar", RUTA_JAR, "--sdk-version", version, "--codename", codename,
     "--keystore", k.ruta, "--storepass", k.pass, "--keyalias", k.alias,
     "--v4=" + (v4 ? "true" : "false"));
-  const r = await correr(argv);
+  // `build: tipo` deja a Ctrl+Enter repetir por el camino real (C3) sin guardar la contraseña (C4)
+  const r = await correr(argv, { build: tipo });
   // la contraseña de release no se queda escrita aunque el build falle
   if (tipo !== "debug") {
     const campoPass = document.getElementById(KEYSTORES.compilar.pass);
@@ -2785,29 +2846,31 @@ async function previsualizarLoCompilado() {
 }
 
 async function compilarDebug() {
-  if (!(await asegurarJarDelProyecto())) return;
+  // C1: jar o clave que faltan son «no compilé», no el código del build anterior
+  if (!(await asegurarJarDelProyecto())) { noCompile("falta el android.jar"); return null; }
   const k = await asegurarDebugKeystore();
-  if (!k) return;
+  if (!k) { noCompile("no hay clave de depuración"); return null; }
   nota("compilando debug con la clave de esta pestaña (no hace falta keystore)");
   return compilarCon(k, "debug");
 }
 
 async function compilarDelTodo() {
-  if (!(await asegurarJarDelProyecto())) return;
+  if (!(await asegurarJarDelProyecto())) { noCompile("falta el android.jar"); return null; }
   const detalle = document.getElementById("detalle-release");
   if (detalle) detalle.open = true;
   const k = await prepararKeystore(KEYSTORES.compilar);
-  if (!k) return;
+  if (!k) { noCompile("no hay keystore de release con el que firmar"); return null; }
   return compilarCon(k, "release");
 }
 
 // Verificar lo que se compiló aquí, con el lector de firmas del propio binario: la vuelta al apk se
 // hace sobre el fs de la pestaña, sin apksigner y sin red. Si el verificador dice mal, su motivo es la
-// única frase que le interesa a quien espera una apk utilizable.
+// única frase que le interesa a quien espera una apk utilizable. Es un paso interno: no pisa
+// `#ultimo-codigo` (C2) ni lo que repite Ctrl+Enter.
 async function verificarLoCompilado() {
   const aviso = document.getElementById("estado-verificacion");
   await hospedador.cwd(PROYECTO);
-  const r = await correr(["verify", "build/app.apk"]);
+  const r = await correr(["verify", "build/app.apk"], { recordar: false });
   const lineas = String(r.consola || "")
     .replace(/\u001b\[[0-9]*m/g, "")
     .split("\n")
@@ -3220,6 +3283,7 @@ export {
   consultarJarDelSdk, traerJarDelSdk, asegurarJarDelProyecto,
   conBloqueo, publicar, recibirRemoto, decirEstadoClave,
   actualizarEstadoClave, abrirDialogoClave, generarClaveRelease, redactarArgv,
+  mensajeNoCompile,
   exportarProyecto, importarProyecto, descargarBytes,
   leerAjustes, guardarAjustes, irALinea, saltarALinea, detener, enlazarSalidas,
   decirEstadoDepuracion, abrirBusqueda, cerrarBusqueda, buscarSiguiente,
