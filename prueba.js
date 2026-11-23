@@ -463,6 +463,36 @@ if (esLayout("/proyecto/res/values/strings.xml") || esLayout(null) || esLayout(3
   mal("esRutaDeLayout acepta algo que no es un layout");
 }
 
+// Un apk soltado sobre el emulador: el tipo MIME no basta (en Linux suele llegar vacío), la
+// extensión sí; y la puerta del zip rechaza con nombre lo que no es un apk antes de escribir en
+// OPFS. Un zip válido pasa a `apkc preview`, que es quien dice el motivo exacto si le falta algo.
+if (!previaPanel.esArchivoApk({ name: "app.apk", type: "" })) {
+  mal("esArchivoApk no reconoce un .apk por la extensión");
+}
+if (!previaPanel.esArchivoApk({ name: "sin-extension", type: "application/vnd.android.package-archive" })) {
+  mal("esArchivoApk no reconoce el tipo MIME del paquete de Android");
+}
+if (previaPanel.esArchivoApk({ name: "foto.png", type: "image/png" }) || previaPanel.esArchivoApk(null)) {
+  mal("esArchivoApk acepta algo que no es un apk");
+}
+const apkValido = new Uint8Array([0x50, 0x4b, 0x03, 0x04, 0x14, 0x00, 0x00, 0x00]);
+if (previaPanel.motivoApkInvalido(apkValido) !== "") {
+  mal("motivoApkInvalido rechaza una cabecera de zip válida");
+}
+if (!previaPanel.motivoApkInvalido(new Uint8Array()).includes("vacío")) {
+  mal("motivoApkInvalido no nombra un apk vacío");
+}
+if (!previaPanel.motivoApkInvalido(new Uint8Array([0x25, 0x50, 0x44, 0x46])).includes("no es un zip")) {
+  mal("motivoApkInvalido no nombra un fichero que no es zip");
+}
+const rechazoApk = previaPanel.mensajeApkRechazado("roto.apk", new Uint8Array([0x25, 0x50, 0x44, 0x46]));
+if (!rechazoApk.startsWith("no se cargó roto.apk: ") || !rechazoApk.includes("no es un zip")) {
+  mal("mensajeApkRechazado no nombra el fichero y el motivo: " + rechazoApk);
+}
+if (previaPanel.mensajeApkRechazado("app.apk", apkValido) !== "") {
+  mal("mensajeApkRechazado rechaza un apk con cabecera válida");
+}
+
 const candidatos = previaPanel.candidatosDeLayout;
 const soloAbierta = candidatos({ abierta: "/proyecto/res/layout/x.xml", proyecto: "/proyecto" });
 if (soloAbierta.length !== 1 || soloAbierta[0] !== "/proyecto/res/layout/x.xml") {

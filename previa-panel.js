@@ -454,6 +454,39 @@ const SECCION_POR_DEFECTO = "pulsos";
 
 // La pieza de interfaz. Se construye sin tocar el DOM y solo se engancha en `iniciar()`, para que
 // importar este módulo desde la prueba de node no necesite navegador.
+// El apk que se suelta sobre el canvas no entra en el proyecto: se guarda en una zona propia de
+// OPFS y `apkc preview` lo lee desde ahí. Así un arrastre no pisa `build/app.apk`, ni `res/`, ni
+// el estado de la última APK, y el siguiente build vuelve a su sitio sin limpiar nada.
+const RUTA_APK_SOLTADA = "/previa-soltada/apk-soltado.apk";
+
+// esArchivoApk decide si un fichero soltado se trata como apk. No se fía solo del tipo MIME: en
+// Linux un `.apk` suele llegar como `application/octet-stream` o vacío.
+export function esArchivoApk(archivo) {
+  if (!archivo) return false;
+  if (String(archivo.type || "").toLowerCase() === "application/vnd.android.package-archive") return true;
+  return /\.apk$/i.test(String(archivo.name || ""));
+}
+
+// motivoApkInvalido es la puerta previa a `apkc preview`: un fichero vacío o que no empiece por la
+// cabecera local de un zip no es un apk y se rechaza con su motivo, sin escribir nada en OPFS. Un
+// zip sin manifiesto o sin layout lo rechaza después el propio `preview`, que nombra lo que falta.
+export function motivoApkInvalido(bytes) {
+  if (!bytes || !bytes.length) return "el apk está vacío";
+  if (bytes.length < 4 || bytes[0] !== 0x50 || bytes[1] !== 0x4b ||
+    bytes[2] !== 0x03 || bytes[3] !== 0x04) {
+    return "no es un zip: un apk empieza por la cabecera PK\\x03\\x04";
+  }
+  return "";
+}
+
+// mensajeApkRechazado une el nombre que el usuario soltó con el motivo, que es lo que se enseña en
+// la línea del emulador. Vacío significa «la puerta pasa»; el contenido del apk lo juzga `preview`.
+export function mensajeApkRechazado(nombre, bytes) {
+  const motivo = motivoApkInvalido(bytes);
+  if (!motivo) return "";
+  return "no se cargó " + String(nombre || "el apk") + ": " + motivo;
+}
+
 export function crearPreviaPanel({ hospedador, proyecto, estadoPestana, editor, conBloqueo } = {}) {
   const carpeta = typeof proyecto === "string" && proyecto ? proyecto : "/proyecto";
   // El bloqueo entre ventanas lo pone `pestana.js`; sin él (la prueba de node) la tarea corre
@@ -561,6 +594,9 @@ export function crearPreviaPanel({ hospedador, proyecto, estadoPestana, editor, 
   // el apk que respalda el modelo en pantalla: el del build o la copia estable. Los clics repiten
   // `apkc preview` sobre el mismo fichero, así no dependen de que `build/app.apk` siga ahí.
   let apkActual = "build/app.apk";
+  // el apk que llegó por arrastre y respalda el modelo en pantalla; se conserva para que los clics
+  // sigan pidiendo `apkc preview` sobre el mismo fichero hasta que un build o otra APK lo sustituya
+  let rutaApkSoltada = RUTA_APK_SOLTADA;
   // distingue el modelo que llega de la última apk del que llega de un build, para no perder la
   // fuente al repintar desde el evento de `vista-previa.js`
   let origenPrevia = "build";
@@ -1447,6 +1483,71 @@ export function crearPreviaPanel({ hospedador, proyecto, estadoPestana, editor, 
     }
   }
 
+  // Abre un `.apk` que el usuario soltó sobre el canvas del emulador. El fichero se guarda en la
+  // zona aislada de OPFS y se le pasa a `apkc preview` tal cual: el mismo comando que lee
+  // `build/app.apk`, sin descomprimir a mano ni ejecutar nada del sistema. Un apk válido pero de una
+  // app que construye sus vistas en código (sin `res/layout`) se publica como frontera con el
+  // motivo que da `preview`; no se finge una pantalla vacía.
+  async function abrirApkSoltada(archivo) {
+    if (!archivo) return null;
+    let bytes;
+    try {
+      bytes = new Uint8Array(await archivo.arrayBuffer());
+    } catch (e) {
+      mensajeEmulador("no se pudo leer " + archivo.name + ": " + (e && e.message ? e.message : e));
+      return null;
+    }
+    const rechazo = mensajeApkRechazado(archivo.name, bytes);
+    if (rechazo) {
+      mensajeEmulador(rechazo);
+      return null;
+    }
+    let escrito;
+    try {
+      escrito = await hospedador.escribir(RUTA_APK_SOLTADA, bytes);
+    } catch (e) {
+      mensajeEmulador("no se pudo guardar " + archivo.name + " en la zona de prueba: " +
+        (e && e.message ? e.message : e));
+      return null;
+    }
+    if (escrito && escrito.tipo === "error") {
+      mensajeEmulador("no se pudo guardar " + archivo.name + ": " + escrito.error);
+      return null;
+    }
+    // cargar un apk es como encender el emulador con otra fuente: se apaga el negro, se empieza una
+    // ejecución nueva y los clics anteriores dejan de valer
+    apagado = false;
+    guardarClave(CLAVE_ENERGIA, "encendido");
+    actualizarEnergiaBotones();
+    pulsos = [];
+    modeloDeClics = null;
+    rutaApkSoltada = RUTA_APK_SOLTADA;
+    for (const superficie of SUPERFICIES) limpiarCanvas(el(superficie.canvasRender));
+    mensajeEmulador("Cargando " + archivo.name + "…");
+    origenPrevia = "soltada";
+    try {
+      await hospedador.cwd(carpeta);
+      const r = await hospedador.ejecutar(["preview", RUTA_APK_SOLTADA]);
+      const modelo = modeloDeSalida(r && r.consola);
+      if (!modelo) {
+        const lineas = String((r && (r.error || r.consola)) || "").trim().split("\n").filter(Boolean);
+        const porque = lineas.length ? lineas[lineas.length - 1].trim() : "no devolvió un modelo legible";
+        mensajeEmulador("no se pudo abrir " + archivo.name + ": " + porque);
+        return null;
+      }
+      const pintado = pintarVistaPrevia(modelo);
+      const ejecucion = modelo.ejecucion;
+      const frontera = ejecucion && ejecucion.error ? " · código no ejecutado: " + ejecucion.error : "";
+      mensajeVistaPreviaRender("APK soltado " + archivo.name + ": " + textoDelModelo(modelo) + frontera);
+      return pintado;
+    } catch (e) {
+      mensajeEmulador("no se pudo abrir " + archivo.name + ": " + (e && e.message ? e.message : e));
+      return null;
+    } finally {
+      origenPrevia = "build";
+    }
+  }
+
   // Enciende desde la copia estable. Si no hay copia no compila por su cuenta: lo dice y se queda
   // apagado, que es más honesto que inventar una pantalla.
   async function encenderDesdeUltima({ apagarSiNoHay = false } = {}) {
@@ -2185,7 +2286,8 @@ export function crearPreviaPanel({ hospedador, proyecto, estadoPestana, editor, 
       if (reiniciaPulsos({ pulsando, modelo: detalle.modelo, modeloDeClics })) {
         pulsos = [];
         modeloDeClics = null;
-        apkActual = origenPrevia === "ultima" ? RUTA_ULTIMA_APK : "build/app.apk";
+        apkActual = origenPrevia === "ultima" ? RUTA_ULTIMA_APK
+          : origenPrevia === "soltada" ? rutaApkSoltada : "build/app.apk";
       }
       // el modelo cambió: el canvas y los dos paneles se pintan ya. Un rAF dejaría la consola con
       // las capturas del build anterior justo cuando el preview falla, que es cuando más importa.
@@ -3384,10 +3486,12 @@ export function crearPreviaPanel({ hospedador, proyecto, estadoPestana, editor, 
     });
     document.addEventListener("pointerup", soltarCanvas);
     document.addEventListener("pointercancel", () => { arrastreNodo = null; });
-    // Soltar una imagen del escritorio sobre el canvas del nodo seleccionado. Solo se acepta si la
-    // selección es un ImageView/ImageButton: el fichero va al OPFS y el XML recibe `@drawable/…`.
+    // Soltar un fichero sobre el canvas: un `.apk` abre esa app en el emulador; una imagen sigue
+    // yendo al ImageView seleccionado como antes. Durante `dragover` el navegador no deja leer el
+    // nombre del fichero (solo los tipos), así que aquí se acepta cualquier `Files` y el `drop`
+    // decide: si es una imagen y no hay ImageView seleccionado, se ignora como antes.
+    const archivoDeArrastre = (e) => e.dataTransfer && e.dataTransfer.files ? e.dataTransfer.files[0] : null;
     canvas.addEventListener("dragover", (e) => {
-      if (!editando || !nodoImagen(seleccion ? nodoPorRuta(modeloVivo && modeloVivo.raiz, seleccion) : null)) return;
       if (!e.dataTransfer) return;
       const tipos = Array.from(e.dataTransfer.types || []);
       if (tipos.indexOf("Files") < 0) return;
@@ -3398,11 +3502,18 @@ export function crearPreviaPanel({ hospedador, proyecto, estadoPestana, editor, 
     canvas.addEventListener("dragleave", () => canvas.classList.remove("previa-canvas-recibiendo"));
     canvas.addEventListener("drop", (e) => {
       canvas.classList.remove("previa-canvas-recibiendo");
+      const archivo = archivoDeArrastre(e);
+      if (!archivo) return;
+      if (esArchivoApk(archivo)) {
+        e.preventDefault();
+        abrirApkSoltada(archivo).catch((err) => {
+          mensajeEmulador("no se pudo cargar el apk soltado: " + (err && err.message ? err.message : err));
+        });
+        return;
+      }
       if (!editando) return;
       const nodo = seleccion && modeloVivo ? nodoPorRuta(modeloVivo.raiz, seleccion) : null;
       if (!nodoImagen(nodo)) return;
-      const archivo = e.dataTransfer && e.dataTransfer.files ? e.dataTransfer.files[0] : null;
-      if (!archivo) return;
       e.preventDefault();
       const campo = document.querySelector(
         '#previa-propiedades-campos [data-propiedad="android:src"]');
