@@ -178,6 +178,25 @@ export function infoTipo(tipo) {
   };
 }
 
+// El tamaño por defecto con el que entra cada tipo en el editor (dp). Es el mismo que pinta el
+// indicador de destino: contenedores 160×96; vistas, el intrínseco que mide `vista-xml.js` con su
+// texto por defecto (7 px por carácter, 16/32 de padding y 24/48 de alto: las mismas constantes,
+// `prueba.js` comprueba que el modelo del nodo insertado coincide con esto).
+export function tamanoDeTipo(tipo) {
+  const t = TIPOS[tipo];
+  if (!t) return null;
+  if (t.contenedor) return { ancho: 160, alto: 96 };
+  const texto = t.texto || "";
+  if (/^(Button|ImageButton)$/.test(tipo)) {
+    return { ancho: Math.max(48, Math.ceil(texto.length * 7) + 32), alto: 48 };
+  }
+  if (/^(TextView|EditText)$/.test(tipo)) {
+    return { ancho: Math.max(24, Math.ceil(texto.length * 7) + 16), alto: 24 };
+  }
+  if (/^Image/.test(tipo)) return { ancho: 48, alto: 48 };
+  return { ancho: 48, alto: 24 };
+}
+
 export function tiposRaizDisponibles() {
   return [
     { tipo: "LinearLayout", disponible: true, motivo: "" },
@@ -235,14 +254,15 @@ function conSangria(texto, sangria) {
 
 // El XML del elemento nuevo, con las medidas que el render en vivo dibuja: `wrap_content` y un
 // texto para las vistas de texto. Los espaciadores llevan una medida fija para que se vean. Los
-// contenedores llevan dentro un `TextView` para que se puedan arrastrar en cuanto se añaden (un
-// contenedor vacío no da nada que mover); un `TableLayout` lo lleva dentro de un `TableRow`, que es
-// lo que Android espera de una tabla.
-function elementoDe(tipo, id, hijoId, extras) {
+// contenedores entran VACÍOS y con una caja fija de 160×96 dp: el hijo «Texto» que metían antes se
+// veía primero y parecía que se había insertado un TextView. La caja se cambia en la ficha.
+function elementoDe(tipo, id, extras) {
   const t = TIPOS[tipo];
-  const medida = tipo === "View" || tipo === "Space"
-    ? ["    android:layout_width=\"48dp\"", "    android:layout_height=\"24dp\""]
-    : ["    android:layout_width=\"wrap_content\"", "    android:layout_height=\"wrap_content\""];
+  const medida = t.contenedor
+    ? ["    android:layout_width=\"160dp\"", "    android:layout_height=\"96dp\""]
+    : (tipo === "View" || tipo === "Space"
+      ? ["    android:layout_width=\"48dp\"", "    android:layout_height=\"24dp\""]
+      : ["    android:layout_width=\"wrap_content\"", "    android:layout_height=\"wrap_content\""]);
   const comun = ["    android:id=\"@+id/" + id + "\"", ...medida, ...(extras || [])];
   if (!t.contenedor) {
     const lineas = ["<" + tipo, ...comun];
@@ -254,17 +274,6 @@ function elementoDe(tipo, id, hijoId, extras) {
   const lineas = ["<" + tipo, ...comun];
   if (tipo === "LinearLayout") lineas.push("    android:orientation=\"vertical\"");
   lineas[lineas.length - 1] += ">";
-  const texto = [
-    "<TextView",
-    "    android:id=\"@+id/" + hijoId + "\"",
-    "    android:layout_width=\"wrap_content\"",
-    "    android:layout_height=\"wrap_content\"",
-    "    android:text=\"Texto\"/>",
-  ].join("\n");
-  const hijo = tipo === "TableLayout"
-    ? ["<TableRow", ">", conSangria(texto, "    "), "</TableRow>"].join("\n")
-    : texto;
-  lineas.push(conSangria(hijo, "    "));
   lineas.push("</" + tipo + ">");
   return lineas.join("\n");
 }
@@ -345,7 +354,6 @@ export function insertarElemento(xml, opciones) {
     return { ok: false, error: tipoPadre + " no es un contenedor: no admite hijos" };
   }
   const id = idLibre(fuente, TIPOS[tipo].id);
-  const hijoId = TIPOS[tipo].contenedor ? idLibre(fuente, "texto") : "";
   const extras = [];
   const margen = opciones && opciones.margen;
   if (margen) {
@@ -354,7 +362,7 @@ export function insertarElemento(xml, opciones) {
     if (izquierda > 0) extras.push("    android:layout_marginLeft=\"" + izquierda + "dp\"");
     if (arriba > 0) extras.push("    android:layout_marginTop=\"" + arriba + "dp\"");
   }
-  const elemento = elementoDe(tipo, id, hijoId, extras);
+  const elemento = elementoDe(tipo, id, extras);
   const hijos = hijosElemento(padre);
   const pedido = Number(opciones && opciones.indice);
   const indice = Math.max(0, Math.min(hijos.length, Number.isFinite(pedido) ? Math.round(pedido) : hijos.length));
