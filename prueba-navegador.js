@@ -397,6 +397,11 @@ const conductor = `(async () => {
   r.cursorOeste = getComputedStyle(document.getElementById("tirador-previa-noroeste")).cursor;
   r.cursorSur = getComputedStyle(document.getElementById("tirador-previa-sur")).cursor;
   r.canvasDeLaPrevia = document.querySelectorAll("canvas.previa-canvas").length;
+  // El detalle del modelo es una línea de solo lectura: no puede capturar el puntero, o la vista
+  // del canvas que caiga bajo ella (el botón «id/pulsar» del panel dividido) deja de responder al
+  // clic. La caja del inspector y su cabecera ya se declaran transparentes por el mismo motivo.
+  r.punteroDetalleModelo = getComputedStyle(document.getElementById("previa-detalle-modelo")).pointerEvents;
+  r.punteroInspector = getComputedStyle(document.getElementById("previa-inspector")).pointerEvents;
 
   // sin cabeceras del servidor, el SW debió aislar la página y el create tiene que funcionar. Con
   // APKC_WASM se crea la plantilla «Menú de opciones» para compilarla y probar su Toast sobre el
@@ -621,6 +626,10 @@ function comprueba(cond, msg) { if (!cond) { fallos++; console.log("  FALLO:", m
     comprueba(v.canvasDeLaPrevia === 4,
       "faltan canvas (Pantalla en vivo y emulador, y la vista dividida en vivo y emulador: deben ser cuatro): " +
       v.canvasDeLaPrevia);
+    comprueba(v.punteroInspector === "none" && v.punteroDetalleModelo === "none",
+      "el detalle del modelo no deja pasar el clic al canvas que hay debajo (debe ser transparente " +
+      "al puntero, como la caja del inspector): " +
+      JSON.stringify({ inspector: v.punteroInspector, detalle: v.punteroDetalleModelo }));
     comprueba(v.tiradoresPrevia === 8 && v.modosPrevia.join(",") === "Vista previa,Emulador" &&
       v.cursorOeste === "nwse-resize" && v.cursorSur === "row-resize",
       "la vista dividida no tiene sus ocho tiradores, sus nombres o sus cursores: " +

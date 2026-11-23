@@ -686,7 +686,10 @@ kbd {
      cabecera llega al canvas que hay debajo (el botón del contador queda en esa franja) */
   pointer-events: none;
 }
-.previa-inspector > * { pointer-events: auto; }
+/* El detalle del modelo es solo lectura: si capturara el puntero, cualquier vista del canvas que
+   caiga bajo esa línea —el botón de `id/pulsar`, medido en la franja del inspector— dejaría de
+   responder al clic. La cabecera y el contenedor ya se declaran transparentes por el mismo motivo. */
+.previa-inspector > :not(.previa-detalle-modelo) { pointer-events: auto; }
 .previa-inspector[hidden] { display: none; }
 .previa-inspector[data-modo="libre"],
 .previa-inspector[data-modo="acoplado"],
