@@ -515,7 +515,7 @@ kbd {
 .marco-vista-lado[data-modo="acoplado"],
 .marco-vista-lado[data-modo="minimizado"] {
   position: fixed;
-  z-index: 60;
+  z-index: 80;
   top: auto;
   right: auto;
   bottom: auto;
