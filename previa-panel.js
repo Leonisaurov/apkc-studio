@@ -503,6 +503,15 @@ const SECCION_POR_DEFECTO = "pulsos";
 // el estado de la última APK, y el siguiente build vuelve a su sitio sin limpiar nada.
 const RUTA_APK_SOLTADA = "/previa-soltada/apk-soltado.apk";
 
+// Las tres superficies que aceptan un fichero soltado: el canvas editable (junto al código), el del
+// emulador en el panel de la vista dividida y el de la vista Pantalla. Un `.apk` se abre igual desde
+// cualquiera —misma ruta aislada, mismo mensaje, mismo modelo—; la rama de la imagen sigue siendo
+// solo del canvas editable y del modo editar.
+const CANVAS_SOLTABLES = ["previa-vivo-canvas", "previa-lateral-canvas", "vista-previa"];
+// El aviso de que se puede soltar un apk: va en el `title` del canvas, que no ocupa sitio y sirve
+// también de tooltip. `detalleEmulador` lo conserva al reescribir el título con el modelo.
+const PISTA_SOLTAR_APK = "Suelta un .apk aquí para abrirlo en el emulador";
+
 // esArchivoApk decide si un fichero soltado se trata como apk. No se fía solo del tipo MIME: en
 // Linux un `.apk` suele llegar como `application/octet-stream` o vacío.
 export function esArchivoApk(archivo) {
@@ -1633,8 +1642,16 @@ export function crearPreviaPanel({ hospedador, proyecto, estadoPestana, editor, 
     }
     for (const id of ["previa-lateral-canvas", "vista-previa"]) {
       const canvas = el(id);
-      if (canvas) canvas.title = limpio;
+      if (canvas) ponerPistaSoltar(canvas, limpio);
     }
+  }
+
+  // El título del canvas lleva el detalle del modelo y, detrás, la pista de que ahí se puede soltar
+  // un apk: se pone y se conserva desde un solo sitio para que no se pisen.
+  function ponerPistaSoltar(canvas, detalle) {
+    if (!canvas) return;
+    const limpio = String(detalle || "").replace(" · " + PISTA_SOLTAR_APK, "").trim();
+    canvas.title = limpio ? limpio + " · " + PISTA_SOLTAR_APK : PISTA_SOLTAR_APK;
   }
 
   // --- energía, tamaño y última apk ---------------------------------------------------------
@@ -3708,10 +3725,16 @@ export function crearPreviaPanel({ hospedador, proyecto, estadoPestana, editor, 
     });
     document.addEventListener("pointerup", soltarCanvas);
     document.addEventListener("pointercancel", () => { arrastreNodo = null; });
-    // Soltar un fichero sobre el canvas: un `.apk` abre esa app en el emulador; una imagen sigue
-    // yendo al ImageView seleccionado como antes. Durante `dragover` el navegador no deja leer el
-    // nombre del fichero (solo los tipos), así que aquí se acepta cualquier `Files` y el `drop`
-    // decide: si es una imagen y no hay ImageView seleccionado, se ignora como antes.
+  }
+
+  // Soltar un fichero sobre una superficie del emulador. Un `.apk` abre esa app en el emulador desde
+  // cualquiera de los tres canvas, por la misma ruta aislada y con el mismo mensaje. Durante
+  // `dragover` el navegador no deja leer el nombre del fichero (solo los tipos), así que aquí se
+  // acepta cualquier `Files` y el `drop` decide: una imagen solo va al ImageView seleccionado del
+  // canvas editable, así que en las demás superficies se ignora.
+  function conectarSoltarCanvas(canvas, { editable = false } = {}) {
+    if (!canvas) return;
+    ponerPistaSoltar(canvas, canvas.title);
     const archivoDeArrastre = (e) => e.dataTransfer && e.dataTransfer.files ? e.dataTransfer.files[0] : null;
     canvas.addEventListener("dragover", (e) => {
       if (!e.dataTransfer) return;
@@ -3733,7 +3756,7 @@ export function crearPreviaPanel({ hospedador, proyecto, estadoPestana, editor, 
         });
         return;
       }
-      if (!editando) return;
+      if (!editable || !editando) return;
       const nodo = seleccion && modeloVivo ? nodoPorRuta(modeloVivo.raiz, seleccion) : null;
       if (!nodoImagen(nodo)) return;
       e.preventDefault();
@@ -3741,6 +3764,22 @@ export function crearPreviaPanel({ hospedador, proyecto, estadoPestana, editor, 
         '#previa-propiedades-campos [data-propiedad="android:src"]');
       importarImagen(archivo, campo).catch(() => {});
     });
+  }
+
+  // Engancha el soltar en las tres superficies una sola vez: si un id se repite o `iniciar()` se
+  // vuelve a llamar, el mismo canvas no acumula manejadores duplicados.
+  const soltablesConectados = new Set();
+  const canvasesConSoltar = new WeakSet();
+  function conectarSoltarApk() {
+    if (!conDocumento()) return;
+    for (const id of CANVAS_SOLTABLES) {
+      if (soltablesConectados.has(id)) continue;
+      const canvas = document.getElementById(id);
+      if (!canvas || canvasesConSoltar.has(canvas)) continue;
+      soltablesConectados.add(id);
+      canvasesConSoltar.add(canvas);
+      conectarSoltarCanvas(canvas, { editable: id === "previa-vivo-canvas" });
+    }
   }
 
   // Supr borra y Esc suelta, solo con el modo editar y una selección. Esc también cierra la ficha
@@ -3896,6 +3935,7 @@ export function crearPreviaPanel({ hospedador, proyecto, estadoPestana, editor, 
       conectarAtajosDiseno();
     }
     conectarCanvasEditable();
+    conectarSoltarApk();
     conectarTecladoEditable();
   }
 

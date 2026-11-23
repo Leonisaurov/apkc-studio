@@ -934,8 +934,8 @@
             <p class="sub">La misma pantalla que la vista dividida del editor, a página completa:
               <strong>Vista previa</strong> dibuja el <code>res/layout</code> del editor sin compilar y
               <strong>Emulador</strong> pinta el modelo de <code>apkc preview</code> con lo que ejecutó
-              la app. Es una aproximación declarada y de solo lectura: no se arrastra ni se edita el
-              layout.</p>
+              la app. Es una aproximación declarada y de solo lectura: el layout no se arrastra ni se
+              edita, aunque sobre el emulador se puede soltar un <code>.apk</code> para abrirlo.</p>
           </div>
           <div class="previa-modos previa-modos-vista" role="tablist" aria-label="Contenido de la pantalla">
             <button id="vista-modo-previa" class="previa-modo activo" type="button" role="tab"
@@ -1000,6 +1000,8 @@
                 <p id="vista-previa-estado" class="previa-estado previa-estado-oculto" role="status" aria-live="polite">Emulador: compila
                   el proyecto (Editor → Compilar → Compilar debug) para ver aquí la pantalla que ejecuta
                   la app.</p>
+                <p class="nota">Suelta un <code>.apk</code> sobre esta pantalla para abrirlo en el
+                  emulador, sin compilar.</p>
                 <p class="nota">Se actualiza al compilar. Fuentes, imágenes, márgenes finos y estilos
                   fieles quedan fuera de esta fase: el modelo lo dice con <code>"aproximado": true</code>.</p>
                 <button id="vista-inspector-abrir" class="previa-inspector-abrir" type="button" hidden

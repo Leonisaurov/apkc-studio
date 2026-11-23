@@ -58,7 +58,12 @@ URL_PAGINA = "http://127.0.0.1:" + HTTP_PORT + "/index.html";
 // Termux, nunca /tmp.
 const TMP = process.env.PREFIX ? process.env.PREFIX + "/tmp" : (process.env.TMPDIR || "/tmp");
 const PERFIL = path.join(TMP, "studio-chrome-perfil-" + process.pid);
-fs.rmSync(PERFIL, { recursive: true, force: true });
+// brave deja procesos hijos vivos un instante después del SIGKILL y siguen escribiendo en el
+// perfil: sin reintentos, el borrado lanza ENOTEMPTY y convierte un veredicto verde en un fallo
+// del propio guion. No oculta nada del veredicto, que ya está calculado cuando se llama.
+const borrarPerfil = () => fs.rmSync(PERFIL,
+  { recursive: true, force: true, maxRetries: 10, retryDelay: 200 });
+borrarPerfil();
 
 const navegador = spawn(CHROME, [
   "--headless=new", "--no-sandbox", "--disable-setuid-sandbox", "--disable-gpu",
@@ -233,6 +238,50 @@ const conductor = `(async () => {
     oculto: listaMenu ? listaMenu.hidden : null,
     estado: document.getElementById("previa-render-estado").textContent,
   };
+  // soltar un apk en las tres superficies del emulador: el enganche tiene que estar en los tres
+  // canvas, y el apk soltado en Pantalla tiene que llegar a abrirApkSoltada (se nota en la línea
+  // de estado, que nombra el fichero). Un fichero roto se rechaza con su nombre y su motivo, y una
+  // imagen no activa en Pantalla la rama del canvas editable.
+  const soltar = {};
+  const conFichero = (canvas, archivo) => {
+    const dt = new DataTransfer();
+    dt.items.add(archivo);
+    const sobre = new DragEvent("dragover", { bubbles: true, cancelable: true, dataTransfer: dt });
+    canvas.dispatchEvent(sobre);
+    const marca = canvas.classList.contains("previa-canvas-recibiendo");
+    const salir = new Event("dragleave", { bubbles: true });
+    canvas.dispatchEvent(salir);
+    return { sobre: sobre.defaultPrevented, marca,
+      marcaTrasSalir: canvas.classList.contains("previa-canvas-recibiendo") };
+  };
+  const apk = (nombre) => new File([new Uint8Array([0x50, 0x4b, 0x03, 0x04])], nombre,
+    { type: "application/vnd.android.package-archive" });
+  const soltarEn = (canvas, archivo) => {
+    const dt = new DataTransfer();
+    dt.items.add(archivo);
+    const drop = new DragEvent("drop", { bubbles: true, cancelable: true, dataTransfer: dt,
+      clientX: 12, clientY: 12 });
+    canvas.dispatchEvent(drop);
+    return drop.defaultPrevented;
+  };
+  for (const id of ["previa-vivo-canvas", "previa-lateral-canvas", "vista-previa"]) {
+    const canvas = document.getElementById(id);
+    soltar[id] = canvas ? conFichero(canvas, apk(id + ".apk")) : null;
+    soltar[id + "-pista"] = canvas ? String(canvas.title) : "";
+  }
+  const vista = document.getElementById("vista-previa");
+  // primero el fichero roto: se rechaza antes de tocar OPFS, así el mensaje no lo pisa después
+  // ningún flujo asíncrono de preview
+  soltar.rotoSoltado = soltarEn(vista, new File([new Uint8Array([1, 2, 3, 4])], "roto.apk",
+    { type: "application/octet-stream" }));
+  await new Promise((ok) => setTimeout(ok, 200));
+  soltar.roto = document.getElementById("vista-previa-estado").textContent;
+  soltar.apk = { soltado: soltarEn(vista, apk("vista-previa.apk")) };
+  await new Promise((ok) => setTimeout(ok, 600));
+  soltar.estadoVista = document.getElementById("vista-previa-estado").textContent;
+  soltar.imagen = soltarEn(vista, new File([new Uint8Array([0x89, 0x50, 0x4e, 0x47])], "foto.png",
+    { type: "image/png" }));
+  r.soltar = soltar;
   r.avisoEstrecho = getComputedStyle(document.getElementById("previa-aviso-estrecho")).display;
   r.cursorOeste = getComputedStyle(document.getElementById("tirador-previa-noroeste")).cursor;
   r.cursorSur = getComputedStyle(document.getElementById("tirador-previa-sur")).cursor;
@@ -393,6 +442,26 @@ function comprueba(cond, msg) { if (!cond) { fallos++; console.log("  FALLO:", m
       /[Cc]ompila/.test(String(v.menu.estado)),
       "el menú de opciones del emulador no está montado o no pide compilar sin ejecución: " +
       JSON.stringify(v.menu));
+    // soltar un apk: las tres superficies lo aceptan, el de Pantalla llega a abrirApkSoltada y el
+    // fichero roto se rechaza con nombre y motivo sin tocar OPFS
+    const sl = v.soltar || {};
+    for (const id of ["previa-vivo-canvas", "previa-lateral-canvas", "vista-previa"]) {
+      const uno = sl[id];
+      comprueba(uno && uno.sobre === true && uno.marca === true && uno.marcaTrasSalir === false,
+        "soltar un fichero no se engancha en " + id + " (dragover sin preventDefault o sin marca): " +
+        JSON.stringify(uno));
+      comprueba(/Suelta un \.apk/.test(String(sl[id + "-pista"])),
+        "el canvas " + id + " no avisa de que se puede soltar un apk: " + String(sl[id + "-pista"]));
+    }
+    comprueba(sl.apk && sl.apk.soltado === true && /vista-previa\.apk/.test(String(sl.estadoVista)),
+      "un apk soltado en Pantalla no llega a abrirApkSoltada: " +
+      JSON.stringify({ soltado: sl.apk, estado: sl.estadoVista }));
+    comprueba(sl.rotoSoltado === true && /no se carg[oó] roto\.apk/.test(String(sl.roto)) &&
+      /no es un zip/.test(String(sl.roto)),
+      "un fichero roto no se rechaza con su nombre y su motivo: " + String(sl.roto));
+    comprueba(sl.imagen === false,
+      "la rama de la imagen se activó en Pantalla, donde no hay ImageView seleccionado");
+    console.log("  soltar:", JSON.stringify(sl).slice(0, 500));
     comprueba(v.icono, "falta el campo del icono");
     // Sin APKC_WASM esta prueba es solo de DOM: basta con que el SW haya aislado la página y el
     // create no culpe a OPFS. Con el binario presente (es lo que hace e2e.sh) tiene que crear.
@@ -427,13 +496,13 @@ function comprueba(cond, msg) { if (!cond) { fallos++; console.log("  FALLO:", m
   ws.close();
   navegador.kill("SIGKILL");
   servidor.close();
-  fs.rmSync(PERFIL, { recursive: true, force: true });
+  borrarPerfil();
   console.log(fallos ? "navegador: " + fallos + " problemas" : "navegador: todo en orden");
   process.exit(fallos ? 1 : 0);
 })().catch((e) => {
   console.log("  FALLO: " + e.message);
   navegador.kill("SIGKILL");
   servidor.close();
-  fs.rmSync(PERFIL, { recursive: true, force: true });
+  borrarPerfil();
   process.exit(1);
 });
