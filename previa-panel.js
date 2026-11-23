@@ -61,6 +61,16 @@ const CLAVE_ENERGIA = "apkc-studio/previa-energia";
 const CLAVE_PANTALLA = "apkc-studio/previa-pantalla";
 const CLAVE_INSPECTOR_PANEL = "apkc-studio/previa-inspector";
 const CLAVE_INSPECTOR_VISTA = "apkc-studio/vista-inspector";
+// la consola de la vista Pantalla es una capa desprendida: su modo, su borde y su posición son
+// preferencias de la ventana, como el tamaño (que ya guardan CLAVE_LADO y CLAVE_LADO_ALTO)
+const CLAVE_LADO_MODO = "apkc-studio/previa-lado-modo";
+const CLAVE_LADO_BORDE = "apkc-studio/previa-lado-borde";
+const CLAVE_LADO_X = "apkc-studio/previa-lado-x";
+const CLAVE_LADO_Y = "apkc-studio/previa-lado-y";
+const MODO_LIBRE = "libre";
+const MODO_ACOPLADO = "acoplado";
+const MODO_MINIMIZADO = "minimizado";
+const BORDE_POR_DEFECTO = "derecha";
 
 const ANCHO_POR_DEFECTO = 340;
 const ANCHO_MINIMO = 240;
@@ -460,6 +470,16 @@ export function crearPreviaPanel({ hospedador, proyecto, estadoPestana, editor }
     panel: leerClave(CLAVE_INSPECTOR_PANEL, "1") !== "0",
     vista: leerClave(CLAVE_INSPECTOR_VISTA, "1") !== "0",
   };
+  // La consola de la vista Pantalla, desprendida de la página. `modo` es libre, acoplado o
+  // minimizado; `x`/`y` son la posición libre en coordenadas de la ventana; `anterior` recuerda a
+  // qué modo volver al restaurar una pastilla. El tamaño sigue en `queridaLado`/`cajaLado`.
+  const lado = {
+    modo: MODO_LIBRE,
+    borde: BORDE_POR_DEFECTO,
+    x: null,
+    y: null,
+    anterior: MODO_LIBRE,
+  };
   const completa = { panel: false, vista: false };
   let ultimaMeta = null;
   // el apk que respalda el modelo en pantalla: el del build o la copia estable. Los clics repiten
@@ -517,6 +537,21 @@ export function crearPreviaPanel({ hospedador, proyecto, estadoPestana, editor }
     try { return matchMedia(ESTRECHO).matches; } catch (e) { return false; }
   }
 
+  // Las medidas de la ventana: la consola flotante se acota a ellas, no al marco del emulador.
+  function ventana() {
+    return {
+      ancho: (typeof window !== "undefined" && window.innerWidth) || 1024,
+      alto: (typeof window !== "undefined" && window.innerHeight) || 768,
+    };
+  }
+
+  // Un valor dentro de [minimo, maximo]; si la ventana es más pequeña que el mínimo, manda el
+  // mínimo (la capa se sale por abajo antes que quedarse en cero píxeles).
+  function acotar(valor, minimo, maximo) {
+    const tope = Math.max(minimo, maximo);
+    return Math.max(minimo, Math.min(tope, valor));
+  }
+
   // --- tiradores y medidas -----------------------------------------------------------------
   function limitesPanel() {
     const cajaFila = fila();
@@ -533,17 +568,14 @@ export function crearPreviaPanel({ hospedador, proyecto, estadoPestana, editor }
   }
 
   function limitesLado() {
-    const marco = marcoLado();
-    const cuerpo = marco && marco.parentElement ? marco.parentElement : null;
-    const anchoDisponible = cuerpo ? cuerpo.clientWidth : 0;
-    const altoDisponible = cuerpo ? cuerpo.clientHeight : 0;
+    // la consola de la vista Pantalla es una capa `fixed`: su espacio es la ventana, no el marco
+    // del emulador. Así se puede mover por toda la página sin salirse de los bordes.
+    const medidas = ventana();
     return {
       anchoMin: LADO_MINIMO,
-      anchoMax: anchoDisponible > 0
-        ? Math.max(LADO_MINIMO, Math.min(LADO_MAXIMO, anchoDisponible - VISTA_MINIMO))
-        : LADO_MAXIMO,
+      anchoMax: Math.max(LADO_MINIMO, Math.min(LADO_MAXIMO, medidas.ancho - 16)),
       altoMin: LADO_ALTO_MINIMO,
-      altoMax: altoDisponible > 0 ? Math.max(LADO_ALTO_MINIMO, altoDisponible) : LADO_ALTO_MINIMO * 4,
+      altoMax: Math.max(LADO_ALTO_MINIMO, medidas.alto - 16),
     };
   }
 
@@ -614,7 +646,108 @@ export function crearPreviaPanel({ hospedador, proyecto, estadoPestana, editor }
     cajaLado.arriba = conAlto ? ajustada.arriba : 0;
     pintarMedidas(marco, cajaLado, persistir,
       { ancho: CLAVE_LADO, alto: CLAVE_LADO_ALTO, arriba: CLAVE_LADO_ARRIBA });
+    aplicarModoLado(persistir);
     actualizarAria();
+  }
+
+  // --- la consola de la vista Pantalla: libre, acoplada o minimizada ------------------------
+  // Es una capa `fixed`: no ocupa sitio en el reparto del emulador. El modo, el borde y la
+  // posición se guardan como preferencias de la ventana, igual que el tamaño.
+  function leerLadoFlotante() {
+    const modo = leerClave(CLAVE_LADO_MODO, MODO_LIBRE);
+    lado.modo = modo === MODO_ACOPLADO || modo === MODO_MINIMIZADO ? modo : MODO_LIBRE;
+    lado.borde = leerClave(CLAVE_LADO_BORDE, BORDE_POR_DEFECTO) === "izquierda" ? "izquierda" : "derecha";
+    const x = numeroOpcional(leerClave(CLAVE_LADO_X, ""), 0, 100000);
+    const y = numeroOpcional(leerClave(CLAVE_LADO_Y, ""), 0, 100000);
+    lado.x = Number.isFinite(x) ? x : null;
+    lado.y = Number.isFinite(y) ? y : null;
+    lado.anterior = lado.modo === MODO_MINIMIZADO ? MODO_LIBRE : lado.modo;
+  }
+
+  function guardarLadoFlotante() {
+    guardarClave(CLAVE_LADO_MODO, lado.modo);
+    guardarClave(CLAVE_LADO_BORDE, lado.borde);
+    if (Number.isFinite(lado.x)) guardarClave(CLAVE_LADO_X, lado.x);
+    if (Number.isFinite(lado.y)) guardarClave(CLAVE_LADO_Y, lado.y);
+  }
+
+  // El alto de la capa libre: el que eligió el usuario o uno razonable para la ventana. En modo
+  // acoplado manda la ventana (arriba y abajo a 8 px) y en la pastilla manda el contenido.
+  function altoLibreLado() {
+    if (Number.isFinite(cajaLado.alto)) return Math.round(cajaLado.alto);
+    return Math.max(LADO_ALTO_MINIMO, Math.min(560, ventana().alto - 96));
+  }
+
+  function actualizarBotonesLado() {
+    const minimizar = el("vista-lado-minimizar");
+    if (minimizar) {
+      const plegado = lado.modo === MODO_MINIMIZADO;
+      minimizar.setAttribute("aria-pressed", String(plegado));
+      const titulo = plegado
+        ? "Restaurar el registro y la consola"
+        : "Minimizar el registro y la consola";
+      minimizar.title = titulo;
+      minimizar.setAttribute("aria-label", titulo);
+    }
+    for (const [id, borde] of [
+      ["vista-lado-acoplar-izquierda", "izquierda"],
+      ["vista-lado-acoplar-derecha", "derecha"],
+    ]) {
+      const boton = el(id);
+      if (boton) {
+        boton.setAttribute("aria-pressed", String(lado.modo === MODO_ACOPLADO && lado.borde === borde));
+      }
+    }
+  }
+
+  // Coloca la capa según su modo. Todo va en línea y con `position: fixed`: cambiar de modo no
+  // toca el reparto del emulador, así que el canvas conserva sus medidas y su posición.
+  function aplicarModoLado(persistir) {
+    const marco = marcoLado();
+    if (!marco) return;
+    const medidas = ventana();
+    marco.dataset.modo = lado.modo;
+    marco.dataset.borde = lado.borde;
+    marco.classList.toggle("minimizado", lado.modo === MODO_MINIMIZADO);
+    marco.style.position = "fixed";
+    if (lado.modo === MODO_ACOPLADO) {
+      marco.style.width = Math.round(cajaLado.ancho) + "px";
+      marco.style.height = "auto";
+      marco.style.top = "8px";
+      marco.style.bottom = "8px";
+      marco.style.left = lado.borde === "izquierda" ? "8px" : "auto";
+      marco.style.right = lado.borde === "izquierda" ? "auto" : "8px";
+    } else if (lado.modo === MODO_MINIMIZADO) {
+      // la pastilla va abajo a la derecha: el título sigue a la vista y el emulador queda libre
+      marco.style.width = "auto";
+      marco.style.height = "auto";
+      marco.style.top = "auto";
+      marco.style.left = "auto";
+      marco.style.bottom = "8px";
+      marco.style.right = "8px";
+    } else {
+      const ancho = Math.round(cajaLado.ancho) || LADO_POR_DEFECTO;
+      const alto = altoLibreLado();
+      const x = acotar(Number.isFinite(lado.x) ? lado.x : medidas.ancho - ancho - 16, 0, medidas.ancho - ancho);
+      const y = acotar(Number.isFinite(lado.y) ? lado.y : 96, 0, medidas.alto - alto);
+      lado.x = Math.round(x);
+      lado.y = Math.round(y);
+      marco.style.width = ancho + "px";
+      marco.style.height = alto + "px";
+      marco.style.left = lado.x + "px";
+      marco.style.top = lado.y + "px";
+      marco.style.right = "auto";
+      marco.style.bottom = "auto";
+    }
+    actualizarBotonesLado();
+    if (persistir) guardarLadoFlotante();
+  }
+
+  function aplicarModoLadoPorModo(modo, borde) {
+    if (borde) lado.borde = borde;
+    if (modo !== MODO_MINIMIZADO && lado.modo !== MODO_MINIMIZADO) lado.anterior = modo;
+    lado.modo = modo;
+    aplicarModoLado(true);
   }
 
   function actualizarAria() {
@@ -634,20 +767,20 @@ export function crearPreviaPanel({ hospedador, proyecto, estadoPestana, editor }
       sur.setAttribute("aria-valuemax", String(panel.altoMax));
       sur.setAttribute("aria-valuetext", alto + " píxeles de alto");
     }
-    const lado = limitesLado();
+    const medidasLado = limitesLado();
     const oesteLado = el("vista-tirador-oeste");
     if (oesteLado) {
       oesteLado.setAttribute("aria-valuenow", String(cajaLado.ancho));
-      oesteLado.setAttribute("aria-valuemin", String(lado.anchoMin));
-      oesteLado.setAttribute("aria-valuemax", String(lado.anchoMax));
+      oesteLado.setAttribute("aria-valuemin", String(medidasLado.anchoMin));
+      oesteLado.setAttribute("aria-valuemax", String(medidasLado.anchoMax));
       oesteLado.setAttribute("aria-valuetext", cajaLado.ancho + " píxeles de ancho");
     }
     const surLado = el("vista-tirador-sur");
     if (surLado) {
       const alto = altoEfectivo(marcoLado(), cajaLado);
       surLado.setAttribute("aria-valuenow", String(alto));
-      surLado.setAttribute("aria-valuemin", String(lado.altoMin));
-      surLado.setAttribute("aria-valuemax", String(lado.altoMax));
+      surLado.setAttribute("aria-valuemin", String(medidasLado.altoMin));
+      surLado.setAttribute("aria-valuemax", String(medidasLado.altoMax));
       surLado.setAttribute("aria-valuetext", alto + " píxeles de alto");
     }
   }
@@ -1098,6 +1231,22 @@ export function crearPreviaPanel({ hospedador, proyecto, estadoPestana, editor }
       const estado = superficie.estadoRender ? el(superficie.estadoRender) : null;
       if (estado) estado.textContent = texto;
     }
+    detalleEmulador(texto);
+  }
+
+  // El detalle del modelo se enseña en la capa flotante (que no empuja el canvas) y en el `title`
+  // del canvas, para no perderlo cuando el panel está cerrado o minimizado. La línea `role=status`
+  // sigue llevando el texto para `aria-live`, pero está fuera del flujo.
+  function detalleEmulador(texto) {
+    const limpio = String(texto || "");
+    for (const id of ["previa-detalle-modelo", "vista-lado-detalle"]) {
+      const caja = el(id);
+      if (caja) caja.textContent = limpio;
+    }
+    for (const id of ["previa-lateral-canvas", "vista-previa"]) {
+      const canvas = el(id);
+      if (canvas) canvas.title = limpio;
+    }
   }
 
   // --- energía, tamaño y última apk ---------------------------------------------------------
@@ -1284,6 +1433,15 @@ export function crearPreviaPanel({ hospedador, proyecto, estadoPestana, editor }
     const abrir = el(superficie === "panel" ? "previa-inspector-abrir" : "vista-inspector-abrir");
     if (contenedor) contenedor.hidden = !abierto;
     if (abrir) abrir.hidden = !!abierto;
+    // al reabrir la capa de Pantalla se reaplica su modo: pudo cambiar el tamaño de la ventana
+    // mientras estaba cerrada, y su posición libre tiene que seguir dentro de los bordes. Si se
+    // cerró plegada, reabrirla la despliega: el botón dice «Registro y consola», no «pastilla».
+    if (superficie === "vista" && abierto) {
+      if (lado.modo === MODO_MINIMIZADO) {
+        lado.modo = lado.anterior === MODO_ACOPLADO ? MODO_ACOPLADO : MODO_LIBRE;
+      }
+      aplicarModoLado(false);
+    }
     if (persistir) {
       guardarClave(superficie === "panel" ? CLAVE_INSPECTOR_PANEL : CLAVE_INSPECTOR_VISTA,
         abierto ? "1" : "0");
@@ -1325,6 +1483,93 @@ export function crearPreviaPanel({ hospedador, proyecto, estadoPestana, editor }
     const soltar = () => { mover = null; };
     document.addEventListener("pointerup", soltar);
     document.addEventListener("pointercancel", soltar);
+  }
+
+  // Arrastre de la consola desprendida. Se mueve por toda la ventana (coordenadas de viewport,
+  // no del padre) y se acota a sus bordes; arrastrar una acoplada la desprende sin saltar. No
+  // reordena ni recrea nada: el modelo, la sección activa y el scroll se conservan.
+  function conectarConsolaFlotante() {
+    const marco = marcoLado();
+    if (!marco) return;
+    const cabecera = marco.querySelector(".previa-inspector-cab");
+    if (!cabecera) return;
+    let mover = null;
+
+    const restaurar = () => {
+      lado.modo = lado.anterior === MODO_ACOPLADO ? MODO_ACOPLADO : MODO_LIBRE;
+      aplicarModoLado(true);
+    };
+    const minimizar = () => {
+      if (lado.modo === MODO_MINIMIZADO) { restaurar(); return; }
+      lado.anterior = lado.modo;
+      lado.modo = MODO_MINIMIZADO;
+      aplicarModoLado(true);
+    };
+    const acoplar = (borde) => aplicarModoLadoPorModo(MODO_ACOPLADO, borde);
+
+    cabecera.addEventListener("pointerdown", (e) => {
+      if (e.button !== undefined && e.button !== 0) return;
+      if (e.target && typeof e.target.closest === "function" && e.target.closest("button")) return;
+      if (lado.modo === MODO_MINIMIZADO) return;
+      const caja = marco.getBoundingClientRect();
+      if (lado.modo === MODO_ACOPLADO) {
+        // se queda donde estaba y pasa a libre: el primer movimiento no da un salto
+        lado.modo = MODO_LIBRE;
+        lado.x = Math.round(caja.left);
+        lado.y = Math.round(caja.top);
+        aplicarModoLado(false);
+      }
+      mover = {
+        x: e.clientX, y: e.clientY,
+        left: caja.left, top: caja.top,
+        ancho: caja.width, alto: caja.height,
+      };
+      try { cabecera.setPointerCapture(e.pointerId); } catch (err) { /* puntero sintético */ }
+      e.preventDefault();
+    });
+
+    document.addEventListener("pointermove", (e) => {
+      if (!mover) return;
+      const medidas = ventana();
+      lado.x = Math.round(acotar(mover.left + e.clientX - mover.x, 0, medidas.ancho - mover.ancho));
+      lado.y = Math.round(acotar(mover.top + e.clientY - mover.y, 0, medidas.alto - mover.alto));
+      marco.style.left = lado.x + "px";
+      marco.style.top = lado.y + "px";
+      marco.style.right = "auto";
+      marco.style.bottom = "auto";
+      e.preventDefault();
+    });
+
+    const soltar = () => {
+      if (!mover) return;
+      mover = null;
+      aplicarModoLado(true);
+    };
+    document.addEventListener("pointerup", soltar);
+    document.addEventListener("pointercancel", soltar);
+
+    // con la pastilla, un clic en la cabecera la despliega
+    cabecera.addEventListener("click", (e) => {
+      if (lado.modo !== MODO_MINIMIZADO) return;
+      if (e.target && typeof e.target.closest === "function" && e.target.closest("button")) return;
+      restaurar();
+    });
+
+    const botonMinimizar = el("vista-lado-minimizar");
+    if (botonMinimizar) {
+      botonMinimizar.addEventListener("click", () => {
+        if (lado.modo === MODO_MINIMIZADO) restaurar(); else minimizar();
+      });
+    }
+    const izquierda = el("vista-lado-acoplar-izquierda");
+    if (izquierda) izquierda.addEventListener("click", () => acoplar("izquierda"));
+    const derecha = el("vista-lado-acoplar-derecha");
+    if (derecha) derecha.addEventListener("click", () => acoplar("derecha"));
+
+    // al cambiar el tamaño de la ventana, la capa libre se recorta a los bordes nuevos
+    if (typeof window !== "undefined") {
+      window.addEventListener("resize", () => aplicarModoLado(false));
+    }
   }
 
   function conectarControles() {
@@ -1475,6 +1720,7 @@ export function crearPreviaPanel({ hospedador, proyecto, estadoPestana, editor }
       const estado = superficie.estadoRender ? el(superficie.estadoRender) : null;
       if (estado) estado.textContent = texto;
     }
+    detalleEmulador(texto);
   }
 
   function cajaUtil(marco) {
@@ -1551,12 +1797,14 @@ export function crearPreviaPanel({ hospedador, proyecto, estadoPestana, editor }
       if (apagado) {
         dibujarApagado(canvas);
         if (estado) estado.textContent = MENSAJE_APAGADO;
+        detalleEmulador(MENSAJE_APAGADO);
         continue;
       }
       if (!modelo) {
         // el motivo del último fallo viene del evento: «no hay apk», «el preview falló» o el de arranque
         limpiarCanvas(canvas);
         if (estado) estado.textContent = motivo || MENSAJE_SIN_MODELO;
+        detalleEmulador(motivo || MENSAJE_SIN_MODELO);
         continue;
       }
       const pintado = pintarModelo(canvas, modelo);
@@ -1567,13 +1815,15 @@ export function crearPreviaPanel({ hospedador, proyecto, estadoPestana, editor }
       }
       if (estado) {
         // la misma línea que escribe `vista-previa.js` para Pantalla, más el recordatorio del clic:
-        // las dos superficies dicen lo mismo del mismo modelo
+        // las dos superficies dicen lo mismo del mismo modelo. Este párrafo está fuera del flujo
+        // (`.previa-estado-oculto`); el texto visible va a la capa flotante y al `title`.
         estado.textContent = textoDelModelo(modelo) + " Arranca en onCreate: pulsa una vista para " +
           "ejecutar su OnClickListener; se actualiza al compilar.";
         if (pintado && pintado.valida === false) {
           estado.textContent = "El modelo de vista previa no trae una pantalla medible (ancho o alto no " +
             "finitos); no se pinta nada.";
         }
+        detalleEmulador(estado.textContent);
       }
       if (!primero) primero = pintado;
     }
@@ -3242,6 +3492,7 @@ export function crearPreviaPanel({ hospedador, proyecto, estadoPestana, editor }
     queridaLado.arriba = numeroOpcional(leerClave(CLAVE_LADO_ARRIBA, "0"), 0, LADO_ALTO_MINIMO * 8) || 0;
     visible = leerClave(CLAVE_VISIBLE, "1") !== "0";
     modo = leerClave(CLAVE_MODO, "vivo") === "render" ? "render" : "vivo";
+    leerLadoFlotante();
 
     montarMarco(marco, {
       caja: () => caja,
@@ -3282,6 +3533,7 @@ export function crearPreviaPanel({ hospedador, proyecto, estadoPestana, editor }
     conectarCanvas("vista-previa");
     conectarEditable();
     conectarControles();
+    conectarConsolaFlotante();
     actualizarEnergiaBotones();
     aplicarPantalla(pantalla, false);
     aplicarInspector("panel", inspectorAbierto.panel, false);

@@ -611,7 +611,7 @@
                     <span class="texto-boton">Salir</span>
                   </button>
                 </div>
-                <p id="previa-render-estado" class="previa-estado" role="status" aria-live="polite">Compila el
+                <p id="previa-render-estado" class="previa-estado previa-estado-oculto" role="status" aria-live="polite">Compila el
                   proyecto para ver aquí la pantalla del emulador.</p>
                 <div class="previa-marco previa-marco-lateral">
                   <canvas id="previa-lateral-canvas" class="previa-canvas previa-canvas-lateral" width="360" height="640"
@@ -626,6 +626,7 @@
                       <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18"/></svg>
                     </button>
                   </div>
+                  <p id="previa-detalle-modelo" class="previa-detalle-modelo">Emulador</p>
                   <div class="previa-secciones" role="tablist" aria-label="Secciones del emulador">
                     <button id="previa-seccion-pulsos" class="previa-modo activo" type="button" role="tab"
                             aria-selected="true" aria-controls="previa-pulsos" data-seccion="pulsos">Pulsar</button>
@@ -949,7 +950,7 @@
                           tabindex="0" role="img" aria-label="Emulador: pantalla del apk con los eventos de la app; se puede pulsar sobre las vistas que responden a un clic"
                           aria-describedby="vista-previa-estado"></canvas>
                 </div>
-                <p id="vista-previa-estado" class="previa-estado" role="status" aria-live="polite">Emulador: compila
+                <p id="vista-previa-estado" class="previa-estado previa-estado-oculto" role="status" aria-live="polite">Emulador: compila
                   el proyecto (Editor → Compilar → Compilar debug) para ver aquí la pantalla que ejecuta
                   la app.</p>
                 <p class="nota">Se actualiza al compilar. Fuentes, imágenes, márgenes finos y estilos
@@ -990,13 +991,29 @@
                    aria-controls="vista-lado"></div>
 
               <div id="vista-lado" class="vista-lado">
-                <div class="previa-inspector-cab">
+                <div class="previa-inspector-cab" title="Arrastra para mover la consola; con la pastilla, pulsa para restaurarla">
                   <span class="previa-inspector-titulo">Registro y consola</span>
+                  <button id="vista-lado-minimizar" class="icono-boton" type="button"
+                          title="Minimizar el registro y la consola" aria-label="Minimizar el registro y la consola"
+                          aria-pressed="false">
+                    <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 12h14"/></svg>
+                  </button>
+                  <button id="vista-lado-acoplar-izquierda" class="icono-boton" type="button"
+                          title="Acoplar el registro y la consola al borde izquierdo" aria-label="Acoplar al borde izquierdo"
+                          aria-pressed="false">
+                    <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 4h16v16H4z"/><path d="M9 4v16"/></svg>
+                  </button>
+                  <button id="vista-lado-acoplar-derecha" class="icono-boton" type="button"
+                          title="Acoplar el registro y la consola al borde derecho" aria-label="Acoplar al borde derecho"
+                          aria-pressed="true">
+                    <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 4h16v16H4z"/><path d="M15 4v16"/></svg>
+                  </button>
                   <button id="vista-inspector-cerrar" class="icono-boton" type="button"
                           title="Cerrar el registro y la consola" aria-label="Cerrar el registro y la consola">
                     <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18"/></svg>
                   </button>
                 </div>
+                <p id="vista-lado-detalle" class="previa-detalle-modelo">Emulador</p>
                 <div class="previa-secciones" role="tablist" aria-label="Secciones del emulador">
                   <button id="vista-seccion-pulsos" class="previa-modo activo" type="button" role="tab"
                           aria-selected="true" aria-controls="vista-pulsos" data-seccion="pulsos">Pulsar</button>

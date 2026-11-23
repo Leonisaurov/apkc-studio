@@ -506,6 +506,55 @@ kbd {
   flex: 0 0 auto;
 }
 .marco-vista-lado[hidden] { display: none; }
+/* La consola de la vista Pantalla es una capa desprendida de la página. En modo libre flota sobre
+   la ventana y se arrastra por toda ella; acoplada se pega a un borde y minimizada queda una
+   pastilla con el título. Las tres son `fixed`, así que no participan del reparto: abrirla,
+   moverla, acoplarla o minimizarla no cambia las medidas ni la posición del canvas. Las
+   coordenadas y el tamaño llegan en línea desde `previa-panel.js`, que es quien los persiste. */
+.marco-vista-lado[data-modo="libre"],
+.marco-vista-lado[data-modo="acoplado"],
+.marco-vista-lado[data-modo="minimizado"] {
+  position: fixed;
+  z-index: 60;
+  top: auto;
+  right: auto;
+  bottom: auto;
+  left: auto;
+  height: auto;
+  margin-top: 0;
+  max-width: calc(100vw - 16px);
+}
+.marco-vista-lado.minimizado {
+  width: max-content;
+}
+.marco-vista-lado.minimizado > .tirador-previa { display: none; }
+.marco-vista-lado.minimizado .vista-lado {
+  width: auto;
+  padding: 0;
+  border-radius: 999px;
+  box-shadow: 0 4px 14px rgba(0, 0, 0, .35);
+}
+.marco-vista-lado.minimizado .vista-lado > :not(.previa-inspector-cab) { display: none; }
+.marco-vista-lado.minimizado .previa-inspector-cab {
+  border-bottom: 0;
+  padding: 5px 6px 5px 12px;
+  cursor: pointer;
+}
+.marco-vista-lado.minimizado .previa-inspector-titulo { flex: 0 1 auto; }
+.marco-vista-lado.minimizado #vista-lado-acoplar-izquierda,
+.marco-vista-lado.minimizado #vista-lado-acoplar-derecha { display: none; }
+/* el detalle del modelo vive en la capa flotante, no en el flujo del emulador: su largo no puede
+   empujar el canvas. Dos líneas como máximo y el texto completo en el `title` del canvas. */
+.previa-detalle-modelo {
+  flex: 0 0 auto;
+  margin: 0;
+  padding: 2px 8px 3px;
+  color: var(--texto-medio);
+  font-size: 10px;
+  line-height: 1.3;
+  max-height: 2.6em;
+  overflow: hidden;
+}
 .vista-lado {
   flex: 1 1 auto;
   display: flex;
@@ -1163,9 +1212,30 @@ body.arrastrando-paleta { cursor: grabbing; }
   font-size: 11px;
   line-height: 1.35;
 }
-/* La línea de estado no puede cambiar el alto del dibujo cuando se alarga (al añadir vistas): su
-   caja se reserva a dos líneas y el canvas conserva la misma medida en Vista previa y en editar. */
-#previa-vivo-estado { min-height: 2.8em; }
+/* La línea del emulador ya no ocupa sitio en el reparto: el detalle del modelo se enseña en el
+   panel flotante (`.previa-detalle-modelo`) y en el `title` del canvas, y este párrafo queda solo
+   para los lectores de pantalla (`aria-live`). Al estar fuera del flujo, ningún texto —ni el
+   modelo ni un fallo— puede cambiar la altura del canvas. */
+.previa-estado-oculto {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  margin: -1px;
+  padding: 0;
+  border: 0;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+}
+/* La línea del layout en vivo (Vista previa) sí cuenta el fichero y los avisos: su caja se reserva
+   a dos líneas y no crece más, para que teclear no cambie el alto del dibujo. */
+#previa-vivo-estado,
+#vista-layout-estado {
+  height: 2.8em;
+  min-height: 2.8em;
+  max-height: 2.8em;
+  overflow: hidden;
+}
 .previa-estado.con-aviso { color: var(--aviso); }
 .previa-marco-lateral {
   flex: 1 1 56%;

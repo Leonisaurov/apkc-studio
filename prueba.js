@@ -305,6 +305,37 @@ if (!/^Emulador aproximado de el layout/.test(vistaPrevia.textoDelModelo({ panta
   mal("textoDelModelo no cae a «el layout» y a la pantalla por defecto: " +
     vistaPrevia.textoDelModelo({ pantalla: {}, raiz: {} }));
 }
+// La línea visible del emulador ya no cuenta el modelo: el párrafo `role=status` está fuera del
+// flujo (`.previa-estado-oculto`, solo para `aria-live`) y el detalle se enseña en la capa
+// flotante de registro y consola y en el `title` del canvas. Así ningún modelo puede cambiar la
+// altura del dibujo. `textoDelModelo` sigue siendo la fuente única de ese detalle.
+const fuenteEstilo = fs.readFileSync(path.join(__dirname, "style.css"), "utf8");
+if (!/\.previa-estado-oculto\s*\{[^}]*position:\s*absolute/.test(fuenteEstilo)) {
+  mal("style.css no saca del flujo la línea de estado del emulador (.previa-estado-oculto)");
+}
+for (const id of ["previa-render-estado", "vista-previa-estado"]) {
+  const etiqueta = new RegExp(`<p id="${id}"[^>]*class="([^"]*)"`).exec(html);
+  if (!etiqueta || !/previa-estado-oculto/.test(etiqueta[1])) {
+    mal(`la línea de estado del emulador ${id} no está fuera del flujo (previa-estado-oculto)`);
+  }
+}
+const fuentePreviaEstado = fs.readFileSync(path.join(__dirname, "previa-panel.js"), "utf8");
+for (const id of ["previa-detalle-modelo", "vista-lado-detalle"]) {
+  if (!fuentePreviaEstado.includes(id)) {
+    mal(`previa-panel.js no escribe el detalle del modelo en la capa flotante (${id})`);
+  }
+}
+// La consola de Pantalla es una capa desprendida: los tres modos son `fixed` (no reparten) y su
+// modo, borde y posición se recuerdan en localStorage.
+if (!/\[data-modo="libre"\][\s\S]{0,400}position:\s*fixed/.test(fuenteEstilo)) {
+  mal("style.css no desprende la consola de Pantalla (data-modo=libre con position: fixed)");
+}
+for (const clave of ["apkc-studio/previa-lado-modo", "apkc-studio/previa-lado-borde",
+  "apkc-studio/previa-lado-x", "apkc-studio/previa-lado-y"]) {
+  if (!fuentePreviaEstado.includes(clave)) {
+    mal(`previa-panel.js no persiste la consola flotante (${clave})`);
+  }
+}
 
 // 6c. el texto de un nodo pintado es el dinámico si existe: el rect que va al canvas no puede
 //     quedarse con el texto del layout cuando la app ya escribió otro.
@@ -1162,6 +1193,7 @@ for (const [id, donde] of [
   ["previa-inspector", "la capa flotante de registro y consola del panel"],
   ["previa-inspector-cerrar", "el botón que cierra el registro y la consola del panel"],
   ["previa-inspector-abrir", "el botón que abre el registro y la consola del panel"],
+  ["previa-detalle-modelo", "el detalle del modelo en la capa flotante del panel"],
   ["vista-cuerpo", "la superficie del emulador de la vista Pantalla"],
   ["vista-emulador-controles", "la barra de controles del emulador en Pantalla"],
   ["vista-energia", "el control de energía del emulador en Pantalla"],
@@ -1175,6 +1207,10 @@ for (const [id, donde] of [
   ["vista-salir-completa", "el botón de salir de pantalla completa en Pantalla"],
   ["vista-inspector-cerrar", "el botón que cierra el registro y la consola en Pantalla"],
   ["vista-inspector-abrir", "el botón que abre el registro y la consola en Pantalla"],
+  ["vista-lado-detalle", "el detalle del modelo en la consola flotante de Pantalla"],
+  ["vista-lado-minimizar", "el botón que minimiza y restaura la consola de Pantalla"],
+  ["vista-lado-acoplar-izquierda", "el botón que acopla la consola al borde izquierdo"],
+  ["vista-lado-acoplar-derecha", "el botón que acopla la consola al borde derecho"],
 ]) {
   if (!ids.has(id)) mal(`${donde} (${id}) no está en index.html`);
 }
