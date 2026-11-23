@@ -2231,6 +2231,53 @@ public final class R {
     if (!/ULTIMO\.build/.test(ejecutarFn) || !/compilarDebug\(\)/.test(ejecutarFn)) {
       mal("C3: Ctrl+Enter no repite un build por el camino que guarda los sucios");
     }
+
+    // F5: el tecleo durante la ventana de carga se rechaza con aviso y no ensucia el documento
+    // nuevo. La política es pura (tres funciones) y el orden del fuente prueba que el listener y
+    // `marcarSucio` la consultan; si se acepta la entrada o se marca sucio un `texto=null`, falla.
+    if (!/espera/.test(pestanaMod.rechazoTecleo(1) || "")) {
+      mal("F5: no hay aviso al rechazar el tecleo durante la carga");
+    }
+    if (pestanaMod.rechazoTecleo(0) !== null) {
+      mal("F5: rechaza el tecleo con la pestaña ya cargada");
+    }
+    const docNuevo = { ruta: "/proyecto/B.java", texto: null, sucio: false };
+    if (pestanaMod.aceptarEntrada(docNuevo, 1)) {
+      mal("F5: acepta tecleo mientras la pestaña lee OPFS: el texto se descartaría después");
+    }
+    if (!pestanaMod.aceptarEntrada(docNuevo, 0)) {
+      mal("F5: rechaza el tecleo con la pestaña cargada");
+    }
+    if (pestanaMod.puedeMarcarSucio(docNuevo, 1)) {
+      mal("F5: marca sucio un documento con texto=null durante la carga");
+    }
+    if (!pestanaMod.puedeMarcarSucio(docNuevo, 0)) {
+      mal("F5: no deja marcar sucio un documento limpio ya cargado (texto=null es normal)");
+    }
+    if (!pestanaMod.puedeMarcarSucio({ ruta: "/proyecto/A.java", texto: "x" }, 1)) {
+      mal("F5: pierde el estado sucio de un documento ya leído al terminar la carga");
+    }
+    const entradaFn = entre('area.addEventListener("input"', 'area.addEventListener("scroll"');
+    const aceptaIdx = entradaFn.indexOf("aceptarEntrada(");
+    const sucioIdx = entradaFn.indexOf("marcarSucio(true)");
+    if (aceptaIdx < 0 || sucioIdx < 0 || aceptaIdx > sucioIdx) {
+      mal("F5: el listener de input marca sucio antes de consultar la política de carga");
+    }
+    const marcarFn = entre("function marcarSucio(", "function estaSucio(");
+    if (!/puedeMarcarSucio\(/.test(marcarFn)) {
+      mal("F5: marcarSucio no consulta la política de carga");
+    }
+    const activarF5 = entre("async function activarDocumento(", "async function cargarDocumentoEnEditor(");
+    const bloqueoIdx = activarF5.indexOf("bloquearTecleo()");
+    const primerAwaitF5 = activarF5.indexOf("await");
+    if (bloqueoIdx < 0 || primerAwaitF5 < 0 || bloqueoIdx > primerAwaitF5 ||
+        !/finally[\s\S]*bloquearTecleo\(\)/.test(activarF5)) {
+      mal("F5: el textarea no se cierra a la escritura antes de leer OPFS con try/finally");
+    }
+    const bloquearFn = entre("function bloquearTecleo(", "async function activarDocumento(");
+    if (!/readOnly\s*=\s*bloqueado/.test(bloquearFn) || !/aria-busy/.test(bloquearFn)) {
+      mal("F5: bloquearTecleo no cierra el textarea a la escritura ni marca aria-busy");
+    }
   }
 
   // 14. F4: la importación no mezcla el zip con el árbol viejo ni deja un proyecto a medias.

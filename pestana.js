@@ -119,6 +119,27 @@ let activacion = 0;
 // `guardar` no escribe: la ruta activa ya es la nueva pero el contenido todavía no es suyo.
 let cargandoDocumento = 0;
 
+// F5: en esa misma ventana el documento nuevo todavía tiene `texto = null` y el textarea es del
+// anterior. Aceptar una tecla ahí marcaba sucio el documento nuevo y la lectura posterior
+// descartaba lo tecleado. La política es **rechazar la entrada** —ese texto pertenece al fichero
+// anterior— con un aviso claro, y volver a admitir teclas al terminar la lectura. Las tres
+// decisiones son puras para poder falsarlas en `prueba.js` sin DOM.
+function rechazoTecleo(cargando) {
+  return cargando ? "abriendo la pestaña: espera para escribir" : null;
+}
+
+// ¿Se acepta una entrada de teclado sobre `doc`? Con la pestaña cargando, no: el buffer no es suyo.
+function aceptarEntrada(doc, cargando) {
+  return !!doc && !cargando;
+}
+
+// Un documento sin texto en memoria no puede quedar sucio mientras dura la carga: `guardar`
+// escribiría un buffer que no es suyo. Fuera de la carga sí se marca: un documento limpio también
+// tiene `texto = null` hasta el siguiente `guardarEnMemoria`, y teclear debe ensuciarlo.
+function puedeMarcarSucio(doc, cargando) {
+  return !(cargando && doc && doc.texto === null);
+}
+
 // Identidad de esta ventana/pestaña del navegador. sessionStorage sobrevive a recargar y no se
 // comparte entre ventanas nuevas; el árbol de deshacer se indexa por ella.
 const VENTANA = (() => {
@@ -148,6 +169,9 @@ const EDITOR = {
     if (!area) return;
     area.addEventListener("input", () => {
       if (silencioInput) return;
+      // F5: un input que llega con la pestaña cargando pertenece al buffer anterior; se rechaza
+      // sin tocar el documento ni el historial
+      if (!aceptarEntrada(documentoActivo(), cargandoDocumento)) return;
       EDITOR.pintar();
       EDITOR.sincronizar();
       actualizarCursor();
@@ -158,6 +182,10 @@ const EDITOR = {
     area.addEventListener("blur", volcarHistorial);
     area.addEventListener("keydown", (e) => {
       if (e.isComposing) return;
+      // F5: con la pestaña a medio abrir se rechaza la tecla y se explica por qué; Ctrl+S sigue
+      // llegando al atajo del documento, que a su vez avisa de que hay que esperar (F1)
+      const rechazo = rechazoTecleo(cargandoDocumento);
+      if (rechazo) { nota(rechazo); return; }
       if ((e.ctrlKey || e.metaKey) && !e.altKey) {
         const tecla = (e.key || "").toLowerCase();
         if (tecla === "z") {
@@ -1194,6 +1222,17 @@ function quitarDocumento(doc) {
 // instante aunque la lectura quede en cola detrás de un build. El precio es que durante la carga
 // el textarea todavía tiene el buffer anterior, así que `guardar` se bloquea con el contador
 // `cargandoDocumento`; sin eso, un Ctrl+S en esa ventana escribía el buffer viejo en la ruta nueva.
+// F5: por lo mismo el textarea se cierra a la escritura (`readOnly`) hasta que la lectura termina;
+// las teclas no llegan al buffer ajeno y el aviso dice que hay que esperar.
+function bloquearTecleo() {
+  const area = document.getElementById("codigo");
+  if (!area) return;
+  const bloqueado = rechazoTecleo(cargandoDocumento) !== null;
+  area.readOnly = bloqueado;
+  if (bloqueado) area.setAttribute("aria-busy", "true");
+  else area.removeAttribute("aria-busy");
+}
+
 async function activarDocumento(ruta) {
   const doc = documentoDe(ruta);
   if (!doc) return false;
@@ -1201,10 +1240,12 @@ async function activarDocumento(ruta) {
   const turno = ++activacion;
   guardarEnMemoria();
   cargandoDocumento += 1;
+  bloquearTecleo();
   try {
     return await cargarDocumentoEnEditor(doc, ruta, turno);
   } finally {
     cargandoDocumento -= 1;
+    bloquearTecleo();
   }
 }
 
@@ -1765,6 +1806,9 @@ const { abrirBusqueda, cerrarBusqueda, buscarSiguiente, reemplazarUno,
 
 function marcarSucio(v) {
   const doc = documentoActivo();
+  // F5: con la pestaña cargando y el documento todavía sin texto, marcar sucio dejaba `texto=null`
+  // en el documento nuevo y la lectura de OPFS pisaba después lo tecleado
+  if (v && !puedeMarcarSucio(doc, cargandoDocumento)) return;
   if (doc) doc.sucio = !!v;
   estadoPestana.sucio = !!v;
   pintarMarcaSucio();
@@ -3377,6 +3421,7 @@ export {
   EDITOR, CONSOLA, abrir, guardar, guardarParaCompilar, pareceManifiesto, correr,
   compilarDelTodo, compilarDebug,
   mostrarPanel, alternarPanel, marcarSucio, deshacer, rehacer,
+  rechazoTecleo, aceptarEntrada, puedeMarcarSucio, bloquearTecleo,
   refrescarArbol, estaSucio, hayDocumentosSucios, confirmarDescartes,
   limpiarEstadoEditor, ponerJarDeUrl, usarJarElegido, cerrarMenuArchivo,
   pedirSubida, subirSeleccion, renderHistorial, restaurarNodoHistorial,
@@ -3407,6 +3452,7 @@ if (typeof window !== "undefined") {
     EDITOR, CONSOLA, abrir, guardar, guardarParaCompilar, pareceManifiesto, correr,
     compilarDelTodo, compilarDebug,
     mostrarPanel, alternarPanel, marcarSucio, deshacer, rehacer,
+    rechazoTecleo, aceptarEntrada, puedeMarcarSucio, bloquearTecleo,
     refrescarArbol, estaSucio, hayDocumentosSucios, confirmarDescartes,
     limpiarEstadoEditor, ponerJarDeUrl, usarJarElegido, cerrarMenuArchivo,
     pedirSubida, subirSeleccion, renderHistorial, restaurarNodoHistorial,

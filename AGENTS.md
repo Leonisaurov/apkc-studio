@@ -149,7 +149,9 @@ los imports y no debe depender de ese puente.
   rutas y `ARBOL.abiertos`, nunca contenido. La activa se restaura al cargar, las demás al
   pulsarlas; `activacion` evita que una lectura lenta pise otra pestaña y `cargandoDocumento`
   bloquea `guardar()` mientras el textarea todavía tiene el buffer anterior (F1: un `Ctrl+S` en esa
-  ventana escribía el fichero viejo en la ruta nueva).
+  ventana escribía el fichero viejo en la ruta nueva). En esa misma ventana el textarea se pone
+  `readOnly` y el listener de `input`/`keydown` rechaza el tecleo con un aviso: el buffer no es del
+  documento nuevo, y aceptarlo dejaba la pestaña sucia con `texto = null` y perdía lo tecleado (F5).
 - **Undo tree persistente.** `historial.js` guarda deltas, checkpoints cada 24 niveles y poda
   (240 nodos / 4 MB). Se hidrata por documento al activarlo y se guarda en IndexedDB con clave
   `VENTANA|ruta`; `VENTANA` sale de sessionStorage. No persistas `cache` (se reconstruye). Las
