@@ -272,8 +272,18 @@ import { diagnosticarXml } from "./xml-editor.js";
       const dato = leerJson(r && r.consola);
       if (!dato) throw new Error("apkc check no devolvió JSON");
       if (mio !== serie) return;
+      // D6: toda fila dice dónde. Si `apkc` trae `posicion` se respeta; si el error nació en el
+      // parser y solo hay línea, se compone `archivo:línea` con el nombre real del fichero (el
+      // temporal solo saldría si no hubiera nombre, y el mensaje no repite esa posición).
+      const nombre = ruta.split("/").pop() || TEMPORAL;
       errores = (Array.isArray(dato.errores) ? dato.errores : [])
-        .map((e) => ({ ...e, origen: "Java" }));
+        .map((e) => {
+          const linea = Number(e.linea) > 0 ? Number(e.linea) : null;
+          const columna = Number(e.columna) > 0 ? Number(e.columna) : null;
+          const posicion = e.posicion ||
+            (linea ? nombre + ":" + linea + (columna ? ":" + columna : "") : nombre);
+          return { ...e, origen: "Java", posicion };
+        });
       const resumen = errores.length
         ? errores.length + (errores.length === 1 ? " error" : " errores")
         : "sin errores";

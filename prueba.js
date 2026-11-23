@@ -1805,6 +1805,106 @@ public final class R {
       mal("contextoDeCompletado sugiere dentro de un comentario");
     }
 
+    // D6: el receptor `v.` no se adivina, se resuelve por la declaración del buffer. Sin
+    // declaración no hay lista (mejor nada que los métodos de otra clase).
+    const tipo = (texto, nombre) => autocompletado.tipoDeVariable(texto, nombre, texto.length);
+    const tiposVistos = [
+      ["TextView v = null;", "v", "TextView"],
+      ["private final Button boton;", "boton", "Button"],
+      ["void f(EditText campo, int n) {", "campo", "EditText"],
+      ["for (String s : lista) {", "s", "String"],
+      ["android.widget.TextView vista;", "vista", "TextView"],
+      ["Map<String, TextView> mapa;", "mapa", "Map"],
+      ["TextView[] filas;", "filas", "TextView"],
+      ["catch (IOException e) {", "e", "IOException"],
+    ];
+    for (const [texto, nombre, esperado] of tiposVistos) {
+      if (tipo(texto, nombre) !== esperado) {
+        mal(`tipoDeVariable no resuelve ${nombre} en ${JSON.stringify(texto)}: ${tipo(texto, nombre)}`);
+      }
+    }
+    if (tipo("TextView v = null;", "otra")) mal("tipoDeVariable inventa un tipo para una variable que no está");
+
+    const contextoVariable = (texto) => autocompletado.contextoDeCompletado(texto, texto.length);
+    const receptores = [
+      ["TextView v = null;\nv.", "TextView", "v"],
+      ["private Button boton;\nvoid f() { boton.", "Button", "boton"],
+      ["void f(EditText campo) {\n campo.", "EditText", "campo"],
+      ["android.widget.Toast aviso;\nthis.aviso.", "Toast", "aviso"],
+    ];
+    for (const [texto, clase, variable] of receptores) {
+      const ctx = contextoVariable(texto);
+      if (!ctx || ctx.modo !== "metodos" || ctx.clase !== clase || ctx.variable !== variable) {
+        mal(`el completado tras ${variable}. no resuelve ${clase}: ${JSON.stringify(ctx)}`);
+      }
+    }
+    if (contextoVariable("desconocida.")) {
+      mal("el completado tras una variable sin declaración ofrece una lista inventada");
+    }
+
+    // los bloques `/* … */` de varias líneas ya no dejan la lista abierta dentro (frontera de D3)
+    const dentroDeBloque = [
+      ["/* R.layout.\n   sigue el comentario */", "un bloque de varias líneas"],
+      ["/*\n * R.layout.\n */", "un bloque con asteriscos"],
+      ['String s = """\nR.layout.', "un bloque de texto"],
+    ];
+    for (const [texto, que] of dentroDeBloque) {
+      const corte = que === "un bloque de texto" ? texto.length : texto.lastIndexOf("*/");
+      const ctx = autocompletado.contextoDeCompletado(texto, corte);
+      if (ctx) mal(`contextoDeCompletado sugiere dentro de ${que}: ${JSON.stringify(ctx)}`);
+    }
+    const despuesDeBloque = "Texto v = null;\n/* una línea */\nv.";
+    const ctxBloque = contextoVariable(despuesDeBloque);
+    if (!ctxBloque || ctxBloque.modo !== "metodos") {
+      mal(`contextoDeCompletado no vuelve tras un bloque cerrado: ${JSON.stringify(ctxBloque)}`);
+    }
+    if (!contextoVariable("char c = '/'; R.layout.")) {
+      mal("un carácter con barra no corta el completado de R.layout.");
+    }
+    if (contextoVariable('String s = "\\"R.layout.')) {
+      mal("una cadena abierta con comilla escapada no corta el completado");
+    }
+
+    // la matriz Java: los cuatro modos se alcanzan desde el texto que se teclea de verdad
+    const matrizJava = [
+      ["R.", "tipos"], ["R.lay", "tipos"], ["R.layout.ma", "valores"], ["R.id.", "valores"],
+      ["android.R.layout.", "valores"], ["Toast.", "metodos"], ["TextView v = null;\nv.", "metodos"],
+      ["MainAct", "clases"],
+    ];
+    const modosVistos = new Set();
+    for (const [texto, modo] of matrizJava) {
+      const ctx = contextoVariable(texto);
+      if (!ctx || ctx.modo !== modo) mal(`matriz Java: ${JSON.stringify(texto)} no da ${modo}: ${JSON.stringify(ctx)}`);
+      else modosVistos.add(ctx.modo);
+    }
+    if (modosVistos.size !== 4) mal(`matriz Java: faltan modos, vistos ${[...modosVistos].join(", ")}`);
+
+    // tipos del proyecto: se leen del árbol y del buffer, sin abrir ni parsear los `.java`
+    const declaradas = autocompletado.clasesDeclaradas(
+      "public class MainActivity extends Activity {}\ninterface Lista {}\nenum Modo { A, B }");
+    if (!["MainActivity", "Lista", "Modo"].every((c) => declaradas.includes(c))) {
+      mal(`clasesDeclaradas pierde tipos del buffer: ${JSON.stringify(declaradas)}`);
+    }
+    const delProyecto = autocompletado.clasesDeRutas([
+      "/proyecto/src/com/x/MainActivity.java",
+      "/proyecto/src/com/x/Util.java",
+      "/proyecto/src/com/x/R.java",
+      "/proyecto/src/com/x/utilidad.txt",
+    ]);
+    if (!delProyecto.includes("MainActivity") || !delProyecto.includes("Util") ||
+        delProyecto.includes("R") || delProyecto.includes("utilidad")) {
+      mal(`clasesDeRutas no separa tipos de proyecto: ${JSON.stringify(delProyecto)}`);
+    }
+
+    // los dos contextos se eligen por extensión y no se cruzan: `.xml` es la rama de
+    // `contextoXml` y `.java` la de `contextoDeCompletado`
+    if (!autocompletado.esRutaXml("/proyecto/res/layout/main.xml") ||
+        !autocompletado.esRutaXml("/proyecto/AndroidManifest.XML") ||
+        autocompletado.esRutaXml("/proyecto/src/MainActivity.java") ||
+        autocompletado.esRutaXml("")) {
+      mal("esRutaXml no separa los dos contextos");
+    }
+
     // el zip del jar: el mismo makeZip de la página, leído por el directorio central
     const zipJar = a.makeZip([["android/app/Activity.class", "PK" + "x".repeat(64)],
       ["android/widget/Toast.class", "PK" + "x".repeat(64)]]);
@@ -1935,6 +2035,68 @@ public final class R {
       mal(`las referencias @string no salen del proyecto: ${JSON.stringify(propios)}`);
     }
 
+    // D6: la matriz XML. Cada etiqueta, atributo y valor del catálogo tiene que ofrecerse en su
+    // modo y en el grupo de fichero que le toca, y ninguno puede colarse en el catálogo del otro
+    // lenguaje ni el de otro grupo.
+    const pedir = (ctx, datos) => xmlEditor.sugerenciasXml(ctx, datos);
+    const textos = (r) => new Set((r.lista || []).map((i) => i.texto));
+    const inserts = (r) => new Set((r.lista || []).map((i) => i.insertar));
+
+    const grupos = [
+      ["/proyecto/res/layout/main.xml", xmlEditor.ETIQUETAS_VISTA],
+      ["/proyecto/res/values/strings.xml", xmlEditor.ETIQUETAS_VALORES],
+      ["/proyecto/AndroidManifest.xml", xmlEditor.ETIQUETAS_MANIFIESTO],
+    ];
+    for (const [archivo, catalogo] of grupos) {
+      const r = pedir({ modo: "etiqueta", prefijo: "", desde: 0, hasta: 0 }, { ruta: archivo });
+      if (!/^xml ·/.test(r.estado)) mal(`la matriz XML no marca el origen xml en ${archivo}: ${r.estado}`);
+      for (const etiqueta of catalogo) {
+        if (!textos(r).has(etiqueta)) mal(`la matriz XML pierde la etiqueta <${etiqueta}> de ${archivo}`);
+      }
+      if (r.lista.some((i) => /^(?:android|tools):/.test(i.texto) || i.texto === "R.")) {
+        mal(`la matriz XML cruza atributos o Java en las etiquetas de ${archivo}`);
+      }
+    }
+
+    const atributosLayout = pedir({ modo: "atributo", prefijo: "", desde: 0, hasta: 0 }, { ruta });
+    for (const a of xmlEditor.ATRIBUTOS_ANDROID) {
+      if (!inserts(atributosLayout).has("android:" + a)) mal(`falta android:${a} en la lista de atributos`);
+    }
+    for (const a of xmlEditor.ATRIBUTOS_TOOLS) {
+      if (!inserts(atributosLayout).has("tools:" + a)) mal(`falta tools:${a} en la lista de atributos`);
+    }
+    if (textos(atributosLayout).has("LinearLayout")) mal("la lista de atributos cruza una etiqueta del layout");
+    const atributosValores = pedir({ modo: "atributo", prefijo: "", desde: 0, hasta: 0 },
+      { ruta: "/proyecto/res/values/strings.xml" });
+    for (const a of xmlEditor.ATRIBUTOS_SIN_PREFIJO) {
+      if (!inserts(atributosValores).has(a)) mal(`falta ${a} en los atributos sin prefijo de values`);
+    }
+    if ([...inserts(atributosValores)].some((t) => t.startsWith("android:"))) {
+      mal("un res/values ofrece android: como atributo (no se escribe así en values)");
+    }
+
+    for (const [atributo, valores] of Object.entries(xmlEditor.VALORES)) {
+      const r = pedir({ modo: "valor", atributo, prefijo: "", desde: 0, hasta: 0 }, { ruta, recursos: {} });
+      for (const valor of valores) {
+        if (!textos(r).has(valor)) mal(`el valor ${valor} de ${atributo} no se ofrece`);
+      }
+    }
+    for (const [atributo, tipos] of Object.entries(xmlEditor.TIPOS_POR_ATRIBUTO)) {
+      const recursos = {};
+      for (const t of tipos) recursos[t] = new Set(["recurso"]);
+      const r = pedir({ modo: "valor", atributo, prefijo: "", desde: 0, hasta: 0 }, { ruta, recursos });
+      for (const t of tipos) {
+        if (!inserts(r).has("@" + t + "/recurso")) {
+          mal(`el atributo ${atributo} no ofrece @${t}/recurso`);
+        }
+      }
+    }
+    for (const atributo of xmlEditor.ATRIBUTOS_COLOR) {
+      const r = pedir({ modo: "valor", atributo, prefijo: "", desde: 0, hasta: 0 },
+        { ruta, recursos: { color: new Set(["rojo"]) } });
+      if (!inserts(r).has("@color/rojo")) mal(`el atributo de color ${atributo} no ofrece @color/rojo`);
+    }
+
     const recursos = { string: new Set(["app_name"]), layout: new Set(["main"]) };
     const errores = xmlEditor.diagnosticarXml(
       "<LinearLayout>\n  <TextView\n  <Button android:id=\"@+id/a\"/>\n" +
@@ -2004,6 +2166,88 @@ public final class R {
     if (fueraCdata.length !== 1 || !/@string\/noexiste/.test(fueraCdata[0].mensaje)) {
       mal(`el CDATA silencia errores de fuera: ${JSON.stringify(fueraCdata)}`);
     }
+
+    // comprensión: el mensaje nombra lo que no se resolvió (el atributo, la referencia, la
+    // etiqueta) y no repite `archivo:línea:columna`, que ya viaja en `posicion`.
+    for (const e of errores) {
+      if (!e.mensaje || !/^[^\s]/.test(e.mensaje)) mal(`un error del linter no dice qué pasa: ${JSON.stringify(e)}`);
+      if (/\b\d+:\d+/.test(e.mensaje)) mal(`el mensaje repite la posición: ${e.mensaje}`);
+    }
+    if (!errores.some((e) => e.mensaje.includes("layout_widht"))) {
+      mal("el aviso de errata no nombra el atributo que no existe");
+    }
+    if (!errores.some((e) => e.mensaje.includes("@string/noexiste"))) {
+      mal("el aviso de recurso no nombra la referencia que no existe");
+    }
+    // un `<` sin nombre no se queda en «error»: dice qué falta
+    const sinNombre = xmlEditor.diagnosticarXml("<>", { archivo: ruta, recursos });
+    if (!sinNombre.length || !/nombre válido|vacía/.test(sinNombre[0].mensaje) || sinNombre[0].origen !== "XML") {
+      mal(`el linter no explica una etiqueta sin nombre: ${JSON.stringify(sinNombre)}`);
+    }
+  }
+
+  // 11c. overhead del autocompletado: el índice del jar se reutiliza, los métodos se cachean por
+  // clase y el popup no puede lanzar `apkc check` ni recorrer OPFS por tecla. Se comprueba en la
+  // fuente porque estos módulos necesitan DOM; la medición de tiempo es de las funciones puras.
+  {
+    const fuenteAuto = fs.readFileSync(path.join(__dirname, "autocompletado.js"), "utf8");
+    const fuenteRecursos = fs.readFileSync(path.join(__dirname, "recursos-proyecto.js"), "utf8");
+    if (!/if \(jar\) return jar;/.test(fuenteAuto)) mal("el índice del jar no se reutiliza entre pulsaciones");
+    if (!/if \(metodosVistos\.has\(entrada\.local\)\) return/.test(fuenteAuto)) {
+      mal("los métodos de una clase se vuelven a leer en cada pulsación");
+    }
+    if (/hospedador\.ejecutar|["']check["']/.test(fuenteAuto)) {
+      mal("el autocompletado lanza apkc check: el popup no puede reparar nada");
+    }
+    if (!/medida: \(\) =>/.test(fuenteAuto)) {
+      mal("el autocompletado no expone las lecturas para poder medir el overhead");
+    }
+    if (!/if \(listo\) return cache/.test(fuenteRecursos)) {
+      mal("el barrido de recursos no se cachea: se recorrería OPFS por tecla");
+    }
+    if (!/apkc:proyecto-cambio/.test(fuenteRecursos)) {
+      mal("la caché de recursos no se invalida con los cambios del proyecto");
+    }
+    const fuentePestana = fs.readFileSync(path.join(__dirname, "pestana.js"), "utf8");
+    if (!/CustomEvent\("apkc:proyecto-cambio"/.test(fuentePestana) ||
+        !/function publicar\(mensaje\) \{\s*avisarCambioDeProyecto/.test(fuentePestana)) {
+      mal("el guardado/creación no avisa a la caché de recursos");
+    }
+    // el linter de XML es local: ni `apkc check` ni temporal
+    const fuenteXml = fs.readFileSync(path.join(__dirname, "xml-editor.js"), "utf8");
+    if (/hospedador|\.apkc-check\.java|ejecutar/.test(fuenteXml)) {
+      mal("el linter de XML toca el hospedador o `apkc check`");
+    }
+    if (!/origen: "XML"/.test(fuenteXml)) mal("el linter de XML no etiqueta sus avisos como XML");
+    // el diagnóstico Java compone `archivo:línea[:columna]` si `apkc` no manda `posicion`; el
+    // mensaje no repite esa posición
+    const fuenteVivo = fs.readFileSync(path.join(__dirname, "diagnostico-vivo.js"), "utf8");
+    if (!/e\.posicion \|\|/.test(fuenteVivo)) {
+      mal("una fila de Java sin `posicion` se queda sin decir dónde");
+    }
+
+    // coste de las funciones puras que corren por pulsación (no es un umbral de producto: es la
+    // cifra que se registra en la salida para comparar con la de la pestaña)
+    const textoJava = "public class MainActivity extends Activity {\n" +
+      "  private TextView titulo;\n  void f(Button b) { titulo.setText(\"hola\"); b. }\n}\n";
+    const t0 = Date.now();
+    const cursorJava = textoJava.indexOf("b. }") + 2;
+    let contextos = 0;
+    for (let i = 0; i < 20000; i++) {
+      if (autocompletado.contextoDeCompletado(textoJava, cursorJava)) contextos++;
+    }
+    const msJava = Date.now() - t0;
+    const textoXml = "<LinearLayout xmlns:android=\"http://schemas.android.com/apk/res/android\">\n" +
+      "  <TextView android:text=\"@string/ap\" />\n</LinearLayout>";
+    const t1 = Date.now();
+    let xml = 0;
+    for (let i = 0; i < 20000; i++) {
+      if (xmlEditor.contextoXml(textoXml, textoXml.indexOf("@string/ap") + 10)) xml++;
+    }
+    const msXml = Date.now() - t1;
+    console.log(`  (medida: 20000 contextos Java en ${msJava} ms y 20000 de XML en ${msXml} ms; ` +
+      `${contextos + xml} con resultado)`);
+    if (msJava > 3000 || msXml > 3000) mal(`el contexto por pulsación es demasiado caro: ${msJava} ms Java, ${msXml} ms XML`);
   }
 
   // 13. la sección de dependencias (R4): importa a OPFS un paquete estático del propio origen.

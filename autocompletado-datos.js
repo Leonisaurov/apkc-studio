@@ -282,20 +282,107 @@ function metodosDeClase(bytes) {
   return salida;
 }
 
-// ¿El cursor está dentro de un comentario de línea o de una cadena? Se mira solo la línea: un
-// bloque `/* … */` de varias líneas no se detecta y la lista puede salir dentro de él; es una
-// frontera conocida, no un fallo silencioso.
-function enComentarioOcadena(antes) {
-  const linea = String(antes || "").slice(String(antes || "").lastIndexOf("\n") + 1);
-  let cadena = false, caracter = false;
-  for (let i = 0; i < linea.length; i++) {
-    const c = linea[i];
-    if (c === "\\" && (cadena || caracter)) { i++; continue; }
-    if (!caracter && c === "\"") cadena = !cadena;
-    else if (!cadena && c === "'") caracter = !caracter;
-    else if (!cadena && !caracter && c === "/" && linea[i + 1] === "/") return true;
+// ¿El cursor está dentro de un comentario o de una cadena? Se recorre el texto desde el principio
+// porque un bloque `/* … */` puede cruzar líneas y una cadena de Java no; mirar solo la línea
+// dejaba abierta la lista dentro del bloque (frontera de D3, cerrada en D6). El recorrido es
+// lineal y de un solo pase: no hay expresiones regulares sobre todo el fichero ni reparses.
+// Los bloques de texto (`""" … """`) también cuentan como cadena: pueden cruzar líneas.
+function estadoDeComentario(antes) {
+  const fuente = String(antes || "");
+  let estado = "codigo";
+  let i = 0;
+  while (i < fuente.length) {
+    const c = fuente[i];
+    if (estado === "linea") {
+      if (c === "\n") estado = "codigo";
+      i++;
+      continue;
+    }
+    if (estado === "bloque") {
+      if (c === "*" && fuente[i + 1] === "/") { estado = "codigo"; i += 2; }
+      else i++;
+      continue;
+    }
+    if (estado === "cadena" || estado === "caracter") {
+      if (c === "\\") { i += 2; continue; }
+      if ((estado === "cadena" && c === "\"") || (estado === "caracter" && c === "'")) {
+        estado = "codigo";
+      }
+      i++;
+      continue;
+    }
+    if (estado === "bloqueTexto") {
+      if (c === "\\") { i += 2; continue; }
+      if (fuente.startsWith("\"\"\"", i)) { estado = "codigo"; i += 3; }
+      else i++;
+      continue;
+    }
+    if (c === "\"") {
+      if (fuente.startsWith("\"\"\"", i)) { estado = "bloqueTexto"; i += 3; }
+      else { estado = "cadena"; i++; }
+      continue;
+    }
+    if (c === "'") { estado = "caracter"; i++; continue; }
+    if (c === "/" && fuente[i + 1] === "/") { estado = "linea"; i += 2; continue; }
+    if (c === "/" && fuente[i + 1] === "*") { estado = "bloque"; i += 2; continue; }
+    i++;
   }
-  return cadena || caracter;
+  return estado;
+}
+
+function enComentarioOcadena(antes) {
+  return estadoDeComentario(antes) !== "codigo";
+}
+
+// Tipo declarado de una variable local, un parámetro o un campo del propio buffer. Es lo que
+// convierte `v.` en `TextView.` sin adivinar: si no hay declaración, no se inventa la clase y el
+// contexto devuelve `null` (mejor ninguna lista que una lista de otro tipo). No cubre campos
+// heredados de otra clase ni tipos que solo existen en otro fichero; eso se queda como frontera.
+function tipoDeVariable(texto, nombre, hasta) {
+  const fuente = String(texto || "").slice(0, hasta == null ? undefined : hasta);
+  if (!fuente || !nombre) return null;
+  const re = /(?:^|[^\w$])(?:\bfinal\s+)?((?:[A-Za-z_$][\w$]*\.)*[A-Z][\w$]*)(?:\s*<[^<>;{}()=]*>)?(?:\s*\[\s*\])?\s+([a-z_$][\w$]*)\s*(?=[=;,):]|$)/g;
+  let tipo = null;
+  let m;
+  while ((m = re.exec(fuente))) {
+    if (m[2] === nombre) tipo = m[1];
+  }
+  return tipo ? tipo.slice(tipo.lastIndexOf(".") + 1) : null;
+}
+
+// La extensión decide el lenguaje del completado, y los dos contextos no se mezclan: un `.xml`
+// va a `contextoXml` y un `.java` a `contextoDeCompletado`. Es una función pura para poder
+// probar el contrato en node; quien tiene `estadoPestana.ruta` es `autocompletado.js`.
+function esRutaXml(ruta) {
+  return /\.xml$/i.test(String(ruta || ""));
+}
+
+// Clases declaradas en el propio buffer (`class`, `interface`, `enum`, `record`): son los tipos
+// del proyecto que se pueden sugerir sin leer OPFS ni el jar.
+function clasesDeclaradas(texto) {
+  const salida = [];
+  const vistos = new Set();
+  for (const m of String(texto || "").matchAll(/\b(?:class|interface|enum|record)\s+([A-Z][\w$]*)/g)) {
+    if (vistos.has(m[1])) continue;
+    vistos.add(m[1]);
+    salida.push(m[1]);
+  }
+  return salida;
+}
+
+// Nombres de clase del proyecto por la ruta de sus fuentes (`/proyecto/src/…/Foo.java`). Sale del
+// árbol de OPFS que ya se recorre para los recursos: no hay una lectura más por tecla ni un parseo
+// de los `.java`. `R.java` se salta porque es generado y no es una clase del usuario.
+function clasesDeRutas(rutas) {
+  const salida = [];
+  const vistos = new Set();
+  for (const ruta of rutas || []) {
+    const m = /\/src(?:\/[^/]+)*\/([A-Z][\w$]*)\.java$/.exec(String(ruta));
+    if (!m || m[1] === "R" || vistos.has(m[1])) continue;
+    vistos.add(m[1]);
+    salida.push(m[1]);
+  }
+  return salida;
 }
 
 // Qué se está completando y qué rango se sustituye. `desde`/`hasta` son índices del textarea
@@ -304,17 +391,35 @@ function enComentarioOcadena(antes) {
 //   R.            -> tipos      (layout, id, string…)
 //   R.layout.ma   -> valores    (layout=layout, prefijo="ma")
 //   View.         -> metodos    (clase=View, prefijo="")
+//   v.            -> metodos    (clase = el tipo declarado de v en el buffer)
 //   Acti          -> clases     (prefijo="Acti")
+//
+// `v.` no se adivina: se busca la declaración de `v` en el propio texto (`TextView v = …`,
+// `private Button b;`, un parámetro o `this.b`). Si el tipo no está declarado en el buffer, la
+// función devuelve `null` y no se ofrece la lista de otra clase; el caso de un campo heredado de
+// otra clase o de otro fichero queda como frontera declarada, no como una sugerencia falsa.
 function contextoDeCompletado(texto, cursor) {
   const hasta = Math.max(0, Number(cursor) || 0);
   const antes = String(texto || "").slice(0, hasta);
   if (enComentarioOcadena(antes)) return null;
 
-  let m = /(?:^|[^\w$.])R\.(\w*)$/.exec(antes);
+  let m = /(?:^|[^\w$.])(?:android\.)?R\.(\w*)$/.exec(antes);
   if (m) return { modo: "tipos", prefijo: m[1], desde: hasta - m[1].length, hasta };
 
-  m = /(?:^|[^\w$.])R\.(\w+)\.(\w*)$/.exec(antes);
+  m = /(?:^|[^\w$.])(?:android\.)?R\.(\w+)\.(\w*)$/.exec(antes);
   if (m) return { modo: "valores", tipo: m[1], prefijo: m[2], desde: hasta - m[2].length, hasta };
+
+  m = /(?:^|[^\w$])(?:this\.)?([a-z_$][\w$]*)\.(\w*)$/.exec(antes);
+  if (m) {
+    const tipo = tipoDeVariable(texto, m[1], hasta);
+    // sin declaración no se sabe el tipo: no hay contexto que ofrecer, pero tampoco se cae a la
+    // lista de clases (que en `v.` no tiene sentido)
+    if (!tipo) return null;
+    return {
+      modo: "metodos", clase: tipo, variable: m[1], prefijo: m[2],
+      desde: hasta - m[2].length, hasta,
+    };
+  }
 
   m = /(?:^|[^\w$.])([A-Z][\w$]*)\.(\w*)$/.exec(antes);
   if (m) return { modo: "metodos", clase: m[1], prefijo: m[2], desde: hasta - m[2].length, hasta };
@@ -330,5 +435,6 @@ export {
   tipoDeCarpeta, nombreDeFicheroDeRecurso,
   recursosDeRutas, agregarValores, agregarIdsDeXml, recursosDeRJava,
   buscarFinDirectorio, leerEntradasDirectorio, clasesDelJar, offsetDeDatosLocales,
-  metodosDeClase, enComentarioOcadena, contextoDeCompletado,
+  metodosDeClase, enComentarioOcadena, estadoDeComentario, tipoDeVariable, esRutaXml,
+  clasesDeclaradas, clasesDeRutas, contextoDeCompletado,
 };

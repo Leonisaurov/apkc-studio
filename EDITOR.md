@@ -827,10 +827,13 @@ plano no toca Tab.
   nombres. Salen de `res/values*/*.xml` (etiquetas con `name`, incluido `<item type="id">`), de
   los ficheros de `res/layout`, `drawable`, `mipmap`, `menu`, `xml`, `raw`, `anim`, `color`,
   `font`… (con calificadores y `.9.png`), de los `@+id/` de los XML y de la `R.java` que deja el
-  build en `src/<package>/R.java`. El barrido se guarda; editar un fichero de `res/` o la `R.java`
-  lo invalida tras una pausa de 800 ms (no se barre por cada pulsación).
-- **API.** Al escribir una clase con mayúscula (`Acti`) se completan las clases del índice del
-  jar; con `View.` se listan sus métodos públicos, leídos del `.class` bajo demanda. Del jar **no
+  build en `src/<package>/R.java`. El barrido se guarda y **no se recorre OPFS por tecla**: lo
+  invalidan `guardar`, crear, importar, mover, borrar y los cambios de otra ventana
+  (`apkc:proyecto-cambio`, que publica `pestana.js`); `refrescar()` sigue existiendo para forzarlo.
+- **API.** Al escribir una clase con mayúscula (`Acti`) se completan las clases del jar, los tipos
+  del proyecto (`/src/…/Foo.java`, sin abrir ni parsear los ficheros) y los declarados en el
+  buffer; con `View.` se listan sus métodos públicos, leídos del `.class` bajo demanda, y `v.` los
+  del tipo declarado de `v` en el propio buffer (`TextView v = null; v.`). Del jar **no
   se descarga ni se copia nada**: `hospedador.rango` pide el final del fichero (EOCD), después el
   directorio central y, solo al abrir una clase, su entrada comprimida
   (`DecompressionStream("deflate-raw")`). Todo sale de `/sdk/android.jar` en OPFS. Sin jar, los
@@ -844,10 +847,11 @@ plano no toca Tab.
   `value` a mano.
 - **Diagnóstico en vivo.** Mover la lista o cerrarla no dispara `apkc check`; aceptar produce un
   solo cambio, no uno por letra de la sugerencia.
-- **Fronteras.** El contexto no se detecta dentro de un bloque `/* … */` de varias líneas (sí en
-  `//` y en cadenas). Dos clases del jar con el mismo nombre simple resuelven a la de `android.*`.
-  La lista se corta en 50 opciones y lo dice. `Tab` con la lista vacía (solo el aviso del jar)
-  sigue siendo la sangría del editor.
+- **Fronteras.** El contexto se detecta dentro de bloques `/* … */` de varias líneas y de bloques
+  de texto `""" … """`; un `v.` sin declaración en el buffer no ofrece lista (el tipo de un campo
+  heredado de otra clase no se adivina). Dos clases del jar con el mismo nombre simple resuelven a
+  la de `android.*`. La lista se corta en 50 opciones y lo dice. `Tab` con la lista vacía (solo el
+  aviso del jar) sigue siendo la sangría del editor.
 
 ### Autocompletado
 
@@ -856,8 +860,8 @@ dependencias. Los datos salen de dos sitios que ya están en el propio origen:
 
 - **el proyecto**: `res/` (los nombres de fichero dan `R.layout`, `R.drawable`…; los `<string>`,
   `<color>`, `<style>`… de `res/values` y los `@+id/` de los layouts dan los nombres) y la
-  `R.java` que dejó el build, si está. Los tipos y los nombres se recalculan con
-  `AUTOCOMPLETADO.refrescar()` o al recargar la página.
+  `R.java` que dejó el build, si está. Los tipos y los nombres se recalculan al guardar o cambiar
+  un fichero de `res/`, al crear/importar un proyecto y con `AUTOCOMPLETADO.refrescar()`.
 - **el `android.jar` de OPFS**: las clases salen de su **directorio central** y los métodos, del
   `.class` de la clase que se está completando, descomprimido en la página con `deflate-raw`. El jar
   no se baja ni se copia: se leen por rango su cola (EOCD) y su directorio central —1,35 MB de los
@@ -870,11 +874,11 @@ Ids y contrato:
 | `#autocompletado` | la caja; `hidden` cuando no hay nada que sugerir. Se coloca bajo la línea del cursor |
 | `#autocompletado-lista` | las opciones, una por `<li>` con un `<button class="autocompletado-opcion">` |
 | `#autocompletado-opcion-N` | id de cada opción (0, 1, 2…), con la clase `activa` en la resaltada y `aria-selected` |
-| `#autocompletado-estado` | de dónde salen: `recursos del proyecto · N tipos`, `R.layout · N nombres`, `clases del android.jar · N`, `métodos de android.view.View · N` |
+| `#autocompletado-estado` | de dónde salen: `recursos del proyecto · N tipos`, `R.layout · N nombres`, `clases del android.jar y del proyecto · N`, `métodos de android.view.View · N` |
 
 Cada opción pinta el texto a completar en un `<code>` (primer hijo) y una pista al lado (el número de
 nombres, la ruta de la clase o el descriptor). `window.AUTOCOMPLETADO` expone `refrescar()`,
-`recursos()`, `cargarJar()` y `textoSinJar()` para las pruebas por CDP y la consola de desarrollo; no
+`recursos()`, `cargarJar()`, `medida()` y `textoSinJar()` para las pruebas por CDP y la consola de desarrollo; no
 es la fuente de verdad del módulo.
 
 Teclado: `Ctrl+Espacio` abre la lista; `↑`/`↓` recorren, `Tab`/`Enter` aceptan (el cambio pasa por
@@ -883,9 +887,10 @@ abierta, las demás teclas pasan de largo: `Ctrl+Mayús+P` abre la paleta y `Ctr
 El detector de contexto, el lector del zip y el del `.class` están en `autocompletado-datos.js`, que
 es puro y se prueba en `prueba.js`.
 
-Límites escritos: no hay completado tras una variable (`v.`, `this.`) porque haría falta saber su
-tipo; un comentario de bloque de varias líneas no se detecta (solo los de línea y las cadenas); y un
-recurso creado después de la primera lectura no aparece hasta `refrescar()` o recargar.
+Límites escritos: `v.`/`this.v.` resuelven el tipo por la declaración que haya en el buffer (local,
+parámetro o campo de la misma clase); si el tipo solo se declara en otro fichero o lo hereda una
+superclase, no se inventa la lista. Un recurso sin guardar no forma parte del proyecto y no aparece
+hasta guardar o `refrescar()`; el `@+id` del buffer sí cuenta.
 
 ### Autocompletado de XML
 
@@ -897,7 +902,7 @@ posiciones dentro de una etiqueta, con `desde`/`hasta` sobre el textarea:
 | Lo que se escribe | Qué sugiere | El estado dice |
 | --- | --- | --- |
 | `<TextVie` | etiquetas Android | `xml · etiquetas de vista · N` |
-| `android:te` (o `textS` sin prefijo) | atributos `android:*` y `tools:*` | `xml · atributos android: · N` |
+| `android:te` (o `textS` sin prefijo) | atributos `android:*` y `tools:*` | `xml · atributos de vista · N` |
 | `android:layout_width="wrap` | valores enumerados (`match_parent`, `wrap_content`, `center`, `visible`/`gone`…) | `xml · valores de android:layout_width · N` |
 | `android:text="@string/ap` | nombres del proyecto de ese tipo | `xml · @string · N nombres` |
 
@@ -911,8 +916,12 @@ posiciones dentro de una etiqueta, con `desde`/`hasta` sobre el textarea:
 - Aceptar con `Tab`/`Enter` pasa por `EDITOR.cambiar`, igual que en Java: entra en el deshacer del
   documento XML y no toca el de otro fichero. Esc y las flechas se comportan igual.
 - `#autocompletado-estado` empieza por `xml` en esta rama para que no se confunda con la lista Java.
-- Límites: no se completa dentro de comentarios, de `<?xml …?>` ni de un cierre `</…>`; y un valor
-  `@tipo/` de un recurso que aún no se ha guardado no aparece hasta que el barrido lo relea.
+- Un `res/values` solo ofrece atributos sin prefijo (`name`, `type`, `value`…): `android:` no se
+  escribe como atributo en `values`.
+- Límites: no se completa dentro de comentarios, de `<?xml …?>` ni de un cierre `</…>`; un valor
+  `@tipo/` de un recurso que aún no se ha guardado no aparece hasta guardar o `refrescar()`; y un
+  atributo `android:` desconocido que no se parece a ninguno del catálogo no se acusa (el catálogo
+  no es el `frameworks` entero).
 
 ### Estado del fichero
 

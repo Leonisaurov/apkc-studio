@@ -78,6 +78,35 @@ const ATRIBUTOS_ANDROID = [
   "clearTaskOnLaunch", "noHistory", "stateNotNeeded", "taskAffinity", "excludeFromRecents",
   "finishOnTaskLaunch", "colorAccent", "colorPrimary", "colorPrimaryDark", "windowBackground",
   "windowLightStatusBar", "windowActionBar", "windowNoTitle", "largeHeap", "extractNativeLibs",
+  // texto y edición (lo que llevan TextView/EditText y sus herederos)
+  "autoLink", "autoText", "bufferType", "capitalize", "cursorVisible", "digits", "editable",
+  "editorExtras", "elegantTextHeight", "ems", "fontFeatureSettings", "freezesText", "handle",
+  "hyphenationFrequency", "imeActionId", "imeActionLabel", "includeFontPadding", "inputMethod",
+  "justificationMode", "lineBreakStyle", "lineHeight", "linksClickable", "marqueeRepeatLimit",
+  "maxEms", "maxHeight", "maxWidth", "minEms", "minHeight", "minWidth", "numeric", "password",
+  "phoneNumber", "privateImeOptions", "scrollHorizontally", "selectAllOnFocus", "shadowColor",
+  "shadowDx", "shadowDy", "shadowRadius", "textColorHighlight", "textColorHint", "textColorLink",
+  "textCursorDrawable", "textDirection", "textFontWeight", "textIsSelectable", "textScaleX",
+  "textSelectHandle", "textSelectHandleLeft", "textSelectHandleRight", "typeface", "width",
+  // layout y restricciones que se usan a diario
+  "layout_alignWithParentIfMissing", "layout_aspectRatio", "layout_constraintBottom_toBottomOf",
+  "layout_constraintBottom_toTopOf", "layout_constraintEnd_toEndOf", "layout_constraintEnd_toStartOf",
+  "layout_constraintHorizontal_bias", "layout_constraintLeft_toLeftOf",
+  "layout_constraintLeft_toRightOf", "layout_constraintRight_toLeftOf",
+  "layout_constraintRight_toRightOf", "layout_constraintStart_toEndOf",
+  "layout_constraintStart_toStartOf", "layout_constraintTop_toBottomOf",
+  "layout_constraintTop_toTopOf", "layout_constraintVertical_bias", "layout_constrainedWidth",
+  "layout_constrainedHeight", "layout_wrapBehaviorInParent", "layout_editor_absoluteX",
+  "layout_editor_absoluteY", "layout_goneMarginStart", "layout_goneMarginEnd",
+  "layout_goneMarginTop", "layout_goneMarginBottom", "layout_marginBaseline",
+  // manifiesto: actividades, servicios, proveedores y permisos
+  "allowClearUserData", "allowTaskReparenting", "authorities", "backupAgent", "banner",
+  "directBootAware", "documentLaunchMode", "foregroundServiceType", "functionalTest",
+  "grantUriPermissions", "initOrder", "isolatedProcess", "killAfterRestore", "logo",
+  "maxRecents", "multiprocess", "permission", "persistent", "priority", "process",
+  "readPermission", "reparent", "required", "restoreAnyVersion", "restoreNeedsApplication",
+  "sharedUserId", "sharedUserLabel", "stopWithTask", "syncable", "targetActivity", "uiOptions",
+  "writePermission",
 ];
 
 const ATRIBUTOS_TOOLS = [
@@ -112,7 +141,17 @@ const VALORES = {
     "fitXY", "matrix"],
   inputType: ["text", "textCapCharacters", "textCapWords", "textCapSentences", "textMultiLine",
     "textPassword", "textEmailAddress", "textUri", "number", "numberDecimal", "numberSigned",
-    "phone", "datetime", "date", "time"],
+    "numberPassword", "phone", "datetime", "date", "time", "textNoSuggestions",
+    "textWebEditText", "textWebEmailAddress", "textFilter", "textPhonetic", "textVisiblePassword",
+    "textPersonName", "textPostalAddress", "textShortMessage", "textLongMessage"],
+  bufferType: ["normal", "spannable", "editable"],
+  textDirection: ["ltr", "rtl", "inherit", "firstStrongLtr", "firstStrongRtl", "locale", "anyRtl"],
+  hyphenationFrequency: ["none", "normal", "full", "fullFast"],
+  lineBreakStyle: ["none", "simple", "highQuality", "balanced"],
+  documentLaunchMode: ["intoExisting", "always", "never"],
+  foregroundServiceType: ["dataSync", "mediaPlayback", "phoneCall", "location",
+    "connectedDevice", "mediaProjection", "camera", "microphone", "health", "shortService",
+    "systemExempted"],
   layout_centerInParent: ["true", "false"],
   layout_centerHorizontal: ["true", "false"],
   layout_centerVertical: ["true", "false"],
@@ -162,7 +201,29 @@ const TIPOS_POR_ATRIBUTO = {
   id: ["id"], style: ["style"], theme: ["style"], menu: ["menu"], fontFamily: ["font"],
   drawableLeft: ["drawable"], drawableRight: ["drawable"], drawableTop: ["drawable"],
   drawableBottom: ["drawable"], drawableStart: ["drawable"], drawableEnd: ["drawable"],
-  listitem: ["layout"], divider: ["drawable", "color"],
+  listitem: ["layout"], divider: ["drawable", "color"], textAppearance: ["style"],
+  // medidas: un `@dimen` es tan válido como `wrap_content`, y las restricciones de posición
+  // toman ids de vistas (`@id/…`), no cadenas.
+  layout_width: ["dimen"], layout_height: ["dimen"], width: ["dimen"], height: ["dimen"],
+  textSize: ["dimen"], lineSpacingExtra: ["dimen"], letterSpacing: ["dimen"], padding: ["dimen"],
+  paddingLeft: ["dimen"], paddingRight: ["dimen"], paddingTop: ["dimen"], paddingBottom: ["dimen"],
+  paddingStart: ["dimen"], paddingEnd: ["dimen"], paddingHorizontal: ["dimen"],
+  paddingVertical: ["dimen"], layout_margin: ["dimen"], layout_marginLeft: ["dimen"],
+  layout_marginRight: ["dimen"], layout_marginTop: ["dimen"], layout_marginBottom: ["dimen"],
+  layout_marginStart: ["dimen"], layout_marginEnd: ["dimen"], layout_marginHorizontal: ["dimen"],
+  layout_marginVertical: ["dimen"], elevation: ["dimen"], dividerHeight: ["dimen"],
+  drawablePadding: ["dimen"], maxWidth: ["dimen"], minWidth: ["dimen"], maxHeight: ["dimen"],
+  minHeight: ["dimen"], layout_below: ["id"], layout_above: ["id"], layout_toLeftOf: ["id"],
+  layout_toRightOf: ["id"], layout_toStartOf: ["id"], layout_toEndOf: ["id"],
+  layout_alignLeft: ["id"], layout_alignRight: ["id"], layout_alignTop: ["id"],
+  layout_alignBottom: ["id"], layout_alignStart: ["id"], layout_alignEnd: ["id"],
+  layout_alignBaseline: ["id"], layout_constraintBottom_toBottomOf: ["id"],
+  layout_constraintBottom_toTopOf: ["id"], layout_constraintEnd_toEndOf: ["id"],
+  layout_constraintEnd_toStartOf: ["id"], layout_constraintLeft_toLeftOf: ["id"],
+  layout_constraintLeft_toRightOf: ["id"], layout_constraintRight_toLeftOf: ["id"],
+  layout_constraintRight_toRightOf: ["id"], layout_constraintStart_toEndOf: ["id"],
+  layout_constraintStart_toStartOf: ["id"], layout_constraintTop_toBottomOf: ["id"],
+  layout_constraintTop_toTopOf: ["id"],
 };
 
 // Atributos de color: cuando el valor está vacío se ofrecen los `@color` del proyecto.
@@ -400,12 +461,19 @@ function sugerenciasXml(ctx, datos) {
       pista, clase,
     });
     const lista = [];
-    for (const a of ATRIBUTOS_ANDROID) lista.push(item("android:" + a, "android:" + a, "android", "atributo"));
-    for (const a of ATRIBUTOS_TOOLS) lista.push(item("tools:" + a, "tools:" + a, "herramienta", "atributo"));
+    // Un layout/manifiesto es el sitio de `android:` y `tools:`; un `res/values` no lleva
+    // `android:` como atributo (los nombres de estilo van dentro de `name="android:…"`), así que
+    // no se cruzan los catálogos.
+    if (grupo !== "valores") {
+      for (const a of ATRIBUTOS_ANDROID) lista.push(item("android:" + a, "android:" + a, "android", "atributo"));
+      for (const a of ATRIBUTOS_TOOLS) lista.push(item("tools:" + a, "tools:" + a, "herramienta", "atributo"));
+    } else {
+      for (const a of ATRIBUTOS_TOOLS) lista.push(item("tools:" + a, "tools:" + a, "herramienta", "atributo"));
+    }
     if (grupo !== "vista") {
       for (const a of ATRIBUTOS_SIN_PREFIJO) lista.push(item(a, a, "sin prefijo", "atributo"));
     }
-    return { estado: `xml · atributos android: · ${lista.length}`, lista };
+    return { estado: `xml · atributos de ${grupo} · ${lista.length}`, lista };
   }
 
   if (ctx.modo === "referencia") {
@@ -429,17 +497,13 @@ function sugerenciasXml(ctx, datos) {
     };
   }
 
-  // valor enumerado, o referencias cuando el atributo toma un recurso
+  // valor enumerado y, si el atributo también toma recursos (`layout_width` admite `@dimen`),
+  // referencias: las dos cosas en la misma lista, los enumerados primero. Así un valor no cruza
+  // el contexto del atributo ni se queda a medias.
   const local = String(ctx.atributo || "").replace(/^.*:/, "");
   const enumerados = VALORES[local] || [];
-  if (enumerados.length) {
-    return {
-      estado: `xml · valores de ${ctx.atributo} · ${enumerados.length}`,
-      lista: enumerados.map((v) => ({ texto: v, insertar: v, pista: ctx.atributo, clase: "valor" })),
-    };
-  }
   const tipos = TIPOS_POR_ATRIBUTO[local] || (ATRIBUTOS_COLOR.has(local) ? ["color"] : []);
-  const lista = [];
+  const lista = enumerados.map((v) => ({ texto: v, insertar: v, pista: ctx.atributo, clase: "valor" }));
   for (const tipo of tipos) {
     const nombres = nombresDe(recursos, tipo).concat(tipo === "id" && datos && datos.id ? [...datos.id] : []);
     for (const nombre of new Set(nombres)) {
@@ -448,9 +512,10 @@ function sugerenciasXml(ctx, datos) {
     }
   }
   if (!lista.length) {
-    return { estado: `xml · ${ctx.atributo || "valor"} · sin valores enumerados`, lista: [] };
+    const que = enumerados.length ? "valores" : "referencias";
+    return { estado: `xml · ${ctx.atributo || "valor"} · sin ${que} medidos`, lista: [] };
   }
-  return { estado: `xml · referencias de ${ctx.atributo} · ${lista.length}`, lista };
+  return { estado: `xml · valores de ${ctx.atributo} · ${lista.length}`, lista };
 }
 
 // --- linter ------------------------------------------------------------------------------
@@ -556,7 +621,7 @@ function leerEtiquetas(fuente) {
     const abierta = j >= fuente.length;
     if (comilla) error(comillaEn, "comillas sin cerrar en un valor");
     const interior = fuente.slice(i + 1, abierta ? fuente.length : j);
-    if (!interior.trim()) { error(i, "etiqueta vacía"); i = j + 1; continue; }
+    if (!interior.trim()) { error(i, "la etiqueta está vacía: no tiene nombre ni atributos"); i = j + 1; continue; }
     const cierre = interior.trimStart().startsWith("/");
     const autocierre = interior.trimEnd().endsWith("/");
     const cuerpo = cierre
@@ -564,7 +629,7 @@ function leerEtiquetas(fuente) {
       : (autocierre ? interior.trimEnd().slice(0, -1) : interior);
     const analisis = analizarCuerpo(cuerpo);
     if (!analisis.nombre) {
-      error(i, "etiqueta inválida");
+      error(i, "la etiqueta no tiene un nombre válido");
     } else {
       etiquetas.push({
         inicio: i, nombre: analisis.nombre, cierre, autocierre,
@@ -657,6 +722,9 @@ export function diagnosticarXml(texto, opciones = {}) {
       if (nombre.startsWith("android:")) {
         const local = nombre.slice("android:".length);
         if (!ATRIBUTOS_ANDROID.includes(local)) {
+          // Frontera declarada: el catálogo no es el `frameworks` entero. Un `android:` que no
+          // está y no se parece a ninguno conocido no se acusa (un falso «no existe» sería peor
+          // que el silencio); solo la errata con un candidato claro se nombra.
           const sugerido = atributoParecido(local);
           if (sugerido) {
             const p = posicionDe(fuente, atributo.inicio);
@@ -706,6 +774,7 @@ export function diagnosticarXml(texto, opciones = {}) {
 
 export {
   ETIQUETAS_VISTA, ETIQUETAS_VALORES, ETIQUETAS_MANIFIESTO,
-  ATRIBUTOS_ANDROID, ATRIBUTOS_TOOLS, VALORES,
+  ATRIBUTOS_ANDROID, ATRIBUTOS_TOOLS, ATRIBUTOS_SIN_PREFIJO, VALORES,
+  TIPOS_POR_ATRIBUTO, ATRIBUTOS_COLOR, TIPOS_VERIFICABLES,
   grupoDe, etiquetasPara, contextoXml, sugerenciasXml, posicionDe,
 };

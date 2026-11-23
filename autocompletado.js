@@ -17,14 +17,16 @@
 //   window.AUTOCOMPLETADO.refrescar()   vuelve a leer los recursos del proyecto
 //   window.AUTOCOMPLETADO.recursos()    resumen { nombres, tipos }
 //   window.AUTOCOMPLETADO.cargarJar()   índice del jar y lo que se leyó de OPFS para tenerlo
+//   window.AUTOCOMPLETADO.medida()      lecturas del jar, clases cacheadas y recursos barridos
 //   window.AUTOCOMPLETADO.textoSinJar() qué se puede sugerir sin el jar
 import { hospedador, EDITOR, RUTA_JAR, estadoPestana } from "./pestana.js";
 import {
   buscarFinDirectorio, leerEntradasDirectorio, clasesDelJar, offsetDeDatosLocales,
-  metodosDeClase, contextoDeCompletado, agregarIdsDeXml,
+  metodosDeClase, contextoDeCompletado, agregarIdsDeXml, clasesDeclaradas, esRutaXml,
 } from "./autocompletado-datos.js";
 import {
-  cargarRecursosProyecto, invalidarRecursosProyecto, recursosEnCache, totalDeNombres,
+  cargarRecursosProyecto, cargarClasesProyecto, invalidarRecursosProyecto, recursosEnCache,
+  totalDeNombres,
 } from "./recursos-proyecto.js";
 import { contextoXml, sugerenciasXml } from "./xml-editor.js";
 
@@ -40,8 +42,11 @@ import { contextoXml, sugerenciasXml } from "./xml-editor.js";
   let jar = null;               // { clases: Map(simple -> entrada), leidos, medida }
   let jarFallo = null;          // motivo del último fallo al leer el jar
   let jarFalloCuando = 0;       // cuándo falló: si la página trae el jar después, se reintenta
-  let limpiarRecursos = null;   // editar res/ o R.java invalida el barrido, pero con pausa
   const metodosVistos = new Map();
+  // Cuentas para poder medir el overhead sin abrir la pestaña: cuántas veces se pidió el índice
+  // del jar, cuántos `.class` se inflaron y cuántos métodos salieron de la caché.
+  let lecturasJar = 0;
+  let lecturasMetodos = 0;
 
   // Insertar con `EDITOR.cambiar` dispara un `input`; sin esta marca la lista se reabriría con el
   // nombre que se acaba de completar.
@@ -61,15 +66,6 @@ import { contextoXml, sugerenciasXml } from "./xml-editor.js";
   // para saber si un `@string/…` existe, y no se recorre OPFS dos veces por pulsación.
   const cargarRecursos = () => cargarRecursosProyecto();
 
-  // Editar un res/values, un layout o la R.java cambia lo que se sugiere. No se barre por cada
-  // pulsación: se marca y se relee cuando la persona deja de teclear.
-  function recursosCambiaron() {
-    const ruta = (estadoPestana && estadoPestana.ruta) || "";
-    if (!/\/proyecto\/res\//.test(ruta) && !/(^|\/)R\.java$/.test(ruta)) return;
-    if (limpiarRecursos) clearTimeout(limpiarRecursos);
-    limpiarRecursos = setTimeout(() => { invalidarRecursosProyecto(); limpiarRecursos = null; }, 800);
-  }
-
   // ---- el jar, por trozos ------------------------------------------------------------
 
   // El android.jar no se baja ni se copia: se pide su tamaño, la cola donde vive el EOCD y el
@@ -83,6 +79,7 @@ import { contextoXml, sugerenciasXml } from "./xml-editor.js";
     if (jarFallo) jarFallo = null;
     const t0 = performance.now();
     try {
+      lecturasJar++;
       const vacio = await hospedador.rango(RUTA_JAR, 0, 0);
       if (!vacio || !vacio.tamano) throw new Error(sinJar());
       const cola = await hospedador.rango(RUTA_JAR, Math.max(0, vacio.tamano - 65557), 65557);
@@ -123,7 +120,10 @@ import { contextoXml, sugerenciasXml } from "./xml-editor.js";
 
   async function metodosDe(entrada) {
     if (!entrada || !Number.isFinite(entrada.local)) return [];
+    // una clase se lee una vez aunque se teclee `View.`, `View.ge` y `View.getW`: la caché no
+    // depende del prefijo, solo de la entrada del zip
     if (metodosVistos.has(entrada.local)) return metodosVistos.get(entrada.local);
+    lecturasMetodos++;
     const cabecera = await hospedador.rango(RUTA_JAR, entrada.local, 30);
     const desde = offsetDeDatosLocales(cabecera.bytes);
     if (desde < 0) return [];
@@ -154,8 +154,7 @@ import { contextoXml, sugerenciasXml } from "./xml-editor.js";
   // El fichero activo decide el lenguaje. La extensión manda: un layout no lleva Java y un
   // fuente no lleva etiquetas XML, aunque su texto se parezca.
   function esFicheroXml() {
-    const ruta = (estadoPestana && estadoPestana.ruta) || "";
-    return /\.xml$/i.test(ruta);
+    return esRutaXml((estadoPestana && estadoPestana.ruta) || "");
   }
 
   async function candidatosXml(ctx) {
@@ -195,14 +194,34 @@ import { contextoXml, sugerenciasXml } from "./xml-editor.js";
         lista: nombres.map((n) => ({ texto: n, insertar: n, pista: "recurso", clase: "recurso" })),
       };
     }
-    const indice = await cargarJar();
     if (ctx.modo === "clases") {
-      const todos = [...indice.clases.keys()].sort();
-      const lista = conPrefijo(todos.map((c) => ({
-        texto: c, insertar: c, pista: indice.clases.get(c).ruta, clase: "clase",
+      // tipos del jar + del proyecto + los declarados en el buffer. El jar puede faltar y los
+      // otros dos siguen valiendo: se dice en el estado y no se pierde la lista del proyecto.
+      const pistas = new Map();
+      let sinJar = "";
+      try {
+        const indice = await cargarJar();
+        for (const c of indice.clases.keys()) pistas.set(c, indice.clases.get(c).ruta);
+      } catch (e) {
+        sinJar = (e && e.message) || String(e);
+      }
+      for (const c of clasesDeclaradas(area.value)) {
+        if (!pistas.has(c)) pistas.set(c, "de este fichero");
+      }
+      try {
+        for (const c of await cargarClasesProyecto()) {
+          if (!pistas.has(c)) pistas.set(c, "proyecto");
+        }
+      } catch (e) { /* sin OPFS solo quedan el jar y el buffer */ }
+      const lista = conPrefijo([...pistas.keys()].sort().map((c) => ({
+        texto: c, insertar: c, pista: pistas.get(c), clase: "clase",
       })), ctx.prefijo);
-      return { estado: `clases del android.jar · ${indice.medida.clases}`, lista };
+      const estado = sinJar
+        ? `clases del proyecto · ${pistas.size} · ${sinJar}`
+        : `clases del android.jar y del proyecto · ${pistas.size}`;
+      return { estado, lista };
     }
+    const indice = await cargarJar();
     const entrada = indice.clases.get(ctx.clase);
     if (!entrada) return { estado: `sin ${ctx.clase} en el android.jar`, lista: [] };
     const metodos = await metodosDe(entrada);
@@ -385,7 +404,9 @@ import { contextoXml, sugerenciasXml } from "./xml-editor.js";
 
   area.addEventListener("input", () => {
     if (insertando) return;
-    recursosCambiaron();
+    // Los recursos se invalidan al guardar, crear, importar o recibir un cambio de otra
+    // ventana (`apkc:proyecto-cambio`), no en cada pulsación: el buffer ya aporta sus `@+id` y
+    // un `res/` sin guardar no forma parte del proyecto.
     sugerir();
   });
   area.addEventListener("scroll", () => { if (abierta) cerrar(); });
@@ -410,8 +431,20 @@ import { contextoXml, sugerenciasXml } from "./xml-editor.js";
         },
         // la página puede guardar o cambiar el jar (SDK local, .zip oficial): el índice cacheado
         // y el aviso de «sin jar» se tiran para volver a leerlo
-        olvidarJar: () => { jar = null; jarFallo = null; metodosVistos.clear(); },
+        olvidarJar: () => {
+          jar = null; jarFallo = null; metodosVistos.clear();
+          lecturasJar = 0; lecturasMetodos = 0;
+        },
         textoSinJar: sinJar,
+        // overhead medido sin abrir DevTools: el índice del jar se pide una vez (`lecturasJar`),
+        // cada `.class` se infla una vez (`lecturasMetodos`) y el resto son aciertos de caché
+        medida: () => ({
+          jar: jar ? { clases: jar.medida.clases, bytes: jar.medida.bytes, ms: jar.medida.ms,
+            lecturas: lecturasJar } : null,
+          metodos: { leidos: lecturasMetodos, enCache: metodosVistos.size },
+          recursos: { nombres: totalDeNombres(recursosEnCache()),
+            tipos: Object.keys(recursosEnCache()).length },
+        }),
         sugerir,
         cerrar,
       },

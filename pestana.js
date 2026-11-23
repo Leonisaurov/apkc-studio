@@ -715,7 +715,19 @@ function revisionActual(ruta) {
 function nuevaRevision() {
   return Date.now().toString(36) + "-" + Math.random().toString(36).slice(2, 8);
 }
+// Aviso local (misma ventana) de que el proyecto cambió: lo consume la caché de recursos del
+// autocompletado y del linter de XML (`recursos-proyecto.js`). Va por el DOM porque
+// BroadcastChannel no entrega a quien publica, y un `Ctrl+S` en `res/values` tiene que invalidar
+// su propia caché igual que lo haría el guardado de otra ventana.
+function avisarCambioDeProyecto(mensaje) {
+  if (typeof document === "undefined" || typeof CustomEvent !== "function") return;
+  try {
+    document.dispatchEvent(new CustomEvent("apkc:proyecto-cambio", { detail: mensaje || {} }));
+  } catch (e) { /* sin CustomEvent: la caché se refresca con `refrescar()` */ }
+}
+
 function publicar(mensaje) {
+  avisarCambioDeProyecto(mensaje);
   if (!canal) return;
   try { canal.postMessage({ ...mensaje, origen: VENTANA }); } catch (e) { /* sin canal */ }
 }
@@ -893,6 +905,8 @@ async function aplicarBorradoRemoto(ruta) {
 
 async function recibirRemoto(msg) {
   if (!msg || msg.origen === VENTANA) return;
+  // lo que otra ventana cambió también invalida la caché de recursos de esta
+  avisarCambioDeProyecto(msg);
   if (msg.tipo === "guardado") {
     const doc = documentoDe(msg.ruta);
     if (doc) await recargarDocumentoRemoto(doc, msg.revision);
