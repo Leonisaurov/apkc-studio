@@ -29,6 +29,33 @@ import { diagnosticarXml } from "./xml-editor.js";
   let enCurso = false;
   let pendiente = false;
   let errores = [];
+  // Lo último que se comprobó y salió limpio: (ruta, texto sin espacios de sobra en cada línea).
+  // Volver a lanzar el mismo check no puede cambiar el resultado; se salta.
+  let ultimaLimpia = null;
+  // contadores para la sonda acotada: pasadas lanzadas y pasadas que no hacía falta lanzar
+  let pasadas = 0;
+  let saltadas = 0;
+
+  // Añadir o quitar espacios al principio o al final de una línea no puede cambiar ningún token
+  // fuera de una cadena (el subconjunto no mide bloques de texto), ni las líneas vacías del final
+  // pueden contener un error. Solo se usa cuando la pasada anterior salió limpia, así que un
+  // cambio de columnas no importa: no hay columna que enseñar.
+  function mismaEstructura(a, b) {
+    if (a === b) return true;
+    const la = a.split("\n");
+    const lb = b.split("\n");
+    while (la.length && !la[la.length - 1].trim()) la.pop();
+    while (lb.length && !lb[lb.length - 1].trim()) lb.pop();
+    if (la.length !== lb.length) return false;
+    for (let i = 0; i < la.length; i++) {
+      if (la[i].trim() !== lb[i].trim()) return false;
+    }
+    return true;
+  }
+
+  // una mutación del proyecto (guardar, crear, mover, importar) o un cambio en la R.java que dejó
+  // un build puede cambiar el diagnóstico aunque el texto del editor sea el mismo: se invalida.
+  document.addEventListener("apkc:proyecto-cambio", () => { ultimaLimpia = null; });
 
   // El resalto y el textarea comparten fuente y padding (10px 12px en style.css); el alto de
   // línea se pregunta al navegador para no copiar aquí el valor de la variable del tema.
@@ -219,6 +246,10 @@ import { diagnosticarXml } from "./xml-editor.js";
       // una pasada vieja no puede pintar su resultado encima de la nueva: se invalida su serie
       serie++;
       pendiente = true;
+      // Cancelar la pasada vieja (matar el worker) se midió en la pestaña y no compensa: con la R
+      // escrita cuesta más arrancar el worker que dejar terminar el check, y en el camino caro el
+      // resultado fue un empate (studio/sonda-check.js). Se deja terminar y se encola una sola
+      // pasada nueva; el despilfarro que sí se evita es el de los checks que no cambiarían nada.
       // mientras corre la pasada nueva no se dejan las filas de la anterior: si el fichero acaba
       // de cambiar pueden ser del otro lenguaje (una fila XML sobre un .java, y al revés)
       errores = [];
@@ -243,7 +274,14 @@ import { diagnosticarXml } from "./xml-editor.js";
       return;
     }
     const texto = area.value;
+    // el mismo fuente que ya salió limpio no se vuelve a compilar: ni un clic en el árbol, ni un
+    // repintado de pestañas, ni cambiar solo espacios de sobra pueden cambiar el resultado.
+    if (ultimaLimpia && ultimaLimpia.ruta === ruta && mismaEstructura(ultimaLimpia.texto, texto)) {
+      saltadas++;
+      return;
+    }
     const mio = ++serie;
+    pasadas++;
     enCurso = true;
     // las filas del fichero anterior (posiblemente XML) no esperan al check: se vacían ya
     errores = [];
@@ -287,6 +325,7 @@ import { diagnosticarXml } from "./xml-editor.js";
       const resumen = errores.length
         ? errores.length + (errores.length === 1 ? " error" : " errores")
         : "sin errores";
+      ultimaLimpia = errores.length ? null : { ruta, texto };
       const notas = [dato.aviso, dato.recursos && /^sin R/.test(dato.recursos) ? dato.recursos : ""]
         .filter(Boolean);
       estado.textContent = resumen + " · Java" + (notas.length ? " · " + notas.join(" · ") : "");
@@ -294,6 +333,7 @@ import { diagnosticarXml } from "./xml-editor.js";
     } catch (e) {
       if (mio === serie) {
         errores = [];
+        ultimaLimpia = null;
         pintar();
         estado.textContent = "no se pudo comprobar: " + ((e && e.message) || e);
       }
@@ -319,5 +359,7 @@ import { diagnosticarXml } from "./xml-editor.js";
     }
   }
   window.addEventListener("resize", sincronizar);
+  // la sonda acotada (studio/sonda-check.js) lee estos contadores por CDP; la página no los usa
+  window.DIAGNOSTICO_VIVO = { pasadas: () => pasadas, saltadas: () => saltadas };
   programar();
 })();

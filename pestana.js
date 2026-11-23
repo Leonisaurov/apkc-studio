@@ -22,6 +22,11 @@ import { guardarUltimaApk, EVENTO_ULTIMA_APK } from "./ultima-apk.js";
 
 const PROYECTO = "/proyecto";
 
+// Comandos que la interfaz lanzó con `correr` y aún no terminaron. La cancelación del diagnóstico
+// mataría el worker, así que se protege cualquier build, firma o compilación del usuario que esté
+// en la misma cola: lo que se cancela es el check, no su trabajo.
+let comandosDelUsuario = 0;
+
 const hospedador = (() => {
   // el worker se crea al primer uso, no al cargar el fichero: la prueba de node exige estas
   // funciones puras (el resaltador) y no tiene Worker ni document
@@ -64,6 +69,18 @@ const hospedador = (() => {
     })();
     return raizPedida;
   };
+  // matar el worker deja sin resolver lo que estuviera pendiente: el que pidió ese comando recibe
+  // un error con nombre en vez de una promesa que nunca llega
+  const detener = () => {
+    if (!worker) return false;
+    try { worker.terminate(); } catch (e) { /* ya estaba muerto */ }
+    worker = null;
+    raizPedida = null;
+    for (const [id, resolver] of pendientes) {
+      if (pendientes.delete(id)) resolver({ tipo: "error", error: "comando detenido por el usuario", consola: "" });
+    }
+    return true;
+  };
   return {
     arbol: async () => { await bajarRaiz(); return pedir({ tipo: "arbol" }); },
     leer: async (ruta) => { await bajarRaiz(); return pedir({ tipo: "leer", ruta }); },
@@ -80,16 +97,11 @@ const hospedador = (() => {
     escucharSalida(fn) { alSalir = fn; },
     // Go wasm no tiene kill: se termina el worker entero y se recrea en el siguiente comando. El
     // fs vive en OPFS, así que lo escrito hasta aquí no se pierde; el build puede quedar a medias.
-    cancelar() {
-      if (!worker) return false;
-      try { worker.terminate(); } catch (e) { /* ya estaba muerto */ }
-      worker = null;
-      raizPedida = null;
-      for (const [id, resolver] of pendientes) {
-        if (pendientes.delete(id)) resolver({ tipo: "error", error: "comando detenido por el usuario", consola: "" });
-      }
-      return true;
-    },
+    cancelar() { return detener(); },
+    // la misma cancelación, pero solo si el worker no está haciendo nada que pidió el usuario.
+    // La sonda de D5 (studio/sonda-check.js) la mide; el diagnóstico en vivo no la usa porque en la
+    // pestaña no baja el tiempo (ver el comentario en diagnostico-vivo.js).
+    cancelarSiNadieEspera() { return comandosDelUsuario > 0 ? false : detener(); },
     // leer con el error nombrado: si el fs falla, la página tiene que decir qué falló y no
     // dejar que un objeto de error se cuele como si fueran bytes
     async bytes(ruta) {
@@ -2235,11 +2247,13 @@ async function correr(argv, opciones = {}) {
     if (ocupado && ultima) ocupado.textContent = "apkc: " + ultima.trim().slice(0, 70);
   });
   try {
+    comandosDelUsuario++;
     r = await hospedador.ejecutar(argv);
   } catch (e) {
     // si el worker no arranca, el aviso de «trabajando» no puede quedarse para siempre
     r = { tipo: "error", error: String((e && e.message) || e), consola: "" };
   } finally {
+    comandosDelUsuario--;
     hospedador.escucharSalida(null);
     if (ocupado) ocupado.hidden = true;
     if (botonDetener) botonDetener.hidden = true;

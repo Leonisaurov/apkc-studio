@@ -2253,6 +2253,39 @@ public final class R {
     if (msJava > 3000 || msXml > 3000) mal(`el contexto por pulsación es demasiado caro: ${msJava} ms Java, ${msXml} ms XML`);
   }
 
+  // 11c-bis. el diagnóstico en vivo no repite un check que no puede cambiar de resultado y no
+  // cancela uno obsoleto porque la medición en la pestaña no lo justifica (sonda-check.js). Se
+  // comprueba en la fuente de los dos módulos, que necesitan DOM y worker para correr.
+  {
+    const fuenteVivo = fs.readFileSync(path.join(__dirname, "diagnostico-vivo.js"), "utf8");
+    if (!/function mismaEstructura/.test(fuenteVivo)) {
+      mal("el diagnóstico no tiene la regla que evita un check cuando solo cambian espacios");
+    }
+    if (!/ultimaLimpia && ultimaLimpia\.ruta === ruta && mismaEstructura/.test(fuenteVivo)) {
+      mal("el diagnóstico no compara el texto con la última pasada limpia antes de compilar");
+    }
+    if (!/apkc:proyecto-cambio", \(\) => \{ ultimaLimpia = null; \}/.test(fuenteVivo)) {
+      mal("un cambio del proyecto no invalida la última pasada limpia: se saltaría el check que hace falta");
+    }
+    if (!/saltadas\+\+/.test(fuenteVivo)) mal("el diagnóstico no cuenta las pasadas que se salta");
+    if (/cancelarSiNadieEspera|hospedador\.cancelar/.test(fuenteVivo)) {
+      mal("el diagnóstico cancela el worker: la medición de la pestaña no lo justifica (esperar cuesta menos)");
+    }
+    const fuentePestana = fs.readFileSync(path.join(__dirname, "pestana.js"), "utf8");
+    if (!/cancelarSiNadieEspera\(\) \{ return comandosDelUsuario > 0 \? false : detener\(\); \}/.test(fuentePestana)) {
+      mal("el hospedador no niega la cancelación cuando hay un comando del usuario en la cola");
+    }
+    if (!/comandosDelUsuario\+\+;/.test(fuentePestana) || !/comandosDelUsuario--;/.test(fuentePestana)) {
+      mal("los comandos de la interfaz no cuentan para protegerlos de la cancelación del diagnóstico");
+    }
+    // la primitiva existe y, sin worker, no finge que canceló: es lo que la sonda mide después
+    if (typeof pestanaMod.hospedador.cancelarSiNadieEspera !== "function") {
+      mal("el hospedador no expone cancelarSiNadieEspera");
+    } else if (pestanaMod.hospedador.cancelarSiNadieEspera() !== false) {
+      mal("cancelarSiNadieEspera sin worker devuelve algo distinto de false");
+    }
+  }
+
   // 11d. la lista de clases se invalida sin `refrescar()`: crear o renombrar un `.java` publica
   // `apkc:proyecto-cambio` (lo mismo que hace `pestana.js` al guardar/crear/mover) y el siguiente
   // `cargarClasesProyecto()` vuelve a mirar el árbol. Se conduce con un OPFS de mentira y un
