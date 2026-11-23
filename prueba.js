@@ -1344,16 +1344,31 @@ if (pestanaMod.esXml("package x; import java.util.List; class X { List<String> x
 if (!pestanaMod.esXml('<!-- c --><resources><string name="x">y</string></resources>'))
   mal("esXml no reconoce un recurso que empieza por comentario");
 
-// el guardado del manifiesto tiene un veto: solo pasa lo que empieza por <manifest>, con BOM o
-// espacios delante y con la declaración XML delante. El XML de un layout no puede guardarse ahí.
+// el guardado del manifiesto tiene un veto: pasa lo que deja `<manifest>` por raíz después de los
+// prólogos que apkc traga (BOM, espacios, declaración XML, comentarios y DOCTYPE), y no pasa el
+// XML de un layout ni otro elemento raíz. El XML de un layout no puede guardarse en esa pestaña.
 if (!pestanaMod.pareceManifiesto('<manifest xmlns:android="http://schemas.android.com/apk/res/android" package="x"/>'))
   mal("pareceManifiesto rechaza un manifiesto sin declaración");
 if (!pestanaMod.pareceManifiesto('<?xml version="1.0" encoding="utf-8"?>\n<manifest package="x">\n</manifest>\n'))
   mal("pareceManifiesto rechaza un manifiesto con declaración XML");
 if (!pestanaMod.pareceManifiesto('\uFEFF  \n<?xml version="1.0"?><manifest package="x"/>'))
   mal("pareceManifiesto rechaza un manifiesto con BOM y espacios delante");
+// los prólogos que el parser de apkc se salta no pueden hacer que el veto sea más estricto
+if (!pestanaMod.pareceManifiesto('<!--x--><manifest package="x"/>'))
+  mal("pareceManifiesto rechaza un comentario delante de manifest");
+if (!pestanaMod.pareceManifiesto('<?xml version="1.0"?><!--c--><manifest/>'))
+  mal("pareceManifiesto rechaza declaración y comentario delante de manifest");
+if (!pestanaMod.pareceManifiesto('<!DOCTYPE manifest><manifest/>'))
+  mal("pareceManifiesto rechaza un DOCTYPE delante de manifest");
+if (!pestanaMod.pareceManifiesto('<!DOCTYPE manifest [ <!ENTITY x "y"> ]>\n<!--a\nb--><manifest\n package="x"/>'))
+  mal("pareceManifiesto rechaza DOCTYPE con subconjunto interno y comentario multilínea");
+if (!pestanaMod.pareceManifiesto('<manifest\n xmlns:android="http://schemas.android.com/apk/res/android">'))
+  mal("pareceManifiesto rechaza manifest con salto de línea");
 if (pestanaMod.pareceManifiesto('<?xml version="1.0" encoding="utf-8"?>\n<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android" />'))
   mal("pareceManifiesto acepta el XML de un layout");
+if (pestanaMod.pareceManifiesto('<LinearLayout manifest="x"/>') ||
+    pestanaMod.pareceManifiesto('<manifestacion/>') || pestanaMod.pareceManifiesto('<android:manifest/>'))
+  mal("pareceManifiesto acepta otro elemento que empieza por manifest");
 if (pestanaMod.pareceManifiesto("") || pestanaMod.pareceManifiesto("package x;"))
   mal("pareceManifiesto acepta un contenido vacío o Java");
 

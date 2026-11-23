@@ -1685,14 +1685,43 @@ function confirmarDescartes() { return window.confirm("Hay cambios sin guardar. 
 
 function rutaDeManifiesto(ruta) { return /(^|\/)AndroidManifest\.xml$/.test(String(ruta || "")); }
 
-// Un AndroidManifest.xml siempre empieza por <manifest>; el BOM y los espacios de delante son
-// legales, y la declaración `<?xml ...?>` puede precederle. Cualquier otra cosa —el XML de un
-// layout pegado en la pestaña del manifiesto— dejaría el proyecto roto y el error saldría del
-// build, lejos de la causa: se rechaza al guardar.
+// Un AndroidManifest.xml siempre tiene `<manifest>` por raíz, pero delante caben prólogos que
+// apkc acepta porque lo lee con `encoding/xml.Unmarshal`: BOM, espacios, la declaración
+// `<?xml ...?>`, comentarios —también de varias líneas— y un DOCTYPE, con o sin subconjunto
+// interno `[ ... ]`. El veto se salta esos prólogos y mira qué etiqueta queda: así no rechaza
+// nada que el parser acepte, y sigue parando el XML de un layout pegado en esta pestaña, que
+// dejaría el proyecto roto con el error lejos de la causa.
 function pareceManifiesto(texto) {
-  const limpio = String(texto == null ? "" : texto).replace(/^\uFEFF/, "").trimStart()
-    .replace(/^<\?xml[\s\S]*?\?>\s*/, "");
-  return /^<manifest(\s|\/?>)/.test(limpio);
+  let resto = String(texto == null ? "" : texto).replace(/^\uFEFF/, "");
+  for (;;) {
+    resto = resto.trimStart();                       // espacios y saltos entre prólogos
+    if (resto.startsWith("<?xml")) {
+      const fin = resto.indexOf("?>");
+      if (fin < 0) return false;
+      resto = resto.slice(fin + 2);
+      continue;
+    }
+    if (resto.startsWith("<!--")) {
+      const fin = resto.indexOf("-->");
+      if (fin < 0) return false;
+      resto = resto.slice(fin + 3);
+      continue;
+    }
+    if (resto.startsWith("<!DOCTYPE")) {
+      // termina en el primer `>` que no esté dentro del subconjunto interno `[ ... ]`
+      let i = 9, corchetes = 0;
+      for (; i < resto.length; i++) {
+        if (resto[i] === "[") corchetes += 1;
+        else if (resto[i] === "]") corchetes = Math.max(0, corchetes - 1);
+        else if (resto[i] === ">" && corchetes === 0) break;
+      }
+      if (i >= resto.length) return false;
+      resto = resto.slice(i + 1);
+      continue;
+    }
+    break;
+  }
+  return /^<manifest(\s|\/?>)/.test(resto);
 }
 
 // El motivo va a la barra (lo que se mira al volver a la pestaña) y a la consola de desarrollo.
