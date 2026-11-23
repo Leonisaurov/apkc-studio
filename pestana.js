@@ -498,6 +498,81 @@ async function exportarProyecto() {
   });
 }
 
+// --- importar con red ----------------------------------------------------------------------
+// `limpiar` devuelve `borradoDelDisco` y `existia`: si `/proyecto` estaba en el disco y no se
+// pudo borrar (otra pestaña con un handle abierto), escribir el zip encima deja una mezcla del
+// árbol viejo y el nuevo que nada delata. La decisión es pura para poder falsarla en `prueba.js`.
+export function decidirImportacion(limpieza) {
+  if (limpieza && (limpieza.borradoDelDisco === true || limpieza.existia === false)) {
+    return { puede: true, motivo: "" };
+  }
+  return {
+    puede: false,
+    motivo: "no se pudo borrar /proyecto del disco (¿otra pestaña tiene un fichero abierto?); " +
+      "la importación se cancela para no mezclar el zip con el proyecto actual",
+  };
+}
+
+async function escribirEntradas(entradas, prefijo, escribir) {
+  for (const entrada of entradas) {
+    if (entrada.dir) continue;
+    const ruta = prefijo + "/" + entrada.ruta;
+    const r = await escribir(ruta, entrada.datos);
+    if (r && r.tipo === "error") throw new Error(r.error || "no se pudo escribir " + ruta);
+  }
+}
+
+// Restaurar es dejar `/proyecto` como estaba: primero se borra lo que llegó a escribirse (si ese
+// borrado falla, escribir encima sería otra mezcla) y después vuelven los ficheros de la copia.
+// `false` = no se pudo, y quien llama lo avisa; nunca se devuelve éxito con la mezcla dentro.
+async function restaurarProyecto(previo, prefijo, limpiar, escribir) {
+  try {
+    const limpieza = await limpiar(prefijo);
+    if (!decidirImportacion(limpieza).puede) return false;
+    await escribirEntradas(previo, prefijo, escribir);
+    return true;
+  } catch (e) {
+    return false;
+  }
+}
+
+// Reemplazo de `/proyecto` con red, sin DOM ni OPFS propios: todo entra por parámetro para que
+// `prueba.js` pueda falsificar el disco. Si la escritura falla a mitad (cuota, handle, CRC) se
+// restaura la copia previa; si tampoco se puede, `/proyecto` queda vacío y `restaurado: false`.
+export async function reemplazarProyecto({ entradas, previo = [], prefijo, limpiar, escribir, refrescar }) {
+  const limpieza = await limpiar(prefijo);
+  const decision = decidirImportacion(limpieza);
+  if (!decision.puede) {
+    // el espejo del worker ya perdió el subárbol al intentar limpiar: se vuelve a descubrir del
+    // disco para que el árbol de la página no mienta mientras se avisa del aborto
+    if (refrescar) {
+      try { await refrescar(prefijo); } catch (e) { /* la página se repinta igual */ }
+    }
+    return { ok: false, motivo: decision.motivo, restaurado: true };
+  }
+  try {
+    await escribirEntradas(entradas, prefijo, escribir);
+    return { ok: true, motivo: "", restaurado: false };
+  } catch (e) {
+    const motivo = "la escritura falló a mitad: " + (e && e.message ? e.message : e);
+    return { ok: false, motivo, restaurado: await restaurarProyecto(previo, prefijo, limpiar, escribir) };
+  }
+}
+
+// Copia del proyecto actual, antes de tocarlo: es a lo que se vuelve si la escritura falla a
+// mitad. Los directorios no hacen falta porque `escribir` crea los padres de cada fichero.
+async function copiaDelProyecto() {
+  const arbol = await hospedador.arbol();
+  const nodos = (arbol.nodos || []).filter(
+    (n) => !n.dir && n.ruta.startsWith(PROYECTO + "/"));
+  const copia = [];
+  for (const n of nodos) {
+    const bytes = await hospedador.bytes(n.ruta);
+    if (bytes) copia.push({ ruta: n.ruta.slice(PROYECTO.length + 1), datos: bytes });
+  }
+  return copia;
+}
+
 async function importarProyecto(archivo) {
   if (!archivo) return;
   return conCarga("Leyendo " + archivo.name + "…", async () => {
@@ -510,16 +585,27 @@ async function importarProyecto(archivo) {
       if (!window.confirm("Importar «" + archivo.name + "» reemplaza el proyecto actual (" +
           ficheros.length + " ficheros)" + (sucios ? " y hay cambios sin guardar" : "") +
           ". Exporta antes si quieres conservarlo. ¿Seguir?")) return;
+      // la copia se lee antes de limpiar: es la única versión del árbol viejo que quedará
+      const previo = await copiaDelProyecto();
+      let resultado = null;
       await conBloqueo(async () => {
-        await hospedador.limpiar(PROYECTO);
-        for (const entrada of entradas) {
-          if (entrada.dir) continue;
-          const ruta = PROYECTO + "/" + entrada.ruta;
-          const r = await hospedador.escribir(ruta, entrada.datos);
-          if (r && r.tipo === "error") throw new Error(r.error);
-          try { localStorage.setItem(claveRevision(ruta), nuevaRevision()); } catch (e) { /* sin revisión */ }
-        }
+        resultado = await reemplazarProyecto({
+          entradas: ficheros, previo, prefijo: PROYECTO,
+          limpiar: hospedador.limpiar, escribir: hospedador.escribir,
+          refrescar: hospedador.refrescar,
+        });
       });
+      if (!resultado || !resultado.ok) {
+        // con `restaurado: false` el disco no es de fiar: se suelta el editor para no seguir
+        // editando sobre un árbol a medias, y el aviso dice qué pasó
+        if (resultado && resultado.restaurado === false) limpiarEstadoEditor();
+        await refrescarArbol();
+        throw new Error((resultado && resultado.motivo) || "la importación no se completó");
+      }
+      for (const entrada of ficheros) {
+        try { localStorage.setItem(claveRevision(PROYECTO + "/" + entrada.ruta), nuevaRevision()); }
+        catch (e) { /* sin revisión */ }
+      }
       limpiarEstadoEditor();
       await refrescarArbol();
       publicar({ tipo: "proyecto", accion: "importar" });

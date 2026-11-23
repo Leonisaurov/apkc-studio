@@ -2215,6 +2215,99 @@ public final class R {
     }
   }
 
+  // 14. F4: la importación no mezcla el zip con el árbol viejo ni deja un proyecto a medias.
+  //     Decisión y rollback son puros (el fs entra por parámetro), así que se falsifican aquí.
+  {
+    // el borrado falla y hay proyecto previo: se aborta antes de escribir nada
+    const aborta = pestanaMod.decidirImportacion({ nodos: 2, borradoDelDisco: false, existia: true });
+    if (aborta.puede || !/cancela/.test(aborta.motivo)) {
+      mal("F4: decidirImportacion deja pasar la importación con /proyecto sin borrar");
+    }
+    if (!pestanaMod.decidirImportacion({ nodos: 0, borradoDelDisco: true }).puede) {
+      mal("F4: decidirImportacion bloquea la importación con /proyecto ya borrado");
+    }
+    if (!pestanaMod.decidirImportacion({ nodos: 0, borradoDelDisco: false, existia: false }).puede) {
+      mal("F4: decidirImportacion bloquea la primera importación (no había /proyecto)");
+    }
+    if (pestanaMod.decidirImportacion(null).puede) {
+      mal("F4: decidirImportacion acepta una limpieza sin respuesta");
+    }
+
+    // camino del aborto: no se escribe ni una entrada y el espejo del worker se refresca
+    let escrituras = 0, refrescos = 0;
+    const aborto = await pestanaMod.reemplazarProyecto({
+      entradas: [{ ruta: "AndroidManifest.xml", datos: "nuevo" }],
+      previo: [{ ruta: "A.java", datos: "viejo" }],
+      prefijo: "/proyecto",
+      limpiar: async () => ({ nodos: 1, borradoDelDisco: false, existia: true }),
+      escribir: async () => { escrituras++; return { tipo: "montado" }; },
+      refrescar: async () => { refrescos++; },
+    });
+    if (aborto.ok || aborto.restaurado !== true || escrituras !== 0 || refrescos !== 1) {
+      mal("F4: con el borrado fallido la importación escribe o no refresca el árbol");
+    }
+
+    // falla la segunda escritura: vuelve la copia previa entera, sin restos del zip
+    const disco = new Map([["/proyecto/A.java", "viejo"]]);
+    let paso = 0;
+    const vuelta = await pestanaMod.reemplazarProyecto({
+      entradas: [{ ruta: "AndroidManifest.xml", datos: "nuevo" },
+        { ruta: "B.java", datos: "nuevoB" }],
+      previo: [{ ruta: "A.java", datos: "viejo" }],
+      prefijo: "/proyecto",
+      limpiar: async () => { disco.clear(); return { nodos: 1, borradoDelDisco: true, existia: true }; },
+      escribir: async (ruta, datos) => {
+        paso++;
+        if (paso === 2) return { tipo: "error", error: "QuotaExceededError" };
+        disco.set(ruta, datos);
+        return { tipo: "montado" };
+      },
+      refrescar: async () => {},
+    });
+    if (vuelta.ok || vuelta.restaurado !== true) {
+      mal("F4: una escritura fallida a mitad se da por buena");
+    }
+    if (disco.size !== 1 || disco.get("/proyecto/A.java") !== "viejo") {
+      mal("F4: el rollback no devuelve la copia previa de /proyecto");
+    }
+
+    // tampoco se puede restaurar: /proyecto queda vacío y la respuesta dice que no hubo vuelta
+    const sucio = new Map([["/proyecto/A.java", "viejo"]]);
+    let otro = 0;
+    const perdido = await pestanaMod.reemplazarProyecto({
+      entradas: [{ ruta: "AndroidManifest.xml", datos: "nuevo" },
+        { ruta: "B.java", datos: "nuevoB" }],
+      previo: [{ ruta: "A.java", datos: "viejo" }],
+      prefijo: "/proyecto",
+      limpiar: async () => { sucio.clear(); return { nodos: 1, borradoDelDisco: true, existia: true }; },
+      escribir: async (ruta, datos) => {
+        otro++;
+        if (otro >= 2) return { tipo: "error", error: "QuotaExceededError" };
+        sucio.set(ruta, datos);
+        return { tipo: "montado" };
+      },
+      refrescar: async () => {},
+    });
+    if (perdido.ok || perdido.restaurado !== false) {
+      mal("F4: sin rollback posible la importación se declara buena");
+    }
+    if (sucio.size !== 0) {
+      mal("F4: sin rollback posible queda una mezcla silenciosa en /proyecto");
+    }
+
+    // el orden del fuente: la copia se lee antes de limpiar y el fallo no sigue como éxito
+    const importarFn = pestana.slice(
+      pestana.indexOf("async function importarProyecto("),
+      pestana.indexOf("// --- documentos abiertos"));
+    if (!importarFn || importarFn.indexOf("copiaDelProyecto()") < 0 ||
+        importarFn.indexOf("copiaDelProyecto()") > importarFn.indexOf("conBloqueo(")) {
+      mal("F4: importarProyecto no copia /proyecto antes de limpiarlo");
+    }
+    if (!/reemplazarProyecto\(/.test(importarFn) || !/resultado\.ok/.test(importarFn)) {
+      mal("F4: importarProyecto no comprueba el resultado del reemplazo");
+    }
+  }
+
   console.log(fallos ? `PRUEBA FALLA: ${fallos} problemas` : "prueba: todo en orden");
   process.exit(fallos ? 1 : 0);
 })();

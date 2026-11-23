@@ -538,12 +538,17 @@ export function crearFs(carpeta) {
       const afectados = [...raiz.keys()].filter((k) => k === a || k.startsWith(a + "/"));
       for (const k of afectados) raiz.delete(k);
       let borradoDelDisco = false;
+      let existia = false;
       try {
         const carpetaPadre = await directorio(tramos, false);
+        // `existia` separa «no había nada que borrar» de «estaba y el borrado falló» (otra
+        // pestaña con un handle abierto): sin esa diferencia la importación no puede decidir
+        // entre seguir con un proyecto vacío y abortar para no mezclar.
+        try { await carpetaPadre.getDirectoryHandle(nombre); existia = true; } catch (e) { existia = false; }
         await carpetaPadre.removeEntry(nombre, { recursive: true });
         borradoDelDisco = true;
       } catch (e) { /* no estaba en el disco: solo se quitó de la memoria */ }
-      return { nodos: afectados.length, borradoDelDisco };
+      return { nodos: afectados.length, borradoDelDisco, existia };
     },
     async existe(rutaSimulada) { return !!raiz.get(absoluta(String(rutaSimulada))); },
     // Otra ventana cambió OPFS: este worker tiene su propio espejo en memoria. Se tira el

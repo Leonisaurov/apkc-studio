@@ -113,8 +113,11 @@ los imports y no debe depender de ese puente.
   `DataTransfer`.
 - **El proyecto se exporta e importa en `.zip`.** `proyecto.js` escribe con `makeZip` (ahora
   acepta `Uint8Array`) y lee STORE y DEFLATE con CRC; rechaza `..`, rutas absolutas, `\` y ZIP64.
-  Importar reemplaza `/proyecto` **solo tras confirmar**. No metas el zip en OPFS sin pasar por
-  `leerZip`.
+  Importar reemplaza `/proyecto` **solo tras confirmar** y **solo si el borrado en disco funcionó**
+  (`borradoDelDisco`): si otra pestaña tiene un handle abierto, se aborta en vez de mezclar. Si una
+  escritura falla a mitad, se restaura la copia previa; si tampoco se puede, `/proyecto` queda vacío
+  y se avisa (`reemplazarProyecto` en `pestana.js`, falsificado en `prueba.js`). No metas el zip en
+  OPFS sin pasar por `leerZip`.
 - **Los ajustes viven en el manifiesto.** `conAjustes()` toca `versionCode`, `versionName`,
   `minSdkVersion` y `targetSdkVersion`, añade `<uses-sdk>` si falta y quita `maxSdkVersion`; no
   crea un fichero paralelo. La plantilla de `app.js` tampoco escribe `maxSdkVersion`.
