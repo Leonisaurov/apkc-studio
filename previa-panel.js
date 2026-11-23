@@ -37,11 +37,11 @@ import {
   pintarModelo, modeloActual, EVENTO_PREVIA, modeloDeSalida, pintarVistaPrevia, nodosAplanados,
   textoDeNodo, rectsEscalados, escalaPara, MENSAJE_SIN_MODELO, textoDelModelo,
 } from "./vista-previa.js";
-import { modeloDeLayout, decodificarEntidades, paddingDe, esLineal, atributoLocal } from "./vista-xml.js";
+import { modeloDeLayout, decodificarEntidades, paddingDe, contenedorDe, atributoLocal } from "./vista-xml.js";
 import {
   insertarElemento, moverEnMarco, reordenarHijo, borrarElemento,
   leerPropiedades, escribirPropiedad, tiposRaizDisponibles, cambiarTipoRaiz,
-  infoTipo, iconosSistema, tamanoDeTipo,
+  iconosSistema, tamanoDeTipo,
 } from "./layout-editor.js";
 import { RUTA_ULTIMA_APK, leerUltimaApk, fechaDeMeta, EVENTO_ULTIMA_APK } from "./ultima-apk.js";
 
@@ -2415,8 +2415,7 @@ export function crearPreviaPanel({ hospedador, proyecto, estadoPestana, editor, 
   const UMBRAL_PALETA = 5;
 
   function esContenedorNodo(nodo) {
-    const info = nodo ? infoTipo(String(nodo.tipo || "")) : null;
-    return !!(info && info.contenedor);
+    return contenedorDe(nodo) !== "";
   }
 
   function hijosDelModelo(nodo) {
@@ -2447,7 +2446,7 @@ export function crearPreviaPanel({ hospedador, proyecto, estadoPestana, editor, 
     if (!destino) return { ok: false, motivo: "La raíz no admite hijos: elige un contenedor." };
     const padre = destino.nodo;
     const opciones = { tipo, padre: destino.ruta };
-    if (esLineal(padre.tipo)) {
+    if (contenedorDe(padre) === "lineal") {
       // un lineal coloca en orden: el punto decide entre qué hermanos entra
       const vertical = atributoLocal(padre.atributos, "orientation") !== "horizontal";
       const pos = vertical ? y : x;
@@ -3299,7 +3298,7 @@ export function crearPreviaPanel({ hospedador, proyecto, estadoPestana, editor, 
     const padre = nodoPorRuta(modelo.raiz, rutaPadre);
     if (!nodo || !nodo.rect || !padre || !padre.rect) return false;
     const texto = String(editor.texto());
-    if (esLineal(padre.tipo)) {
+    if (contenedorDe(padre) === "lineal") {
       // Un layout lineal coloca en orden: mover es reordenar los hijos en el XML.
       const vertical = atributoLocal(padre.atributos, "orientation") !== "horizontal";
       const otros = (padre.hijos || [])

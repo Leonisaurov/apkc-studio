@@ -233,6 +233,10 @@ la jerarquía de vistas y estas reglas:
 
 - `LinearLayout` (vertical y horizontal) con **`layout_weight`**; `FrameLayout`,
   `RelativeLayout`, `ScrollView` y cualquier otro contenedor como marco;
+- un **tipo propio totalmente cualificado** (`com.ejemplo.lienzo.Lienzo`) como contenedor por
+  declaración: el editor no resuelve la herencia de Java, así que un nombre con paquete que no
+  sea del framework de hoja se dibuja como lineal (`android:orientation` decide el eje) para que
+  sus hijos se repartan y no se apilen en (0,0);
 - `android:text` literal y **`@string/nombre`**, resuelto con los `res/values*/strings.xml` del
   proyecto leídos de OPFS (con caché de 5 s); lo que no se resuelve se cuenta en el estado;
 - `layout_width`/`layout_height` (`match_parent`, `wrap_content`, `Ndp`);
@@ -387,7 +391,9 @@ Frontera del modo editar: solo cambia lo que el render en vivo entiende. No hay 
 `ConstraintLayout` (ni `bias`, ni cadenas), ni estilos ni temas, ni reparentado de un nodo que ya
 está dibujado (arrastrar un nodo dentro de otro contenedor), ni edición de `@string`, ni de `@color`
 (se referencian, no se crean), y un layout lineal no admite posición libre: ahí mover es reordenar.
-`android:enabled` se escribe como atributo válido pero el dibujo no lo imita. Cambiar la raíz a
+Un tipo propio cualificado cuenta como contenedor aunque en el código herede de `View` (el
+editor no lee las clases): es la frontera del reconocimiento por declaración. `android:enabled`
+se escribe como atributo válido pero el dibujo no lo imita. Cambiar la raíz a
 `RelativeLayout` se rechaza por nombre por la razón de arriba; tampoco se cambia una raíz que no sea
 `LinearLayout` o `FrameLayout`. En las imágenes, un `drawable` vectorial (`.xml`) no se dibuja (solo
 PNG/JPG/WebP), los iconos `@android:drawable/…` se dibujan como marcador con su nombre porque viven

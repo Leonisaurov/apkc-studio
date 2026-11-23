@@ -6,6 +6,11 @@
 // Lo que sí entiende del subconjunto que usan las plantillas y el editor:
 //   - jerarquía de vistas y los contenedores `LinearLayout` (vertical/horizontal, pesos) y los de
 //     marco (`FrameLayout`, `RelativeLayout`, `ScrollView`, `ConstraintLayout`… como marco);
+//   - un tipo propio totalmente cualificado (`com.ejemplo.lienzo.Lienzo`) cuenta como contenedor
+//     por declaración: el editor no resuelve la herencia de Java, así que se dibuja como lineal
+//     (vertical u horizontal según `android:orientation`) para que sus hijos se repartan y no se
+//     apilen en (0,0). Frontera: un tipo propio que en realidad herede de `View` también se dibuja
+//     como contenedor, y un tipo desconocido SIN cualificar sigue tratándose como hoja;
 //   - `android:text` literal y `@string/nombre` con el mapa que se le pase (OPFS lo lee el panel);
 //   - `android:background` y `android:textColor` (`#RGB`, `#ARGB`, `#RRGGBB`, `#AARRGGBB` o
 //     `@color/nombre` con el mapa de colores que también lee el panel), que el canvas usa al pintar;
@@ -240,6 +245,39 @@ export function esLineal(tipo) {
   return /^(LinearLayout|RadioGroup|TableRow|TableLayout)$/.test(tipo);
 }
 
+// Los contenedores no lineales que el modelo reconoce por nombre simple: se dibujan como marco.
+// No es la lista de Android, sino la del subconjunto que dibuja este fichero; lo que falte y llegue
+// cualificado se trata como contenedor propio (ver `tipoDeContenedor`).
+const CONTENEDORES_MARCO = /^(FrameLayout|RelativeLayout|ScrollView|HorizontalScrollView|GridLayout|ConstraintLayout|CoordinatorLayout|DrawerLayout|NestedScrollView|ViewPager|ViewPager2)$/;
+
+// Las vistas que no admiten hijos, por nombre simple. Sirve para no confundir un tipo del framework
+// escrito con su paquete (`android.widget.TextView`) con un contenedor propio sin resolver.
+const HOJAS_CONOCIDAS = /^(View|Space|TextView|EditText|AutoCompleteTextView|MultiAutoCompleteTextView|CheckedTextView|TextInputEditText|MaterialTextView|AppCompatTextView|Button|CompoundButton|ImageButton|MaterialButton|AppCompatButton|CheckBox|RadioButton|MaterialCheckBox|MaterialRadioButton|AppCompatCheckBox|AppCompatRadioButton|Switch|SwitchCompat|SwitchMaterial|MaterialSwitch|ToggleButton|ImageView|AppCompatImageView|MaterialImageView|AppCompatImageButton|ProgressBar|SeekBar|AppCompatSeekBar|MaterialSeekBar|RatingBar|Spinner|AppCompatSpinner|WebView|VideoView|SurfaceView|TextureView|Chronometer|AnalogClock|CalendarView|DatePicker|TimePicker|NumberPicker|ViewStub|SearchView|Toolbar|ScrollBar)$/;
+
+// El tipo de contenedor de una etiqueta, por su nombre tal como aparece en el XML: "lineal", "marco"
+// o "" (una vista que no admite hijos). Los tipos del framework se reconocen por el nombre simple.
+// Un tipo TOTALMENTE CUALIFICADO que no es conocido se trata como contenedor por declaración: no
+// hay forma de resolver la herencia de Java desde el editor, y el nombre con paquete es la señal de
+// que es una clase del proyecto. Se dibuja como lineal, que es lo único que reparte a los hijos en
+// vez de apilarlos en el origen; `android:orientation` decide el eje.
+export function tipoDeContenedor(nombre) {
+  const completo = String(nombre == null ? "" : nombre).trim();
+  const tipo = completo.replace(/^.*\./, "");
+  if (esLineal(tipo)) return "lineal";
+  if (CONTENEDORES_MARCO.test(tipo) || /Layout$/.test(tipo)) return "marco";
+  if (HOJAS_CONOCIDAS.test(tipo)) return "";
+  if (completo.includes(".")) return "lineal";
+  return "";
+}
+
+// La forma de contenedor de un nodo del modelo. `nodo.contenedor` lo deja `crearNodo`; el respaldo
+// por nombre cubre los modelos de `apkc preview` y los nodos construidos a mano en las pruebas.
+export function contenedorDe(nodo) {
+  if (!nodo) return "";
+  if (nodo.contenedor === "lineal" || nodo.contenedor === "marco") return nodo.contenedor;
+  return tipoDeContenedor(nodo.tipo || nodo.nombre || "");
+}
+
 function resolverTexto(valor, strings, resolucion) {
   if (typeof valor !== "string" || !valor) return "";
   if (valor.startsWith("@string/")) {
@@ -262,6 +300,7 @@ function crearNodo(elemento, resolucion, strings, colores) {
   })();
   const nodo = {
     tipo,
+    contenedor: tipoDeContenedor(elemento.nombre),
     id,
     texto: resolverTexto(local(elemento.atributos, "text"), strings, resolucion),
     fondo: colorDeCanvas(local(elemento.atributos, "background"), colores),
@@ -412,7 +451,7 @@ function disponer(nodo) {
     alto: Math.max(0, nodo.rect.alto - pad.arriba - pad.abajo),
   };
   if (!nodo.hijos.length) return;
-  if (esLineal(nodo.tipo)) colocarLineal(nodo, caja, local(nodo.atributos, "orientation") !== "horizontal");
+  if (contenedorDe(nodo) === "lineal") colocarLineal(nodo, caja, local(nodo.atributos, "orientation") !== "horizontal");
   else colocarMarco(nodo, caja);
 }
 

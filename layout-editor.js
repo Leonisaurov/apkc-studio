@@ -7,7 +7,10 @@
 //
 // Lo que sabe hacer, y nada más:
 //   - añadir un elemento de la paleta: como último hijo de la raíz o, si se suelta sobre un
-//     contenedor, dentro de él, en una posición y con los márgenes del punto donde se soltó;
+//     contenedor, dentro de él, en una posición y con los márgenes del punto donde se soltó; un
+//     tipo propio totalmente cualificado (`com.ejemplo.lienzo.Lienzo`) cuenta como contenedor por
+//     declaración: el editor no resuelve la herencia de Java y el paquete es la única señal de que
+//     es una clase del proyecto;
 //   - mover un hijo de un marco (`FrameLayout` y cualquier contenedor que no sea lineal) con
 //     `layout_marginLeft`/`layout_marginTop` —la gravedad se quita para que el margen mande—;
 //   - reordenar un hijo de un `LinearLayout` (un layout lineal no tiene posición libre: mover es
@@ -25,7 +28,7 @@
 // editor). Tampoco se cambia la raíz a `RelativeLayout`: sus reglas (`layout_toRightOf`,
 // `layout_alignParent…`) no las escribe este editor y la gravedad que sí escribe no la aplica
 // Android, así que el dibujo mentiría. Se rechaza por nombre en `cambiarTipoRaiz`.
-import { analizarXml, atributoLocal } from "./vista-xml.js";
+import { analizarXml, atributoLocal, tipoDeContenedor } from "./vista-xml.js";
 
 // Las propiedades que el panel sabe leer y escribir. El orden es el de la ficha: identidad, texto,
 // colores, medidas, gravedad y el resto. `tipo` decide el control y la validación.
@@ -350,7 +353,7 @@ export function insertarElemento(xml, opciones) {
   const padre = rutaPadre.length ? nodoEnRuta(raiz, rutaPadre) : raiz;
   if (!padre) return { ok: false, error: "el contenedor de destino no está en el layout" };
   const tipoPadre = String(padre.nombre || "").replace(/^.*\./, "");
-  if (!(TIPOS[tipoPadre] && TIPOS[tipoPadre].contenedor)) {
+  if (!tipoDeContenedor(padre.nombre)) {
     return { ok: false, error: tipoPadre + " no es un contenedor: no admite hijos" };
   }
   const id = idLibre(fuente, TIPOS[tipo].id);

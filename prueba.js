@@ -593,6 +593,73 @@ if (conLinea.ok !== false || !(conLinea.linea >= 1)) {
   mal("modeloDeLayout no dice la línea del XML roto: " + JSON.stringify(conLinea));
 }
 
+// 6e-bis. un tipo propio TOTALMENTE CUALIFICADO cuenta como contenedor por declaración: el editor
+// no resuelve la herencia de Java, así que se dibuja como lineal para que sus hijos se repartan.
+// Falsificación: si se apaga el reconocimiento, los hijos vuelven a apilarse en (0,0) y esta
+// comprobación falla con ese síntoma, que es el que dejó abierto el frente de la vista propia.
+const layoutPropia = `<?xml version="1.0" encoding="utf-8"?>
+<com.ejemplo.lienzo.Lienzo xmlns:android="http://schemas.android.com/apk/res/android"
+    android:id="@+id/lienzo"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent">
+    <TextView android:id="@+id/uno" android:layout_width="wrap_content"
+        android:layout_height="wrap_content" android:text="Uno"/>
+    <Button android:id="@+id/dos" android:layout_width="wrap_content"
+        android:layout_height="wrap_content" android:text="Dos"/>
+</com.ejemplo.lienzo.Lienzo>`;
+const propia = vistaXml.modeloDeLayout(layoutPropia, { layout: "res/layout/main.xml" });
+if (!propia.ok) {
+  mal("modeloDeLayout no lee un layout de vista propia: " + propia.error);
+} else {
+  const raiz = propia.modelo.raiz;
+  if (raiz.tipo !== "Lienzo" || raiz.contenedor !== "lineal") {
+    mal("un tipo propio cualificado no se reconoce como contenedor: " +
+      JSON.stringify({ tipo: raiz.tipo, contenedor: raiz.contenedor }));
+  }
+  const [uno, dos] = raiz.hijos;
+  if (uno.rect.y === 0 && dos.rect.y === 0) {
+    mal("los hijos de un tipo propio se apilan en el origen: " + JSON.stringify([uno.rect, dos.rect]));
+  }
+  if (dos.rect.y !== uno.rect.alto) {
+    mal("los hijos de un tipo propio no se reparten en vertical: " + JSON.stringify([uno.rect, dos.rect]));
+  }
+  const capas = vistaPrevia.nodosAplanados(propia.modelo).map((p) => p.nodo.tipo);
+  if (capas.join(",") !== "Lienzo,TextView,Button") {
+    mal("el modelo no refleja la jerarquía de la vista propia: " + capas.join(","));
+  }
+}
+// el editor acepta hijos en el contenedor propio y los deja en la posición pedida
+const enPropia = layoutEditor.insertarElemento(layoutPropia, { tipo: "Button", padre: [], indice: 0 });
+if (!enPropia.ok) {
+  mal("el editor no admite hijos en un contenedor propio: " + enPropia.error);
+} else {
+  const modeloPropia = vistaXml.modeloDeLayout(enPropia.xml);
+  const hijosPropia = modeloPropia.ok ? modeloPropia.modelo.raiz.hijos : [];
+  if (JSON.stringify(enPropia.ruta) !== "[0]" || !hijosPropia[0] || hijosPropia[0].tipo !== "Button" ||
+      hijosPropia.length !== 3) {
+    mal("el hijo soltado en un contenedor propio no entra en su posición: " +
+      JSON.stringify({ ruta: enPropia.ruta, tipos: hijosPropia.map((h) => h.tipo) }));
+  }
+  if (hijosPropia[0] && hijosPropia[1] && hijosPropia[0].rect.y === hijosPropia[1].rect.y) {
+    mal("el hijo nuevo del contenedor propio se apila sobre el primero en el origen");
+  }
+}
+// una vista del framework escrita con su paquete no es un contenedor: manda el nombre simple
+if (vistaXml.tipoDeContenedor("android.widget.TextView") !== "") {
+  mal("un TextView cualificado se confunde con un contenedor");
+}
+const textoPropio = `<android.widget.TextView xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="x"/>`;
+const enTextoPropio = layoutEditor.insertarElemento(textoPropio, { tipo: "Button" });
+if (enTextoPropio.ok || !/no es un contenedor/.test(String(enTextoPropio.error))) {
+  mal("el editor mete un hijo en un TextView cualificado: " +
+    (enTextoPropio.error || enTextoPropio.xml));
+}
+// sin cualificar, un nombre desconocido sigue siendo hoja: no se inventa un contenedor
+if (vistaXml.tipoDeContenedor("Lienzo") !== "") {
+  mal("un tipo desconocido sin paquete se trata como contenedor");
+}
+
 // 6b-bis. el editor de layout del modo editar: añadir, mover, reordenar y borrar son operaciones
 // de TEXTO sobre el XML. Se prueban aquí porque son puras; que el panel las aplique con el canvas
 // y el undo tree se conduce en `prueba-pestana.js`.
