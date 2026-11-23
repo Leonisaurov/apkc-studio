@@ -1852,20 +1852,17 @@ async function guardar() {
     return false;
   }
   let doc = documentoActivo();
+  let nuevo = false;
   if (!doc) {
     // compatibilidad con quien fija estadoPestana.ruta a mano (las pruebas lo hacen) y con el
-    // primer guardado de un buffer sin nombre
+    // primer guardado de un buffer sin nombre. La existencia del fichero se comprueba dentro del
+    // mismo bloqueo que escribe (más abajo): fuera, otra ventana podía crearlo entre la
+    // confirmación y el `escribir` y se pisaba sin avisar (TOCTOU).
     const ruta = estadoPestana.ruta || await nuevoNombre();
     if (!ruta) return false;
-    const previo = await hospedador.leer(ruta);
-    if (previo && previo.bytes && !window.confirm("Ya existe " + relativa(ruta) + ". ¿Reemplazarlo?")) return false;
     doc = { ruta, texto: EDITOR.texto(), sucio: true, cursor: null, scroll: null,
       hist: Historial.crear(ruta, EDITOR.texto()) };
-    DOCUMENTOS.lista.push(doc);
-    DOCUMENTOS.activa = ruta;
-    estadoPestana.ruta = ruta;
-    revelarRuta(ruta);
-    renderPestanas();
+    nuevo = true;
   }
   if (!doc.hist) doc.hist = Historial.crear(doc.ruta, EDITOR.texto());
   volcarHistorial();
@@ -1881,9 +1878,18 @@ async function guardar() {
   // antes, otra ventana podía guardar entre la confirmación y el `escribir` y su cambio se
   // perdía sin avisar (TOCTOU). El diálogo corre con el bloqueo tomado, así que mientras está
   // abierto ninguna otra ventana puede escribir este proyecto; cancelar solo suelta el bloqueo.
+  // Lo mismo vale para el «Ya existe» del buffer que todavía no tiene pestaña.
   let sobrescribir = true;
   try {
     await conBloqueo(async () => {
+      if (nuevo) {
+        const previo = await hospedador.leer(ruta);
+        if (previo && previo.bytes &&
+            !window.confirm("Ya existe " + relativa(ruta) + ". ¿Reemplazarlo?")) {
+          sobrescribir = false;
+          return;
+        }
+      }
       const revisionGuardada = revisionActual(ruta);
       if (anterior && revisionGuardada && anterior !== revisionGuardada &&
           !window.confirm("Otra ventana guardó " + relativa(ruta) + ". ¿Sobrescribir?")) {
@@ -1899,6 +1905,16 @@ async function guardar() {
     return false;
   }
   if (!sobrescribir) return false;
+  // el buffer sin pestaña se registra solo cuando el guardado procede: cancelar el «Ya existe»
+  // no deja una pestaña a medio abrir de un fichero que no se escribió
+  if (nuevo) {
+    DOCUMENTOS.lista.push(doc);
+    DOCUMENTOS.activa = ruta;
+    estadoPestana.ruta = ruta;
+    revelarRuta(ruta);
+    renderPestanas();
+    volcarHistorial();
+  }
   doc.revision = revision;
   doc.base = guardado;
   // si se siguió escribiendo o se cambió de pestaña mientras el worker guardaba, el documento

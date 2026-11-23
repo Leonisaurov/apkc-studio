@@ -2367,6 +2367,55 @@ public final class R {
     }
   }
 
+  // 15. F3: ningún `window.confirm` de `guardar()` puede quedar fuera de un `conBloqueo`. La
+  //     rama sin documento activo («Ya existe … ¿Reemplazarlo?») leía y confirmaba antes de
+  //     entrar al bloqueo y, como el documento nuevo no traía `revision`, el guard del bloqueo
+  //     no disparaba: otra ventana podía crear el fichero entre la confirmación y el `escribir`.
+  //     Se recorre el fuente de verdad —los cuerpos de todos los `conBloqueo(...)`— en vez de
+  //     dar por bueno el orden de un solo texto literal.
+  {
+    const fuenteGuardar = (() => {
+      const i = pestana.indexOf("async function guardar()");
+      const j = i < 0 ? -1 : pestana.indexOf("async function guardarParaCompilar()", i);
+      return i < 0 || j < 0 ? "" : pestana.slice(i, j);
+    })();
+    // rangos [inicio, fin] de cada cuerpo `conBloqueo(… => { … })`, con las llaves emparejadas
+    const rangosDeBloqueo = (fuente) => {
+      const rangos = [];
+      const marca = "conBloqueo(";
+      for (let desde = 0; ;) {
+        const i = fuente.indexOf(marca, desde);
+        if (i < 0) break;
+        const abre = fuente.indexOf("{", i);
+        if (abre < 0) break;
+        let nivel = 0;
+        for (let j = abre; j < fuente.length; j++) {
+          if (fuente[j] === "{") nivel += 1;
+          else if (fuente[j] === "}" && --nivel === 0) { rangos.push([i, j]); break; }
+        }
+        desde = i + marca.length;
+      }
+      return rangos;
+    };
+    const rangos = rangosDeBloqueo(fuenteGuardar);
+    const dentro = (indice) => rangos.some(([a, b]) => indice > a && indice < b);
+    const confirmes = [...fuenteGuardar.matchAll(/window\.confirm\(/g)].map((m) => m.index);
+    if (!confirmes.length) {
+      mal("guardar() no tiene ningún window.confirm: la prueba no puede vigilar el TOCTOU");
+    }
+    for (const indice of confirmes) {
+      if (!dentro(indice)) {
+        mal("guardar() confirma fuera de conBloqueo: otra ventana puede escribir entre la confirmación y el guardado");
+      }
+    }
+    // la lectura que decide si el fichero ya existe corre con el mismo bloqueo que la escritura
+    for (const m of fuenteGuardar.matchAll(/hospedador\.leer\(/g)) {
+      if (!dentro(m.index)) {
+        mal("guardar() lee OPFS fuera de conBloqueo: la comprobación de «ya existe» sigue siendo TOCTOU");
+      }
+    }
+  }
+
   console.log(fallos ? `PRUEBA FALLA: ${fallos} problemas` : "prueba: todo en orden");
   process.exit(fallos ? 1 : 0);
 })();
