@@ -488,6 +488,75 @@ const conductor = `(async () => {
       pantalla: (document.getElementById("vista-toast") || {}).hidden,
       panel: (document.getElementById("previa-toast") || {}).hidden,
     };
+    // Hot swap: el dex del propio proyecto se suelta en el canvas del panel con la firma del
+    // método que la plantilla Menú ya ejecutó. El modelo tiene que publicar el intercambio en
+    // ejecucion.intercambios y el registro pintarlo, sin recompilar y sin perder la sesión. El
+    // dex no viaja como binario versionado: se saca del apk que acaba de compilar la pestaña.
+    const dexSwap = await (async () => {
+      try {
+        const apk = await hospedador.bytes(PROYECTO + "/build/app.apk");
+        const entradas = await leerZip(apk);
+        return (entradas.find((e) => !e.dir && e.ruta === "classes.dex") || {}).datos || null;
+      } catch (e) { return "ERROR: " + e.message; }
+    })();
+    const manifiestoSwap = new TextDecoder().decode(
+      await hospedador.bytes(PROYECTO + "/AndroidManifest.xml"));
+    const paqueteSwap = (/package="([^"]+)"/.exec(manifiestoSwap) || [])[1] || "";
+    // la firma sin «/metodo» cambia la clase entera, que es la forma natural de la pestaña. Se usa
+    // esa y no un método concreto porque todo método útil de la plantilla lleva un parámetro de
+    // referencia y el parser de --intercambiar corta por el ÚLTIMO «;» del descriptor: con
+    // (Landroid/os/Bundle;)V se comería la firma (deuda del comando, no de la pestaña).
+    const firmaSwap = "L" + paqueteSwap.replace(/\\./g, "/") + "/MainActivity;";
+    const campoSwap = document.getElementById("previa-intercambio-firma");
+    const botonSwap = document.getElementById("previa-intercambiar");
+    const canvasSwap = document.getElementById("previa-lateral-canvas");
+    const filasRegistro = () =>
+      [...document.querySelectorAll("#previa-log-lista li")].map((li) => li.textContent);
+    const esperarSwap = async (aguja, intentos = 40) => {
+      for (let i = 0; i < intentos; i++) {
+        await new Promise((ok) => setTimeout(ok, 400));
+        if (filasRegistro().some((f) => f.indexOf(aguja) >= 0)) return;
+      }
+    };
+    r.swapControl = {
+      firma: !!campoSwap,
+      boton: !!botonSwap,
+      etiqueta: botonSwap ? botonSwap.getAttribute("aria-label") : "",
+      fichero: !!document.getElementById("previa-intercambio-fichero"),
+      vistaFirma: !!document.getElementById("vista-intercambio-firma"),
+      vistaBoton: !!document.getElementById("vista-intercambiar"),
+    };
+    if (typeof dexSwap === "string" || !dexSwap) {
+      r.swap = { faltaDex: typeof dexSwap === "string" ? dexSwap : "el apk no trae classes.dex" };
+    } else if (!campoSwap || !canvasSwap) {
+      r.swap = { faltaControl: true };
+    } else {
+      campoSwap.value = firmaSwap;
+      const soltadoSwap = soltarEn(canvasSwap,
+        new File([dexSwap], "nuevo.dex", { type: "application/x-dex" }));
+      await esperarSwap("existía");
+      const estadoSwap = PREVIA_PANEL.estado();
+      const filasSwap = filasRegistro();
+      r.swap = {
+        soltado: soltadoSwap,
+        firma: firmaSwap,
+        filas: filasSwap,
+        guion: estadoSwap.guion,
+        rutas: estadoSwap.intercambios,
+        estado: document.getElementById("previa-render-estado").textContent,
+      };
+      // un dex roto se rechaza antes de tocar OPFS y sin añadir un paso al guion
+      const antesRoto = PREVIA_PANEL.estado().guion.length;
+      soltarEn(canvasSwap, new File([new Uint8Array([1, 2, 3, 4])], "roto.dex",
+        { type: "application/octet-stream" }));
+      await new Promise((ok) => setTimeout(ok, 600));
+      r.swap.roto = {
+        filas: filasRegistro(),
+        estado: document.getElementById("previa-render-estado").textContent,
+        pasos: PREVIA_PANEL.estado().guion.length,
+        antes: antesRoto,
+      };
+    }
   }
   r.sinUndefined = !/undefined/.test(document.body.innerText);
 
@@ -739,6 +808,45 @@ function comprueba(cond, msg) { if (!cond) { fallos++; console.log("  FALLO:", m
         "un repintado del mismo modelo resucitó el Toast caducado: " +
         JSON.stringify(v.toastTardeRepintado));
       console.log("  toast:", JSON.stringify({ pantalla: v.toast, panel: v.toastPanel }).slice(0, 500));
+      // el hot swap: control en las dos superficies, dex desde el apk compilado y rechazo del roto
+      const sc = v.swapControl || {};
+      comprueba(sc.firma && sc.boton && sc.fichero && sc.vistaFirma && sc.vistaBoton &&
+        /dex/i.test(String(sc.etiqueta)),
+        "el control de hot swap no está montado en las dos superficies: " + JSON.stringify(sc));
+      const sw = v.swap || {};
+      comprueba(!sw.faltaDex && !sw.faltaControl,
+        "no se pudo preparar el hot swap: " + JSON.stringify({ dex: sw.faltaDex,
+          control: sw.faltaControl }));
+      if (!sw.faltaDex && !sw.faltaControl) {
+        comprueba(sw.soltado === true,
+          "el drop del .dex no cancela el navegador: soltarlo abriría el documento");
+        comprueba(Array.isArray(sw.filas) && sw.filas.some((f) =>
+          f.indexOf(sw.firma) >= 0 && /existía: sí/.test(String(f))),
+          "el registro no pintó el intercambio con clase, método, proto y existía: " +
+          JSON.stringify((sw.filas || []).slice(-4)).slice(0, 500));
+        comprueba(Array.isArray(sw.guion) && sw.guion.some((p) =>
+          String(p).indexOf("intercambiar:") === 0 && String(p).indexOf(sw.firma) > 0),
+          "el evento `intercambiar` con la firma no entró en el guion del intérprete: " +
+          JSON.stringify(sw.guion));
+        comprueba(Array.isArray(sw.rutas) && sw.rutas.length === 1 &&
+          /^\/previa-soltada\/intercambio-\d+\.dex$/.test(String(sw.rutas[0])),
+          "el dex no quedó en la zona aislada de OPFS (/previa-soltada/): " +
+          JSON.stringify(sw.rutas));
+        comprueba(/res\/layout\/main\.xml/.test(String(sw.estado)) &&
+          !/sin ejecución/i.test(String(sw.estado)),
+          "el hot swap perdió el modelo: la línea del emulador quedó en " +
+          String(sw.estado).slice(0, 160));
+        const roto = sw.roto || {};
+        comprueba(roto.pasos === roto.antes &&
+          Array.isArray(roto.filas) &&
+          roto.filas.some((f) => /no se intercambió roto\.dex/.test(String(f)) &&
+            /no es un dex/.test(String(f))) &&
+          /no se intercambió roto\.dex/.test(String(roto.estado)),
+          "el dex roto no se rechazó con su nombre y su motivo, o dejó un paso en el guion: " +
+          JSON.stringify(roto).slice(0, 500));
+        console.log("  swap:", JSON.stringify({ firma: sw.firma, rutas: sw.rutas,
+          ultimas: (sw.filas || []).slice(-2), roto: (roto.filas || []).slice(-1) }).slice(0, 700));
+      }
     } else {
       console.log("  toast: sin APKC_WASM, se omite la compilación de la plantilla Menú");
     }

@@ -258,6 +258,16 @@ export function resumenEjecucion(modelo) {
     .filter((o) => o && typeof o === "object")
     .map((o) => ({ id: comoTexto(o.id), idRef: comoTexto(o.idRef) }))
     .filter((o) => o.id || o.idRef);
+  // los hot swaps del guion: qué método se reemplazó o se añadió. `existia` es del JSON y se
+  // normaliza a booleano para que el registro no tenga que adivinar; un objeto sin clase ni método
+  // no es un intercambio y no se pinta.
+  const intercambios = (Array.isArray(ejecucion.intercambios) ? ejecucion.intercambios : [])
+    .filter((c) => c && typeof c === "object")
+    .map((c) => ({
+      clase: comoTexto(c.clase), metodo: comoTexto(c.metodo), proto: comoTexto(c.proto),
+      existia: c.existia === true,
+    }))
+    .filter((c) => c.clase || c.metodo);
   // el Toast es efímero: el intérprete publica el último en `toast` y deja todas sus líneas en
   // `consola`. El panel lo enseña sobre el teléfono unos segundos; la consola conserva el historial.
   const toast = comoTexto(ejecucion.toast);
@@ -286,6 +296,7 @@ export function resumenEjecucion(modelo) {
     consola,
     pulsaciones,
     oyentes,
+    intercambios,
     menu,
     toast,
     avisos,
@@ -302,15 +313,18 @@ export function menuDeModelo(modelo) {
 }
 
 // La línea de comandos de `apkc preview` para el guion de la pestaña. Cada paso conserva su orden:
-// un clic es `--pulsar`, desplegar el menú es `--menu` y elegir un ítem, `--menu-item menu/N`. Se
-// repite el guion entero en cada invocación porque el comando no guarda la máquina.
+// un clic es `--pulsar`, desplegar el menú es `--menu` y elegir un ítem, `--menu-item menu/N`, y un
+// hot swap es `--intercambiar clase/metodo(proto)=fichero.dex`. Se repite el guion entero en cada
+// invocación porque el comando no guarda la máquina; el dex vive en OPFS y se relee en cada pasada.
 export function argvDePrevia(guion, apk) {
   const argv = ["preview"];
   for (const paso of Array.isArray(guion) ? guion : []) {
     const tipo = paso && paso.tipo;
     if (tipo === "menu") argv.push("--menu");
     else if (tipo === "menu-item") argv.push("--menu-item", String(paso.valor));
-    else argv.push("--pulsar", String(paso && paso.valor));
+    else if (tipo === "intercambiar") {
+      argv.push("--intercambiar", String(paso.firma) + "=" + String(paso.ruta));
+    } else argv.push("--pulsar", String(paso && paso.valor));
   }
   argv.push(String(apk));
   return argv;
@@ -467,6 +481,7 @@ const SUPERFICIES = [
     pulsos: { caja: "previa-oyentes", cuenta: "previa-pulsos-cuenta", nota: "previa-pulsos-nota" },
     controles: "previa-emulador-controles",
     menu: { control: "previa-menu-opciones", lista: "previa-menu-lista" },
+    intercambio: { firma: "previa-intercambio-firma", boton: "previa-intercambiar", fichero: "previa-intercambio-fichero" },
     toast: "previa-toast",
   },
   {
@@ -481,6 +496,7 @@ const SUPERFICIES = [
     pulsos: { caja: "vista-oyentes", cuenta: "vista-pulsos-cuenta", nota: "vista-pulsos-nota" },
     controles: "vista-emulador-controles",
     menu: { control: "vista-menu-opciones", lista: "vista-menu-lista" },
+    intercambio: { firma: "vista-intercambio-firma", boton: "vista-intercambiar", fichero: "vista-intercambio-fichero" },
     toast: "vista-toast",
   },
 ];
@@ -508,6 +524,10 @@ const SECCION_POR_DEFECTO = "pulsos";
 // OPFS y `apkc preview` lo lee desde ahí. Así un arrastre no pisa `build/app.apk`, ni `res/`, ni
 // el estado de la última APK, y el siguiente build vuelve a su sitio sin limpiar nada.
 const RUTA_APK_SOLTADA = "/previa-soltada/apk-soltado.apk";
+// El dex de un hot swap tampoco entra en el proyecto: va a la misma zona aislada y `apkc preview`
+// lo lee con `--intercambiar`. Un fichero por swap para que el guion, que se repite entero en cada
+// invocación, no acabe leyendo el dex nuevo en los pasos viejos.
+const RUTA_DEX_SOLTADO = "/previa-soltada/intercambio-";
 
 // Las tres superficies que aceptan un fichero soltado: el canvas editable (junto al código), el del
 // emulador en el panel de la vista dividida y el de la vista Pantalla. Un `.apk` se abre igual desde
@@ -516,7 +536,7 @@ const RUTA_APK_SOLTADA = "/previa-soltada/apk-soltado.apk";
 const CANVAS_SOLTABLES = ["previa-vivo-canvas", "previa-lateral-canvas", "vista-previa"];
 // El aviso de que se puede soltar un apk: va en el `title` del canvas, que no ocupa sitio y sirve
 // también de tooltip. `detalleEmulador` lo conserva al reescribir el título con el modelo.
-const PISTA_SOLTAR_APK = "Suelta un .apk aquí para abrirlo en el emulador";
+const PISTA_SOLTAR_APK = "Suelta un .apk (o un .dex para intercambiar un método) aquí";
 
 // El progreso de un apk soltado: una barra indeterminada dentro del marco del teléfono, con el
 // texto de la carga, en las tres superficies. Los ids están en index.html y se documentan en
@@ -552,6 +572,71 @@ export function mensajeApkRechazado(nombre, bytes) {
   const motivo = motivoApkInvalido(bytes);
   if (!motivo) return "";
   return "no se cargó " + String(nombre || "el apk") + ": " + motivo;
+}
+
+// Un `.dex` que se suelta para el hot swap: se reconoce por la extensión o por el tipo, porque en
+// Linux llega como `application/octet-stream`. El contenido lo valida después `motivoDexInvalido`.
+export function esArchivoDex(archivo) {
+  if (!archivo) return false;
+  const tipo = String(archivo.type || "").toLowerCase();
+  if (tipo === "application/x-dex" || tipo === "application/dex") return true;
+  return /\.dex$/i.test(String(archivo.name || ""));
+}
+
+// motivoDexInvalido es la puerta previa a `apkc preview --intercambiar`: un fichero vacío, que no
+// empieza por el mágico `dex\n`, que no llega a la cabecera o cuya cabecera declara más bytes que
+// el fichero no puede llegar al intérprete. El dex que pasa el mágico pero está roto por dentro lo
+// rechaza el propio `preview`, que nombra el defecto concreto.
+export function motivoDexInvalido(bytes) {
+  if (!bytes || !bytes.length) return "el dex está vacío";
+  if (bytes.length < 4 || bytes[0] !== 0x64 || bytes[1] !== 0x65 || bytes[2] !== 0x78 || bytes[3] !== 0x0a) {
+    return "no es un dex: empieza por el mágico dex\\n";
+  }
+  if (bytes.length < 0x70) return "el dex está truncado: no llega a la cabecera de 112 bytes";
+  const version = String.fromCharCode(bytes[4], bytes[5], bytes[6]);
+  if (!/^0\d\d$/.test(version)) return "la versión del dex no tiene la forma 035, y llegó «" + version + "»";
+  const declarado = bytes[0x20] | (bytes[0x21] << 8) | (bytes[0x22] << 16) | (bytes[0x23] << 24);
+  if (!(declarado > 0) || declarado > bytes.length) {
+    return "la cabecera declara " + (declarado >>> 0) + " bytes y el fichero tiene " + bytes.length;
+  }
+  return "";
+}
+
+// mensajeDexRechazado une el nombre del fichero con el motivo, como el del apk: es la frase que se
+// queda en el registro y en la línea del emulador cuando el fichero no puede ser un dex.
+export function mensajeDexRechazado(nombre, bytes) {
+  const motivo = motivoDexInvalido(bytes);
+  if (!motivo) return "";
+  return "no se intercambió " + String(nombre || "el dex") + ": " + motivo;
+}
+
+// motivoFirmaInvalida es la puerta de la firma que acompaña al dex. La forma que acepta el
+// intérprete es `Lcom/hola/Saludo;/metodo(proto)`; sin `/metodo` se cambia la clase entera, que es
+// una forma legítima y por eso el método es opcional. Lo que no puede faltar es el descriptor.
+export function motivoFirmaInvalida(firma) {
+  const texto = String(firma || "").trim();
+  if (!texto) {
+    return "indica la firma clase/metodo en el campo «swap» antes de soltar el dex " +
+      "(Lcom/hola/Saludo;/metodo()I)";
+  }
+  if (texto.indexOf(";") < 0) {
+    return "la firma necesita el descriptor de la clase, como Lcom/hola/Saludo;, y después, si es " +
+      "un método, /metodo(proto): llegó «" + texto + "»";
+  }
+  return "";
+}
+
+// textoDeIntercambio es la línea del registro para un hot swap ya aplicado. Lleva los cuatro datos
+// que publica `ejecucion.intercambios` —clase, método, proto y si el método ya existía— porque son
+// los que distinguen «reemplacé el cuerpo» de «añadí un método».
+export function textoDeIntercambio(cambio) {
+  if (!cambio || typeof cambio !== "object") return "";
+  const clase = typeof cambio.clase === "string" ? cambio.clase : "";
+  const metodo = typeof cambio.metodo === "string" ? cambio.metodo : "";
+  const proto = typeof cambio.proto === "string" ? cambio.proto : "";
+  if (!clase && !metodo) return "";
+  return clase + (metodo ? "/" + metodo : "") + proto +
+    " · existía: " + (cambio.existia === true ? "sí" : "no");
 }
 
 export function crearPreviaPanel({ hospedador, proyecto, estadoPestana, editor, conBloqueo } = {}) {
@@ -596,6 +681,9 @@ export function crearPreviaPanel({ hospedador, proyecto, estadoPestana, editor, 
   // guarda la máquina; conservar el orden es lo que hace que un clic posterior al menú vea el mismo
   // estado que en el aparato.
   let guion = [];
+  // el número del dex soltado: cada swap escribe su propio fichero en la zona de prueba para que
+  // repetir el guion no cambie los bytes de los pasos anteriores
+  let secuenciaIntercambio = 0;
   let pulsando = false;
   // si el desplegable del menú de opciones está abierto en la interfaz. No se persiste: la app que
   // lo pinta es la que decide si hay ítems; al reiniciar o compilar vuelve a cerrarse.
@@ -1378,6 +1466,11 @@ export function crearPreviaPanel({ hospedador, proyecto, estadoPestana, editor, 
         lista.appendChild(lineaLog("captura", conId + ":", captura.texto === "" ? "(sin texto)" : captura.texto));
       }
       for (const aviso of resumen.avisos) lista.appendChild(lineaLog("aviso", "aviso:", aviso));
+      // el hot swap se pinta desde el modelo, no desde el último mensaje: un repintado o un cambio
+      // de superficie conserva lo que el intérprete cambió en la sesión
+      for (const cambio of resumen.intercambios) {
+        lista.appendChild(lineaLog("intercambio", "swap:", textoDeIntercambio(cambio)));
+      }
       if (resumen.error) lista.appendChild(lineaLog("peligro", "error:", resumen.error));
       const hay = lista.children.length > 0;
       vacio.hidden = hay;
@@ -1449,8 +1542,9 @@ export function crearPreviaPanel({ hospedador, proyecto, estadoPestana, editor, 
 
   // Corre el guion entero y pinta el modelo que devuelva. Si la orden no se pudo entregar, deshace
   // el último paso para que la lista siga siendo válida y escribe el motivo en la línea del
-  // emulador. Es el mismo camino para un clic, para abrir el menú y para elegir un ítem.
-  async function ejecutaGuion(desde, mensaje) {
+  // emulador. Es el mismo camino para un clic, para abrir el menú, para elegir un ítem y para el
+  // hot swap, que además necesita dejar su rechazo en el registro (`alFallar`).
+  async function ejecutaGuion(desde, mensaje, { alFallar } = {}) {
     pulsando = true;
     mensajeVistaPreviaRender(mensaje);
     try {
@@ -1460,8 +1554,10 @@ export function crearPreviaPanel({ hospedador, proyecto, estadoPestana, editor, 
       if (!modelo) {
         guion.length = desde;
         const lineas = String((r && (r.error || r.consola)) || "").trim().split("\n").filter(Boolean);
-        mensajeVistaPreviaRender(lineas.length ? lineas[lineas.length - 1].trim()
-          : "la orden no devolvió un modelo legible");
+        const motivo = lineas.length ? lineas[lineas.length - 1].trim()
+          : "la orden no devolvió un modelo legible";
+        mensajeVistaPreviaRender(motivo);
+        if (typeof alFallar === "function") alFallar(motivo);
         return null;
       }
       // `pintarVistaPrevia` avisa por el evento; el panel se repinta con el modelo nuevo. La
@@ -1475,6 +1571,136 @@ export function crearPreviaPanel({ hospedador, proyecto, estadoPestana, editor, 
       return null;
     } finally {
       pulsando = false;
+    }
+  }
+
+  // --- el hot swap de un método --------------------------------------------------------------
+  // El dex que el usuario suelta (o elige con el botón) va a OPFS y entra en el guion como un paso
+  // más: `apkc preview` repite el guion entero, así que el intercambio ocurre en el orden en que se
+  // pidió, la sesión conserva la identidad de sus objetos y la pantalla no se reinicia. La firma la
+  // escribe el usuario; el modelo devuelve el resultado en `ejecucion.intercambios`.
+  function registrarSwap(texto, clase) {
+    for (const superficie of SUPERFICIES) {
+      const lista = el(superficie.log.lista);
+      if (!lista) continue;
+      lista.appendChild(lineaLog(clase || "aviso", "swap:", texto));
+      const vacio = el(superficie.log.vacio);
+      if (vacio) vacio.hidden = true;
+    }
+  }
+
+  function superficieDe(idSuperficie) {
+    return SUPERFICIES.find((s) => s.id === idSuperficie) || SUPERFICIES[0];
+  }
+
+  function firmaDeSuperficie(idSuperficie) {
+    const superficie = superficieDe(idSuperficie);
+    const campo = superficie && superficie.intercambio ? el(superficie.intercambio.firma) : null;
+    return campo && typeof campo.value === "string" ? campo.value.trim() : "";
+  }
+
+  async function intercambiarDexSoltado(archivo, idSuperficie) {
+    if (!archivo) return null;
+    const nombre = String(archivo.name || "el dex");
+    const rechazar = (texto) => {
+      mensajeVistaPreviaRender(texto);
+      registrarSwap(texto, "peligro");
+      return null;
+    };
+    if (apagado) return rechazar(MENSAJE_APAGADO);
+    if (pulsando) return null;
+    const firma = firmaDeSuperficie(idSuperficie);
+    const malaFirma = motivoFirmaInvalida(firma);
+    if (malaFirma) return rechazar("no se intercambió " + nombre + ": " + malaFirma);
+    if (!resumenEjecucion(modeloActual())) {
+      return rechazar("no se intercambió " + nombre + ": el emulador no tiene una sesión viva. " +
+        "Compila el proyecto y espera su primera pantalla.");
+    }
+    let bytes;
+    try {
+      bytes = new Uint8Array(await archivo.arrayBuffer());
+    } catch (e) {
+      return rechazar("no se pudo leer " + nombre + ": " + (e && e.message ? e.message : e));
+    }
+    const rechazo = mensajeDexRechazado(nombre, bytes);
+    if (rechazo) return rechazar(rechazo);
+    const ruta = RUTA_DEX_SOLTADO + (++secuenciaIntercambio) + ".dex";
+    try {
+      const escrito = await hospedador.escribir(ruta, bytes);
+      if (escrito && escrito.tipo === "error") {
+        return rechazar("no se pudo guardar " + nombre + " en la zona de prueba: " + escrito.error);
+      }
+    } catch (e) {
+      return rechazar("no se pudo guardar " + nombre + " en la zona de prueba: " +
+        (e && e.message ? e.message : e));
+    }
+    const antes = guion.length;
+    guion.push({ tipo: "intercambiar", firma, ruta });
+    const pintado = await ejecutaGuion(antes, "Intercambiando " + firma + " desde " + nombre + "…", {
+      alFallar: (motivo) => registrarSwap("no se intercambió " + nombre + ": " + motivo, "peligro"),
+    });
+    if (!pintado) return null;
+    // el modelo ya publicó el cambio y `pintarLog` lo pinta desde `ejecucion.intercambios`; esta
+    // línea dice además de qué fichero vino, que el modelo no sabe
+    const cambios = (resumenEjecucion(modeloActual()) || { intercambios: [] }).intercambios;
+    const ultimo = cambios.length ? cambios[cambios.length - 1] : null;
+    registrarSwap(ultimo
+      ? "aplicado desde " + nombre + ": " + textoDeIntercambio(ultimo)
+      : "aplicado desde " + nombre + ", pero el modelo no publicó el cambio", "aviso");
+    return pintado;
+  }
+
+  // El control mínimo del panel y de Pantalla: un campo con la firma y un botón que abre el
+  // selector de ficheros. Se monta aquí y no en el HTML para no duplicar el marcado en las dos
+  // superficies y para que la prueba de node siga importando el módulo sin DOM.
+  function montarControlIntercambio() {
+    if (!conDocumento()) return;
+    for (const superficie of SUPERFICIES) {
+      const barra = el(superficie.controles);
+      if (!barra || el(superficie.intercambio.firma)) continue;
+      const caja = document.createElement("label");
+      caja.className = "previa-control-campo";
+      caja.title = "Descriptor de la clase y, si es un método, /metodo(proto). Sin /metodo se " +
+        "cambian todos los métodos que el dex declare para esa clase.";
+      const rotulo = document.createElement("span");
+      rotulo.textContent = "swap";
+      const campo = document.createElement("input");
+      campo.id = superficie.intercambio.firma;
+      campo.type = "text";
+      campo.autocomplete = "off";
+      campo.spellcheck = false;
+      campo.placeholder = "Lcom/hola/Saludo;/metodo()I";
+      // el ancho del CSS de `.previa-control-campo input` es para los números de pantalla: una
+      // firma no cabe, y el ancho es de esta pieza, no del tema
+      campo.style.width = "15em";
+      campo.setAttribute("aria-label", "Clase y método a intercambiar (clase/metodo(proto))");
+      caja.appendChild(rotulo);
+      caja.appendChild(campo);
+      barra.appendChild(caja);
+
+      const boton = document.createElement("button");
+      boton.id = superficie.intercambio.boton;
+      boton.type = "button";
+      boton.className = "previa-control";
+      boton.textContent = "Intercambiar…";
+      boton.title = "Elegir un .dex y sustituir ese método en la sesión viva, sin reiniciar el emulador";
+      boton.setAttribute("aria-label", "Intercambiar un método con un fichero .dex");
+      const fichero = document.createElement("input");
+      fichero.id = superficie.intercambio.fichero;
+      fichero.type = "file";
+      fichero.accept = ".dex,application/x-dex,application/octet-stream";
+      fichero.hidden = true;
+      fichero.addEventListener("change", () => {
+        const elegido = fichero.files && fichero.files[0];
+        fichero.value = "";
+        if (!elegido) return;
+        intercambiarDexSoltado(elegido, superficie.id).catch(() => {});
+      });
+      boton.addEventListener("click", () => {
+        if (typeof fichero.click === "function") fichero.click();
+      });
+      barra.appendChild(boton);
+      barra.appendChild(fichero);
     }
   }
 
@@ -3915,6 +4141,15 @@ export function crearPreviaPanel({ hospedador, proyecto, estadoPestana, editor, 
         });
         return;
       }
+      if (esArchivoDex(archivo)) {
+        const superficie = SUPERFICIES.find((s) =>
+          s.canvasRender === canvas.id || s.canvasVivo === canvas.id);
+        intercambiarDexSoltado(archivo, superficie ? superficie.id : "panel").catch((err) => {
+          mensajeEmulador("no se pudo intercambiar el dex soltado: " +
+            (err && err.message ? err.message : err));
+        });
+        return;
+      }
       if (!editable || !editando) return;
       const nodo = seleccion && modeloVivo ? nodoPorRuta(modeloVivo.raiz, seleccion) : null;
       if (!nodoImagen(nodo)) return;
@@ -4208,6 +4443,7 @@ export function crearPreviaPanel({ hospedador, proyecto, estadoPestana, editor, 
     conectarEditable();
     conectarControles();
     montarMenuDeOpciones();
+    montarControlIntercambio();
     montarToasts();
     // el desplegable del menú se cierra al tocar fuera o con Escape, como cualquier popup; no toca
     // OPFS ni el documento: es estado de la interfaz
@@ -4303,7 +4539,10 @@ export function crearPreviaPanel({ hospedador, proyecto, estadoPestana, editor, 
       ancho: caja.ancho, alto: caja.alto, arriba: caja.arriba,
       lado: cajaLado.ancho, ladoAlto: cajaLado.alto,
       visible, modo, ruta: rutaViva, pulsos: [...pulsos], editando,
-      guion: guion.map((p) => p.tipo + (p.valor ? ":" + p.valor : "")),
+      guion: guion.map((p) => p.tipo + (p.valor ? ":" + p.valor : p.firma ? ":" + p.firma : "")),
+      // las rutas de OPFS que usan los pasos de hot swap, para que una prueba pueda comprobar que
+      // el dex quedó bajo /previa-soltada/ y no en el proyecto
+      intercambios: guion.filter((p) => p.tipo === "intercambiar").map((p) => p.ruta),
       menuAbierto: menuDesplegado,
       seccionPanel: seccion.panel, seccionVista: seccion.vista,
       seleccion: seleccion ? seleccion.slice() : null,
