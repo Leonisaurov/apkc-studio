@@ -716,6 +716,23 @@ kbd {
 .marco-previa[hidden] { display: none; }
 .marco-previa > .previa-lateral,
 .marco-previa > .vista-lado { flex: 1 1 auto; width: 100%; height: 100%; }
+/* El panel del emulador en la vista Pantalla es una capa, no una columna del reparto. Esta regla
+   va después de .marco-previa para que `position: relative` no anule la capa: abrir el inspector
+   no debe reducir el canvas ni mover los tiradores. */
+.marco-previa.marco-vista-lado,
+.marco-previa.marco-vista-lado[data-alto="propio"] {
+  position: absolute;
+  z-index: 4;
+  top: 0;
+  right: 0;
+  bottom: 0;
+  left: auto;
+  width: var(--previa-ancho, 380px);
+  max-width: calc(100% - 8px);
+  height: auto;
+  margin-top: 0;
+  flex: 0 0 auto;
+}
 
 .tirador-previa {
   position: absolute;
