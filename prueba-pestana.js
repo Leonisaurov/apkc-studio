@@ -26,6 +26,9 @@ const AAB = process.env.AAB_EJEMPLO || "";
 // el android.jar es opcional: sin él no se puede probar el build completo dentro de la pestaña, y
 // la prueba lo dice en la salida en vez de pasar de largo en silencio
 const JAR_SRC = process.env.ANDROID_JAR || "";
+// el tamaño real del jar que se sirve y se elige de disco: el de Google y el generado desde AOSP
+// (tools/androidjar) no coinciden, y el aviso de la página imprime el que leyó, no un literal.
+const JAR_BYTES = JAR_SRC && fs.existsSync(JAR_SRC) ? fs.statSync(JAR_SRC).size : 0;
 const PUERTO = Number(process.env.STUDIO_SERVIDOR_PORT || 8791);
 const CDP = process.env.STUDIO_PORT || "9345";
 const URL_PAGINA = "http://127.0.0.1:" + PUERTO + "/index.html";
@@ -1055,7 +1058,7 @@ async function conductor() {
       document.getElementById("usar-android-jar").click();
       const aviso = document.getElementById("estado-jar");
       for (let i = 0; i < 160; i++) {
-        if (/26361808/.test(aviso.textContent)) break;
+        if (String(aviso.textContent).includes("${JAR_BYTES} bytes")) break;
         await new Promise((r) => setTimeout(r, 500));
       }
       const detalle = document.getElementById("detalle-sdk");
@@ -1069,7 +1072,7 @@ async function conductor() {
       };
     })()`);
     const peticionesNuevo = peticiones.slice(antesDelPicker);
-    comprueba("el jar elegido de disco queda en OPFS con su tamano", /26361808 bytes/.test(desdeDisco.aviso) && desdeDisco.guardado,
+    comprueba("el jar elegido de disco queda en OPFS con su tamano", String(desdeDisco.aviso || "").includes(JAR_BYTES + " bytes") && desdeDisco.guardado,
       JSON.stringify(desdeDisco.aviso));
     comprueba("con el jar cargado la sección se marca lista y no llama la atención",
       desdeDisco.listo === true && desdeDisco.badge === true &&
@@ -1107,7 +1110,7 @@ async function conductor() {
       };
     })()`);
     comprueba("tras recargar la página el jar sigue en OPFS sin pedirlo otra vez",
-      /26361808 bytes/.test(recargada.aviso) && recargada.jar === 26361808 &&
+      String(recargada.aviso || "").includes(JAR_BYTES + " bytes") && recargada.jar === JAR_BYTES &&
       !peticiones.slice(antesRecarga).some((u) => new URL(u).pathname === "/android-jar"),
       "aviso " + JSON.stringify(recargada.aviso) + ", jar " + recargada.jar + ", peticiones del tramo " +
       peticiones.slice(antesRecarga).length);
@@ -2479,7 +2482,7 @@ async function conductor() {
         .replace('    <activity android:name=".SegundaActivity"/>\\n', "");
       await hospedador.escribir("/proyecto/AndroidManifest.xml", new TextEncoder().encode(sinSegunda));
       await hospedador.escribir("/proyecto/res/layout/main.xml",
-        new TextEncoder().encode(${JSON.stringify(layoutDeclarativa)}));
+        new TextEncoder().encode(${JSON.stringify(layoutDeclarativo)}));
       await hospedador.escribir("/proyecto/src/com/myapp/MainActivity.java",
         new TextEncoder().encode(${JSON.stringify(fuenteDeclarativa)}));
       await hospedador.limpiar("/proyecto/res/layout/segunda.xml");
