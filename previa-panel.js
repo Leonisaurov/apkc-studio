@@ -1567,7 +1567,11 @@ export function crearPreviaPanel({ hospedador, proyecto, estadoPestana, editor, 
       return pintarVistaPrevia(modelo);
     } catch (e) {
       guion.length = desde;
-      mensajeVistaPreviaRender("no se pudo ejecutar la orden: " + (e && e.message ? e.message : e));
+      const motivo = "no se pudo ejecutar la orden: " + (e && e.message ? e.message : e);
+      mensajeVistaPreviaRender(motivo);
+      // el rechazo también va al registro: deshacer el paso no basta, el usuario necesita saber
+      // qué fichero no entró y por qué
+      if (typeof alFallar === "function") alFallar(motivo);
       return null;
     } finally {
       pulsando = false;
@@ -1608,46 +1612,61 @@ export function crearPreviaPanel({ hospedador, proyecto, estadoPestana, editor, 
       return null;
     };
     if (apagado) return rechazar(MENSAJE_APAGADO);
-    if (pulsando) return null;
-    const firma = firmaDeSuperficie(idSuperficie);
-    const malaFirma = motivoFirmaInvalida(firma);
-    if (malaFirma) return rechazar("no se intercambió " + nombre + ": " + malaFirma);
-    if (!resumenEjecucion(modeloActual())) {
-      return rechazar("no se intercambió " + nombre + ": el emulador no tiene una sesión viva. " +
-        "Compila el proyecto y espera su primera pantalla.");
+    // La guarda se toma AQUÍ y ahora, no en `ejecutaGuion`: entre este punto y la ejecución hay
+    // dos `await` (leer el fichero y escribirlo en OPFS), y dos drop seguidos la pasaban los dos,
+    // dejando dos pasos en el guion y dos swaps donde el usuario pidió uno.
+    if (pulsando) {
+      return rechazar("no se intercambió " + nombre + ": el emulador está ejecutando otra orden; " +
+        "espera a que termine.");
     }
-    let bytes;
+    pulsando = true;
+    // `ejecutaGuion` gestiona su propio `pulsando`; este `finally` solo suelta la reserva si el
+    // swap se rechazó antes de llegar a ejecutar el guion.
+    let ejecutando = false;
     try {
-      bytes = new Uint8Array(await archivo.arrayBuffer());
-    } catch (e) {
-      return rechazar("no se pudo leer " + nombre + ": " + (e && e.message ? e.message : e));
-    }
-    const rechazo = mensajeDexRechazado(nombre, bytes);
-    if (rechazo) return rechazar(rechazo);
-    const ruta = RUTA_DEX_SOLTADO + (++secuenciaIntercambio) + ".dex";
-    try {
-      const escrito = await hospedador.escribir(ruta, bytes);
-      if (escrito && escrito.tipo === "error") {
-        return rechazar("no se pudo guardar " + nombre + " en la zona de prueba: " + escrito.error);
+      const firma = firmaDeSuperficie(idSuperficie);
+      const malaFirma = motivoFirmaInvalida(firma);
+      if (malaFirma) return rechazar("no se intercambió " + nombre + ": " + malaFirma);
+      if (!resumenEjecucion(modeloActual())) {
+        return rechazar("no se intercambió " + nombre + ": el emulador no tiene una sesión viva. " +
+          "Compila el proyecto y espera su primera pantalla.");
       }
-    } catch (e) {
-      return rechazar("no se pudo guardar " + nombre + " en la zona de prueba: " +
-        (e && e.message ? e.message : e));
+      let bytes;
+      try {
+        bytes = new Uint8Array(await archivo.arrayBuffer());
+      } catch (e) {
+        return rechazar("no se pudo leer " + nombre + ": " + (e && e.message ? e.message : e));
+      }
+      const rechazo = mensajeDexRechazado(nombre, bytes);
+      if (rechazo) return rechazar(rechazo);
+      const ruta = RUTA_DEX_SOLTADO + (++secuenciaIntercambio) + ".dex";
+      try {
+        const escrito = await hospedador.escribir(ruta, bytes);
+        if (escrito && escrito.tipo === "error") {
+          return rechazar("no se pudo guardar " + nombre + " en la zona de prueba: " + escrito.error);
+        }
+      } catch (e) {
+        return rechazar("no se pudo guardar " + nombre + " en la zona de prueba: " +
+          (e && e.message ? e.message : e));
+      }
+      const antes = guion.length;
+      guion.push({ tipo: "intercambiar", firma, ruta });
+      ejecutando = true;
+      const pintado = await ejecutaGuion(antes, "Intercambiando " + firma + " desde " + nombre + "…", {
+        alFallar: (motivo) => registrarSwap("no se intercambió " + nombre + ": " + motivo, "peligro"),
+      });
+      if (!pintado) return null;
+      // el modelo ya publicó el cambio y `pintarLog` lo pinta desde `ejecucion.intercambios`; esta
+      // línea dice además de qué fichero vino, que el modelo no sabe
+      const cambios = (resumenEjecucion(modeloActual()) || { intercambios: [] }).intercambios;
+      const ultimo = cambios.length ? cambios[cambios.length - 1] : null;
+      registrarSwap(ultimo
+        ? "aplicado desde " + nombre + ": " + textoDeIntercambio(ultimo)
+        : "aplicado desde " + nombre + ", pero el modelo no publicó el cambio", "aviso");
+      return pintado;
+    } finally {
+      if (!ejecutando) pulsando = false;
     }
-    const antes = guion.length;
-    guion.push({ tipo: "intercambiar", firma, ruta });
-    const pintado = await ejecutaGuion(antes, "Intercambiando " + firma + " desde " + nombre + "…", {
-      alFallar: (motivo) => registrarSwap("no se intercambió " + nombre + ": " + motivo, "peligro"),
-    });
-    if (!pintado) return null;
-    // el modelo ya publicó el cambio y `pintarLog` lo pinta desde `ejecucion.intercambios`; esta
-    // línea dice además de qué fichero vino, que el modelo no sabe
-    const cambios = (resumenEjecucion(modeloActual()) || { intercambios: [] }).intercambios;
-    const ultimo = cambios.length ? cambios[cambios.length - 1] : null;
-    registrarSwap(ultimo
-      ? "aplicado desde " + nombre + ": " + textoDeIntercambio(ultimo)
-      : "aplicado desde " + nombre + ", pero el modelo no publicó el cambio", "aviso");
-    return pintado;
   }
 
   // El control mínimo del panel y de Pantalla: un campo con la firma y un botón que abre el

@@ -174,6 +174,17 @@ const conductor = `(async () => {
     }
     return [...lista.children].map((b) => b.textContent);
   };
+  // Espera a que una condición sobre el DOM se cumpla, en vez de dormir un tiempo fijo: el arranque
+  // del wasm tarda lo que tarda la máquina, y 1200 ms se quedaban cortos con el equipo cargado.
+  const esperarTexto = async (leer, listo, intentos = 50) => {
+    for (let i = 0; i < intentos; i++) {
+      let valor = null;
+      try { valor = leer(); } catch (e) { valor = null; }
+      if (listo(valor)) return true;
+      await new Promise((ok) => setTimeout(ok, 400));
+    }
+    return false;
+  };
   r.aislada = crossOriginIsolated;
   r.recarga = sessionStorage.getItem("apkc-coi-reintento");
   r.titulo = document.title;
@@ -386,7 +397,9 @@ const conductor = `(async () => {
   };
   await new Promise((ok) => setTimeout(ok, 120));
   soltar.apkCarga120 = progreso("vista-previa-progreso");
-  await new Promise((ok) => setTimeout(ok, 1200));
+  // la barra se apaga cuando llega el resultado: se espera a que deje de decir «Abriendo …»
+  await esperarTexto(() => progreso("vista-previa-progreso").texto,
+    (t) => !!t && !/^Abriendo /.test(String(t)));
   soltar.apkFin = {
     progreso: progreso("vista-previa-progreso"),
     estado: document.getElementById("vista-previa-estado").textContent,
@@ -414,7 +427,9 @@ const conductor = `(async () => {
     }
   }
   document.getElementById("crear-proyecto").click();
-  await new Promise((ok) => setTimeout(ok, 1200));
+  // el aviso pasa de «creando…» al resultado: se espera, no se duerme
+  await esperarTexto(() => document.getElementById("estado-crear").textContent,
+    (t) => !!String(t || "").trim() && String(t).trim() !== "creando…");
   r.avisoCrear = document.getElementById("estado-crear").textContent;
 
   // La plantilla real «Menú de opciones»: compilar en wasm, abrir ⋮ Menú, pulsar «Opciones» y exigir
@@ -556,6 +571,42 @@ const conductor = `(async () => {
         pasos: PREVIA_PANEL.estado().guion.length,
         antes: antesRoto,
       };
+      // dos drop seguidos: la guarda tiene que tomarse antes de los dos await, o los dos pasan y el
+      // guion acaba con dos pasos. El rechazo del segundo se lee en cuanto se suelta, antes de que
+      // el primero pinte su modelo y repinte el registro.
+      const swapsDe = () => PREVIA_PANEL.estado().guion
+        .filter((p) => String(p).indexOf("intercambiar:") === 0).length;
+      const swapsAntes = swapsDe();
+      campoSwap.value = firmaSwap;
+      soltarEn(canvasSwap, new File([dexSwap], "doble-uno.dex", { type: "application/x-dex" }));
+      soltarEn(canvasSwap, new File([dexSwap], "doble-dos.dex", { type: "application/x-dex" }));
+      const dobleSegundo = filasRegistro();
+      await esperarSwap("aplicado desde doble-uno.dex");
+      r.swap.doble = {
+        segundo: dobleSegundo,
+        swapsAntes,
+        swapsDespues: swapsDe(),
+        filas: filasRegistro(),
+      };
+      // el transporte que lanza también tiene que dejar el rechazo en el registro, con el nombre
+      const ejecutarReal = hospedador.ejecutar;
+      hospedador.ejecutar = (argv) => {
+        if (argv && argv[0] === "preview") throw new Error("transporte roto");
+        return ejecutarReal.call(hospedador, argv);
+      };
+      try {
+        const antesCaida = PREVIA_PANEL.estado().guion.length;
+        soltarEn(canvasSwap, new File([dexSwap], "caido.dex", { type: "application/x-dex" }));
+        await esperarSwap("caido.dex");
+        r.swap.caida = {
+          filas: filasRegistro(),
+          estado: document.getElementById("previa-render-estado").textContent,
+          pasos: PREVIA_PANEL.estado().guion.length,
+          antes: antesCaida,
+        };
+      } finally {
+        hospedador.ejecutar = ejecutarReal;
+      }
     }
   }
   r.sinUndefined = !/undefined/.test(document.body.innerText);
@@ -844,8 +895,26 @@ function comprueba(cond, msg) { if (!cond) { fallos++; console.log("  FALLO:", m
           /no se intercambió roto\.dex/.test(String(roto.estado)),
           "el dex roto no se rechazó con su nombre y su motivo, o dejó un paso en el guion: " +
           JSON.stringify(roto).slice(0, 500));
+        // dos drop seguidos: el segundo se rechaza y el guion solo gana un paso
+        const db = sw.doble || {};
+        comprueba(Array.isArray(db.segundo) && db.segundo.some((f) =>
+          /no se intercambió doble-dos\.dex/.test(String(f)) &&
+          /el emulador está ejecutando otra orden/.test(String(f))) &&
+          db.swapsDespues === db.swapsAntes + 1,
+          "dos .dex soltados seguidos no se serializan: el segundo no se rechazó o el guion acabó " +
+          "con dos pasos: " + JSON.stringify({ segundo: (db.segundo || []).slice(-2),
+            antes: db.swapsAntes, despues: db.swapsDespues }));
+        // un fallo del transporte deja el rechazo en el registro, con nombre y motivo
+        const ca = sw.caida || {};
+        comprueba(ca.pasos === ca.antes &&
+          Array.isArray(ca.filas) && ca.filas.some((f) =>
+            /no se intercambió caido\.dex/.test(String(f)) && /transporte roto/.test(String(f))),
+          "un fallo del transporte no dejó el rechazo en el registro con nombre y motivo: " +
+          JSON.stringify(ca).slice(0, 400));
         console.log("  swap:", JSON.stringify({ firma: sw.firma, rutas: sw.rutas,
-          ultimas: (sw.filas || []).slice(-2), roto: (roto.filas || []).slice(-1) }).slice(0, 700));
+          ultimas: (sw.filas || []).slice(-2), roto: (roto.filas || []).slice(-1),
+          doble: (db.segundo || []).slice(-1), pasosDoble: [db.swapsAntes, db.swapsDespues],
+          caida: { estado: ca.estado, filas: (ca.filas || []).slice(-1) } }).slice(0, 1100));
       }
     } else {
       console.log("  toast: sin APKC_WASM, se omite la compilación de la plantilla Menú");
