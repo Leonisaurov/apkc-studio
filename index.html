@@ -365,6 +365,10 @@
                 <div class="previa-marco previa-marco-lateral">
                   <canvas id="previa-vivo-canvas" class="previa-canvas previa-canvas-lateral" width="360" height="640"
                           role="img" tabindex="0" aria-label="Dibujo del layout del editor, sin compilar"></canvas>
+                  <div id="previa-vivo-progreso" class="previa-progreso" role="status" aria-live="polite" hidden>
+                    <span class="previa-progreso-barra" aria-hidden="true"></span>
+                    <p class="previa-progreso-texto"></p>
+                  </div>
                   <div id="previa-paleta" class="previa-paleta" role="toolbar" aria-label="Añadir elementos al layout" hidden>
                     <div class="previa-paleta-cab">
                       <span id="previa-paleta-titulo" class="previa-paleta-titulo">Añadir</span>
@@ -622,6 +626,10 @@
                   <canvas id="previa-lateral-canvas" class="previa-canvas previa-canvas-lateral" width="360" height="640"
                           tabindex="0" role="img" aria-label="Emulador: pantalla del apk con los eventos de la app; se puede pulsar sobre las vistas que tienen OnClickListener"
                           aria-describedby="previa-render-estado"></canvas>
+                  <div id="previa-lateral-progreso" class="previa-progreso" role="status" aria-live="polite" hidden>
+                    <span class="previa-progreso-barra" aria-hidden="true"></span>
+                    <p class="previa-progreso-texto"></p>
+                  </div>
                 </div>
                 <div id="previa-inspector" class="previa-inspector">
                   <div class="previa-inspector-cab">
@@ -996,6 +1004,10 @@
                   <canvas id="vista-previa" class="previa-canvas previa-canvas-vista" width="360" height="640"
                           tabindex="0" role="img" aria-label="Emulador: pantalla del apk con los eventos de la app; se puede pulsar sobre las vistas que responden a un clic"
                           aria-describedby="vista-previa-estado"></canvas>
+                  <div id="vista-previa-progreso" class="previa-progreso" role="status" aria-live="polite" hidden>
+                    <span class="previa-progreso-barra" aria-hidden="true"></span>
+                    <p class="previa-progreso-texto"></p>
+                  </div>
                 </div>
                 <p id="vista-previa-estado" class="previa-estado previa-estado-oculto" role="status" aria-live="polite">Emulador: compila
                   el proyecto (Editor → Compilar → Compilar debug) para ver aquí la pantalla que ejecuta

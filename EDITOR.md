@@ -447,6 +447,22 @@ no se publica ni se puede pulsar, y su índice real no se corre por saltarlo. Un
 del emulador lo avisa y el botón queda con su nota; el camino soportado es `menu.add` en
 `onCreateOptionsMenu`.
 
+**Soltar un apk se ve.** Los tres canvas del emulador aceptan un fichero: `#previa-vivo-canvas`
+(junto al código), `#previa-lateral-canvas` y `#vista-previa` (Pantalla). El `.apk` se guarda en
+`/previa-soltada/apk-soltado.apk` y se abre con `apkc preview`, igual desde las tres superficies; la
+rama de la imagen sigue siendo solo del canvas editable y del modo editar. El `drop` **cancela
+siempre** el comportamiento del navegador (`preventDefault()` antes de cualquier `return`): soltar
+un fichero que no toca no puede abrirlo como documento y sacar al usuario del editor. Mientras se
+abre, el marco del teléfono de cada superficie enseña una barra indeterminada y `Abriendo
+<nombre>.apk…` en `#previa-vivo-progreso`, `#previa-lateral-progreso` y `#vista-previa-progreso`
+(`role="status"`, sin capturar el puntero), durante un mínimo de 250 ms aunque la carga sea
+instantánea; el mismo texto va a la línea de estado (`#previa-render-estado`, `#vista-previa-estado`)
+y al **Registro** de las dos superficies (`#previa-log-lista`, `#vista-log-lista`) con origen
+`soltar:`. Al terminar, el resultado —`APK soltado …` o el error con su motivo— sustituye a la barra
+en ese mismo sitio y queda en la línea de estado y en el Registro hasta que se pulse el canvas, se
+apague o reinicie el emulador, se compile otra apk o se suelte otro fichero. Un fichero que no es
+zip se rechaza con su nombre y el motivo sin escribir nada en OPFS.
+
 **La nota de «Pulsar» no miente.** Sin modelo (antes de compilar o con el preview fallido) dice que
 compiles; con la ejecución detenida, el error; y solo cuando `onCreate` corrió de verdad y no
 registró ningún listener con id dice «Esta ejecución no registró ningún OnClickListener sobre una

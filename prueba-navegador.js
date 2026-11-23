@@ -238,11 +238,22 @@ const conductor = `(async () => {
     oculto: listaMenu ? listaMenu.hidden : null,
     estado: document.getElementById("previa-render-estado").textContent,
   };
-  // soltar un apk en las tres superficies del emulador: el enganche tiene que estar en los tres
-  // canvas, y el apk soltado en Pantalla tiene que llegar a abrirApkSoltada (se nota en la línea
-  // de estado, que nombra el fichero). Un fichero roto se rechaza con su nombre y su motivo, y una
-  // imagen no activa en Pantalla la rama del canvas editable.
+  // soltar un fichero en las tres superficies del emulador: el enganche tiene que estar en los tres
+  // canvas, el drop no puede dejar que el navegador se quede el fichero, y un apk soltado en
+  // Pantalla tiene que verse (barra con el nombre, después el resultado) y quedar en el registro.
+  // La imagen se mide por su efecto: el estado y el registro no cambian y no se importa nada.
   const soltar = {};
+  const estados = () => ({
+    vista: document.getElementById("vista-previa-estado").textContent,
+    panel: document.getElementById("previa-render-estado").textContent,
+  });
+  const progreso = (id) => {
+    const caja = document.getElementById(id);
+    if (!caja) return { falta: true };
+    const rotulo = caja.querySelector(".previa-progreso-texto");
+    return { visible: !caja.hidden, texto: rotulo ? rotulo.textContent : "" };
+  };
+  const registro = () => String(document.getElementById("vista-log-lista").textContent || "");
   const conFichero = (canvas, archivo) => {
     const dt = new DataTransfer();
     dt.items.add(archivo);
@@ -270,17 +281,46 @@ const conductor = `(async () => {
     soltar[id + "-pista"] = canvas ? String(canvas.title) : "";
   }
   const vista = document.getElementById("vista-previa");
-  // primero el fichero roto: se rechaza antes de tocar OPFS, así el mensaje no lo pisa después
-  // ningún flujo asíncrono de preview
+  // un fichero que no es apk ni imagen: el drop se cancela (el navegador no lo abre) y no cambia
+  // nada de la página, que es el efecto que se mide, no el flag
+  const antesImagen = estados();
+  const antesRegistro = registro();
+  soltar.imagenSoltada = soltarEn(vista, new File([new Uint8Array([0x89, 0x50, 0x4e, 0x47])],
+    "foto.png", { type: "image/png" }));
+  await new Promise((ok) => setTimeout(ok, 150));
+  soltar.imagen = {
+    estadoIgual: JSON.stringify(estados()) === JSON.stringify(antesImagen),
+    registroIgual: registro() === antesRegistro,
+    progresoOculto: !progreso("vista-previa-progreso").visible,
+  };
+  // fichero roto: se rechaza con su nombre y su motivo; la barra se ve al menos un instante
   soltar.rotoSoltado = soltarEn(vista, new File([new Uint8Array([1, 2, 3, 4])], "roto.apk",
     { type: "application/octet-stream" }));
-  await new Promise((ok) => setTimeout(ok, 200));
-  soltar.roto = document.getElementById("vista-previa-estado").textContent;
+  soltar.rotoCarga = progreso("vista-previa-progreso");
+  await new Promise((ok) => setTimeout(ok, 120));
+  soltar.rotoCarga120 = progreso("vista-previa-progreso");
+  await new Promise((ok) => setTimeout(ok, 400));
+  soltar.roto = {
+    progreso: progreso("vista-previa-progreso"),
+    estado: document.getElementById("vista-previa-estado").textContent,
+    registro: registro(),
+  };
+  // apk válido: barra con el nombre en las tres superficies y, al terminar, el resultado en el
+  // marco, en la línea de estado y en el registro
   soltar.apk = { soltado: soltarEn(vista, apk("vista-previa.apk")) };
-  await new Promise((ok) => setTimeout(ok, 600));
-  soltar.estadoVista = document.getElementById("vista-previa-estado").textContent;
-  soltar.imagen = soltarEn(vista, new File([new Uint8Array([0x89, 0x50, 0x4e, 0x47])], "foto.png",
-    { type: "image/png" }));
+  soltar.apkCarga = {
+    vista: progreso("vista-previa-progreso"),
+    vivo: progreso("previa-vivo-progreso"),
+    lateral: progreso("previa-lateral-progreso"),
+  };
+  await new Promise((ok) => setTimeout(ok, 120));
+  soltar.apkCarga120 = progreso("vista-previa-progreso");
+  await new Promise((ok) => setTimeout(ok, 1200));
+  soltar.apkFin = {
+    progreso: progreso("vista-previa-progreso"),
+    estado: document.getElementById("vista-previa-estado").textContent,
+    registro: registro(),
+  };
   r.soltar = soltar;
   r.avisoEstrecho = getComputedStyle(document.getElementById("previa-aviso-estrecho")).display;
   r.cursorOeste = getComputedStyle(document.getElementById("tirador-previa-noroeste")).cursor;
@@ -453,16 +493,49 @@ function comprueba(cond, msg) { if (!cond) { fallos++; console.log("  FALLO:", m
       comprueba(/Suelta un \.apk/.test(String(sl[id + "-pista"])),
         "el canvas " + id + " no avisa de que se puede soltar un apk: " + String(sl[id + "-pista"]));
     }
-    comprueba(sl.apk && sl.apk.soltado === true && /vista-previa\.apk/.test(String(sl.estadoVista)),
-      "un apk soltado en Pantalla no llega a abrirApkSoltada: " +
-      JSON.stringify({ soltado: sl.apk, estado: sl.estadoVista }));
-    comprueba(sl.rotoSoltado === true && /no se carg[oó] roto\.apk/.test(String(sl.roto)) &&
-      /no es un zip/.test(String(sl.roto)),
-      "un fichero roto no se rechaza con su nombre y su motivo: " + String(sl.roto));
-    comprueba(sl.imagen === false,
-      "la rama de la imagen se activó en Pantalla, donde no hay ImageView seleccionado");
-    console.log("  soltar:", JSON.stringify(sl).slice(0, 500));
-    comprueba(v.icono, "falta el campo del icono");
+    // un fichero que no es apk no puede cambiar nada: se mide el efecto, no el flag
+    comprueba(sl.imagenSoltada === true,
+      "el drop de un fichero que no se usa no cancela el navegador: soltarlo abriría el documento y " +
+      "sacaría al usuario del editor sin guardar");
+    comprueba(sl.imagen && sl.imagen.estadoIgual === true && sl.imagen.registroIgual === true &&
+      sl.imagen.progresoOculto === true,
+      "soltar una imagen en Pantalla cambió la página o abrió el progreso: " +
+      JSON.stringify(sl.imagen));
+    // la carga del fichero roto se ve antes del rechazo, con su nombre
+    comprueba(sl.rotoCarga && sl.rotoCarga.visible === true &&
+      /^Abriendo roto\.apk/.test(String(sl.rotoCarga.texto)),
+      "soltar un apk no muestra la barra con el nombre del fichero: " + JSON.stringify(sl.rotoCarga));
+    comprueba(sl.rotoCarga120 && sl.rotoCarga120.visible === true &&
+      /Abriendo roto\.apk/.test(String(sl.rotoCarga120.texto)),
+      "la barra de carga desaparece antes de verse (mínimo de 250 ms): " +
+      JSON.stringify(sl.rotoCarga120));
+    comprueba(sl.roto && /no se carg[oó] roto\.apk/.test(String(sl.roto.progreso && sl.roto.progreso.texto)) &&
+      /no es un zip/.test(String(sl.roto.progreso && sl.roto.progreso.texto)) &&
+      /no se carg[oó] roto\.apk/.test(String(sl.roto.estado)) &&
+      /soltar:/.test(String(sl.roto.registro)) && /roto\.apk/.test(String(sl.roto.registro)),
+      "el rechazo no queda en el marco, en la línea de estado y en el registro: " +
+      JSON.stringify(sl.roto));
+    // el apk válido: barra con el nombre en las tres superficies y el resultado al terminar
+    const carga = sl.apkCarga || {};
+    const superficies = ["vista", "vivo", "lateral"];
+    comprueba(superficies.every((k) => carga[k] && carga[k].visible === true &&
+      /^Abriendo vista-previa\.apk/.test(String(carga[k].texto))),
+      "la barra de carga no aparece en las tres superficies: " + JSON.stringify(carga));
+    comprueba(carga.vivo && carga.lateral && carga.vivo.texto === carga.vista.texto &&
+      carga.lateral.texto === carga.vista.texto,
+      "las tres superficies no enseñan el mismo texto de carga: " + JSON.stringify(carga));
+    comprueba(sl.apkCarga120 && sl.apkCarga120.visible === true &&
+      /Abriendo vista-previa\.apk/.test(String(sl.apkCarga120.texto)),
+      "la barra del apk válido se apaga antes de verse: " + JSON.stringify(sl.apkCarga120));
+    const fin = sl.apkFin || {};
+    const resultado = String(fin.progreso && fin.progreso.texto);
+    comprueba(/APK soltado vista-previa\.apk|no se pudo abrir vista-previa\.apk/.test(resultado) &&
+      String(fin.estado) === resultado &&
+      /soltar:/.test(String(fin.registro)) && /vista-previa\.apk/.test(String(fin.registro)),
+      "el resultado del apk no queda en el marco, en la línea de estado y en el registro: " +
+      JSON.stringify(fin));
+    console.log("  soltar:", JSON.stringify({ carga: sl.apkCarga, fin: sl.apkFin, roto: sl.roto,
+      imagen: sl.imagen }).slice(0, 700));
     // Sin APKC_WASM esta prueba es solo de DOM: basta con que el SW haya aislado la página y el
     // create no culpe a OPFS. Con el binario presente (es lo que hace e2e.sh) tiene que crear.
     const creo = /proyecto creado/.test(String(v.avisoCrear));

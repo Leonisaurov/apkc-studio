@@ -1160,6 +1160,57 @@ body.arrastrando-paleta { cursor: grabbing; }
 .previa-canvas.editable:active { cursor: grabbing; }
 .previa-canvas.previa-canvas-recibiendo { outline: 2px dashed var(--acento); outline-offset: 1px; }
 .previa-canvas:focus-visible { outline: 2px solid var(--foco); outline-offset: 2px; }
+/* El progreso del apk soltado: una barra indeterminada centrada sobre el marco del teléfono, en
+   las tres superficies. No captura el puntero (el emulador se sigue pudiendo pulsar debajo) y su
+   texto es el mismo mensaje que la línea de estado. */
+.previa-progreso {
+  position: absolute;
+  inset: 0;
+  z-index: 3;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  padding: 16px;
+  border-radius: 6px;
+  background: color-mix(in srgb, var(--superficie2) 82%, transparent);
+  pointer-events: none;
+  text-align: center;
+}
+.previa-progreso[hidden] { display: none; }
+.previa-progreso-barra {
+  width: 128px;
+  height: 4px;
+  border-radius: 2px;
+  overflow: hidden;
+  background: var(--borde2);
+  position: relative;
+}
+.previa-progreso-barra::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  width: 40%;
+  background: var(--acento);
+  animation: previa-progreso 1s linear infinite;
+}
+.previa-progreso-texto {
+  margin: 0;
+  max-width: 30ch;
+  font-size: 12px;
+  line-height: 1.35;
+  color: var(--texto);
+}
+.previa-progreso.listo .previa-progreso-barra { display: none; }
+.previa-progreso.error .previa-progreso-texto { color: var(--peligro); }
+@keyframes previa-progreso {
+  from { transform: translateX(-110%); }
+  to { transform: translateX(260%); }
+}
+@media (prefers-reduced-motion: reduce) {
+  .previa-progreso-barra::after { animation: none; width: 100%; opacity: 0.5; }
+}
 .previa-editar-estado[hidden] { display: none; }
 /* el aviso del modo editar vive al pie de la paleta: es una capa, no una fila que le robe alto al
    dibujo, y no tapa la línea de estado de la vista previa */

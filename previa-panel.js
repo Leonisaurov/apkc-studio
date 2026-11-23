@@ -512,6 +512,14 @@ const CANVAS_SOLTABLES = ["previa-vivo-canvas", "previa-lateral-canvas", "vista-
 // también de tooltip. `detalleEmulador` lo conserva al reescribir el título con el modelo.
 const PISTA_SOLTAR_APK = "Suelta un .apk aquí para abrirlo en el emulador";
 
+// El progreso de un apk soltado: una barra indeterminada dentro del marco del teléfono, con el
+// texto de la carga, en las tres superficies. Los ids están en index.html y se documentan en
+// EDITOR.md.
+const PROGRESOS = ["previa-vivo-progreso", "previa-lateral-progreso", "vista-previa-progreso"];
+// Una carga instantánea no puede pasar sin que el usuario vea que pasó algo: la barra se queda al
+// menos este tiempo antes de enseñar el resultado.
+const MINIMO_PROGRESO = 250;
+
 // esArchivoApk decide si un fichero soltado se trata como apk. No se fía solo del tipo MIME: en
 // Linux un `.apk` suele llegar como `application/octet-stream` o vacío.
 export function esArchivoApk(archivo) {
@@ -1654,6 +1662,54 @@ export function crearPreviaPanel({ hospedador, proyecto, estadoPestana, editor, 
     canvas.title = limpio ? limpio + " · " + PISTA_SOLTAR_APK : PISTA_SOLTAR_APK;
   }
 
+  // --- progreso del apk soltado --------------------------------------------------------------
+  // El usuario tiene que ver que el arrastre hizo algo: una barra indeterminada y el nombre del
+  // fichero dentro del marco del teléfono, en las tres superficies, y el mismo texto en la línea de
+  // estado y en el registro del emulador. El resultado sustituye a la barra en ese mismo sitio y se
+  // queda ahí hasta que el usuario pulsa el emulador o suelta otro fichero.
+  let progresoToken = 0;
+  let progresoDesde = 0;
+  function pintarProgresoApk(texto, estado) {
+    for (const id of PROGRESOS) {
+      const caja = el(id);
+      if (!caja) continue;
+      const rotulo = caja.querySelector(".previa-progreso-texto");
+      if (rotulo) rotulo.textContent = String(texto || "");
+      caja.hidden = !texto;
+      caja.classList.toggle("listo", estado === "listo");
+      caja.classList.toggle("error", estado === "error");
+    }
+  }
+  function empezarProgresoApk(texto) {
+    progresoToken += 1;
+    progresoDesde = Date.now();
+    pintarProgresoApk(texto, "cargando");
+    return progresoToken;
+  }
+  // El token evita que dos cargas se pisen el mensaje: solo la última escribe su resultado.
+  async function terminarProgresoApk(token, texto, estado) {
+    if (token !== progresoToken) return;
+    const falta = MINIMO_PROGRESO - (Date.now() - progresoDesde);
+    if (falta > 0) await new Promise((ok) => setTimeout(ok, falta));
+    if (token !== progresoToken) return;
+    pintarProgresoApk(texto, estado);
+  }
+  function cerrarProgresoApk() {
+    progresoToken += 1;
+    pintarProgresoApk("", "");
+  }
+  // La línea del registro del emulador, en las dos superficies: lo que se soltó se lee también ahí
+  // y no solo en la línea de estado.
+  function registrarSoltada(texto, clase) {
+    for (const superficie of SUPERFICIES) {
+      const lista = el(superficie.log.lista);
+      if (!lista) continue;
+      lista.appendChild(lineaLog(clase || "aviso", "soltar:", texto));
+      const vacio = el(superficie.log.vacio);
+      if (vacio) vacio.hidden = true;
+    }
+  }
+
   // --- energía, tamaño y última apk ---------------------------------------------------------
   // La copia estable la escribe `pestana.js` después de un build correcto. Aquí solo se lee para
   // decir si hay, y se usa como fuente de `apkc preview` sin volver a compilar.
@@ -1698,6 +1754,8 @@ export function crearPreviaPanel({ hospedador, proyecto, estadoPestana, editor, 
 
   async function ejecutarPreviewDe(ruta) {
     const fuente = ruta === RUTA_ULTIMA_APK ? "ultima" : "build";
+    // un build o la última apk reemplazan el modelo: el resultado del arrastre anterior ya no vale
+    cerrarProgresoApk();
     origenPrevia = fuente;
     try {
       await hospedador.cwd(carpeta);
@@ -1723,32 +1781,40 @@ export function crearPreviaPanel({ hospedador, proyecto, estadoPestana, editor, 
   // zona aislada de OPFS y se le pasa a `apkc preview` tal cual: el mismo comando que lee
   // `build/app.apk`, sin descomprimir a mano ni ejecutar nada del sistema. Un apk válido pero de una
   // app que construye sus vistas en código (sin `res/layout`) se publica como frontera con el
-  // motivo que da `preview`; no se finge una pantalla vacía.
+  // motivo que da `preview`; no se finge una pantalla vacía. Todo el camino —carga, rechazo y
+  // error— deja su rastro en el marco del teléfono, en la línea de estado y en el registro.
   async function abrirApkSoltada(archivo) {
     if (!archivo) return null;
+    const nombre = String(archivo.name || "el apk");
+    const token = empezarProgresoApk("Abriendo " + nombre + "…");
+    mensajeEmulador("Abriendo " + nombre + "…");
+    registrarSoltada("Abriendo " + nombre + "…", "aviso");
+    // cierra una carga con su mensaje en los tres sitios: el marco del teléfono, la línea de estado
+    // y el registro. `pintarLog` repinta la lista cuando llega un modelo, así que el resultado se
+    // apunta siempre después de pintar.
+    const fallar = async (texto) => {
+      mensajeEmulador(texto);
+      registrarSoltada(texto, "peligro");
+      await terminarProgresoApk(token, texto, "error");
+      return null;
+    };
     let bytes;
     try {
       bytes = new Uint8Array(await archivo.arrayBuffer());
     } catch (e) {
-      mensajeEmulador("no se pudo leer " + archivo.name + ": " + (e && e.message ? e.message : e));
-      return null;
+      return fallar("no se pudo leer " + nombre + ": " + (e && e.message ? e.message : e));
     }
-    const rechazo = mensajeApkRechazado(archivo.name, bytes);
-    if (rechazo) {
-      mensajeEmulador(rechazo);
-      return null;
-    }
+    const rechazo = mensajeApkRechazado(nombre, bytes);
+    if (rechazo) return fallar(rechazo);
     let escrito;
     try {
       escrito = await hospedador.escribir(RUTA_APK_SOLTADA, bytes);
     } catch (e) {
-      mensajeEmulador("no se pudo guardar " + archivo.name + " en la zona de prueba: " +
+      return fallar("no se pudo guardar " + nombre + " en la zona de prueba: " +
         (e && e.message ? e.message : e));
-      return null;
     }
     if (escrito && escrito.tipo === "error") {
-      mensajeEmulador("no se pudo guardar " + archivo.name + ": " + escrito.error);
-      return null;
+      return fallar("no se pudo guardar " + nombre + ": " + escrito.error);
     }
     // cargar un apk es como encender el emulador con otra fuente: se apaga el negro, se empieza una
     // ejecución nueva y los clics anteriores dejan de valer
@@ -1762,7 +1828,7 @@ export function crearPreviaPanel({ hospedador, proyecto, estadoPestana, editor, 
     claveMenu = "";
     rutaApkSoltada = RUTA_APK_SOLTADA;
     for (const superficie of SUPERFICIES) limpiarCanvas(el(superficie.canvasRender));
-    mensajeEmulador("Cargando " + archivo.name + "…");
+    mensajeEmulador("Abriendo " + nombre + "…");
     origenPrevia = "soltada";
     try {
       await hospedador.cwd(carpeta);
@@ -1771,17 +1837,18 @@ export function crearPreviaPanel({ hospedador, proyecto, estadoPestana, editor, 
       if (!modelo) {
         const lineas = String((r && (r.error || r.consola)) || "").trim().split("\n").filter(Boolean);
         const porque = lineas.length ? lineas[lineas.length - 1].trim() : "no devolvió un modelo legible";
-        mensajeEmulador("no se pudo abrir " + archivo.name + ": " + porque);
-        return null;
+        return fallar("no se pudo abrir " + nombre + ": " + porque);
       }
       const pintado = pintarVistaPrevia(modelo);
       const ejecucion = modelo.ejecucion;
       const frontera = ejecucion && ejecucion.error ? " · código no ejecutado: " + ejecucion.error : "";
-      mensajeVistaPreviaRender("APK soltado " + archivo.name + ": " + textoDelModelo(modelo) + frontera);
+      const resultado = "APK soltado " + nombre + ": " + textoDelModelo(modelo) + frontera;
+      mensajeVistaPreviaRender(resultado);
+      registrarSoltada(resultado, "aviso");
+      await terminarProgresoApk(token, resultado, "listo");
       return pintado;
     } catch (e) {
-      mensajeEmulador("no se pudo abrir " + archivo.name + ": " + (e && e.message ? e.message : e));
-      return null;
+      return fallar("no se pudo abrir " + nombre + ": " + (e && e.message ? e.message : e));
     } finally {
       origenPrevia = "build";
     }
@@ -1822,6 +1889,7 @@ export function crearPreviaPanel({ hospedador, proyecto, estadoPestana, editor, 
     actualizarEnergiaBotones();
     if (apagado) {
       // apagar no ejecuta ni borra la última apk: solo deja el lienzo en negro
+      cerrarProgresoApk();
       mensajeEmulador(MENSAJE_APAGADO);
       pintarRender();
       return null;
@@ -3747,10 +3815,12 @@ export function crearPreviaPanel({ hospedador, proyecto, estadoPestana, editor, 
     canvas.addEventListener("dragleave", () => canvas.classList.remove("previa-canvas-recibiendo"));
     canvas.addEventListener("drop", (e) => {
       canvas.classList.remove("previa-canvas-recibiendo");
+      // el navegador no puede quedarse el fichero: sin esto, soltarlo fuera de su rama lo abre como
+      // documento y saca al usuario del editor sin guardar (el convenio de deps.js)
+      e.preventDefault();
       const archivo = archivoDeArrastre(e);
       if (!archivo) return;
       if (esArchivoApk(archivo)) {
-        e.preventDefault();
         abrirApkSoltada(archivo).catch((err) => {
           mensajeEmulador("no se pudo cargar el apk soltado: " + (err && err.message ? err.message : err));
         });
@@ -3759,11 +3829,13 @@ export function crearPreviaPanel({ hospedador, proyecto, estadoPestana, editor, 
       if (!editable || !editando) return;
       const nodo = seleccion && modeloVivo ? nodoPorRuta(modeloVivo.raiz, seleccion) : null;
       if (!nodoImagen(nodo)) return;
-      e.preventDefault();
       const campo = document.querySelector(
         '#previa-propiedades-campos [data-propiedad="android:src"]');
       importarImagen(archivo, campo).catch(() => {});
     });
+    // el resultado de una carga se queda en el marco hasta que el usuario pulsa el emulador: el
+    // overlay no captura el puntero, así que este `pointerdown` es el que lo retira
+    canvas.addEventListener("pointerdown", () => cerrarProgresoApk());
   }
 
   // Engancha el soltar en las tres superficies una sola vez: si un id se repite o `iniciar()` se
