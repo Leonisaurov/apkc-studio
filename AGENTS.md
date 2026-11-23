@@ -223,6 +223,10 @@ los imports y no debe depender de ese puente.
   por `postMessage`. No lo muevas al worker.
 - `createSyncAccessHandle()` es **asíncrona**; sus métodos sí son sincrónicos. Sin
   `crossOriginIsolated` no hay handle: hacen falta COOP/COEP y servir por `http(s)`, no `file://`.
+- El **mtime de una entrada de OPFS es el del `File`** (`getFileHandle().getFile().lastModified`),
+  no `Date.now()`: `apkc` lo mete en la huella del `android.jar` (I5) y una fecha nueva por worker
+  haría reindexar y recompilar I3 en cada recarga. `fs-fragmento.js` lo fija al descubrir el nodo;
+  `Date.now()` solo para lo creado en la sesión. `prueba.js` lo falsifica con un OPFS de mentira.
 - `wasm_exec.js` **no se versiona** (viene del GOROOT). `servidor.js` lo sirve desde
   `$(go env GOROOT)/lib/wasm/`; en un host estático hay que copiarlo junto a `index.html`.
 - Un binario de Go en wasm **no se reutiliza**: `hospedador.js` guarda los bytes y crea una

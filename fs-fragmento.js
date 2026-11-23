@@ -33,8 +33,12 @@ export function crearFs(carpeta) {
     volcar: () => { const s = salidaConsola; salidaConsola = ""; return s; },
   };
 
-  function nuevoNodo(calle, esDir) {
-    const ahora = Date.now();
+  // La fecha de una entrada que ya está en OPFS es la del File, no la de hoy. apkc mete el mtime
+  // del android.jar en la huella del jar (I5): si el mismo fichero cambia de fecha al crear un
+  // worker nuevo, una recarga reindexa y recompila I3 entero. `fechaMs` llega del disco cuando se
+  // descubre la entrada; Date.now() se queda para lo que nace en esta sesión.
+  function nuevoNodo(calle, esDir, fechaMs) {
+    const ahora = typeof fechaMs === "number" && Number.isFinite(fechaMs) ? fechaMs : Date.now();
     const n = {
       dir: esDir, data: esDir ? null : new Uint8Array(0), mode: esDir ? MODO_DIR : MODO_FICHERO,
       mtimeMs: ahora, atimeMs: ahora, ctimeMs: ahora, uid: 1000, gid: 1000, acceso: null,
@@ -91,6 +95,14 @@ export function crearFs(carpeta) {
     const nombre = tramos.pop();
     try { (await directorio(tramos, false)).removeEntry(nombre, { recursive: !!recursivo }); }
     catch (e) { /* no estaba: nada que borrar */ }
+  }
+  // getFile() no pide el acceso exclusivo y da el lastModified real del fichero en OPFS. Si el
+  // navegador no lo da (handle sin File, permiso retirado), devuelve null y el nodo cae a Date.now().
+  async function fechaDeDisco(mango) {
+    try {
+      const f = await mango.getFile();
+      return typeof f.lastModified === "number" && Number.isFinite(f.lastModified) ? f.lastModified : null;
+    } catch (e) { return null; }
   }
 
   // un acceso sincrónico por fichero abierto: es lo que permite escribir en una posición
@@ -187,10 +199,10 @@ export function crearFs(carpeta) {
           if (!(flags & N.O_CREAT)) {
             // puede estar en OPFS y no en la memoria (otra sesión, u otra pestaña)
             const dh = await directorio(tramosDe(a).slice(0, -1), false);
-            let existeEnDisco = false;
-            try { await dh.getFileHandle(tramosDe(a).pop()); existeEnDisco = true; } catch (e) { /* no está */ }
-            if (!existeEnDisco) return void r(err("ENOENT", a));
-            n = nuevoNodo(a, false);
+            let fh = null;
+            try { fh = await dh.getFileHandle(tramosDe(a).pop()); } catch (e) { /* no está */ }
+            if (!fh) return void r(err("ENOENT", a));
+            n = nuevoNodo(a, false, await fechaDeDisco(fh));
           } else {
             n = nuevoNodo(a, false);
             n.sinCargar = true;
@@ -286,7 +298,12 @@ export function crearFs(carpeta) {
       // sin nodo en memoria: si está en OPFS existe, y los tests de apkc lo piden
       try {
         const tramos = tramosDe(a);
-        if (await ficheroOPFS(a, false)) return void llamar(cb)(null, statDe({ dir: false, data: new Uint8Array(0), mode: MODO_FICHERO, mtimeMs: Date.now(), atimeMs: Date.now(), ctimeMs: Date.now(), uid: 1000, gid: 1000 }, a));
+        const fh = await ficheroOPFS(a, false);
+        if (fh) {
+          // la fecha es la del fichero del disco, no la de esta llamada: stat no puede inventarla
+          const fecha = await fechaDeDisco(fh);
+          return void llamar(cb)(null, statDe({ dir: false, data: new Uint8Array(0), mode: MODO_FICHERO, mtimeMs: fecha ?? Date.now(), atimeMs: fecha ?? Date.now(), ctimeMs: fecha ?? Date.now(), uid: 1000, gid: 1000 }, a));
+        }
         await directorio(tramos, false);
         return void llamar(cb)(null, statDe({ dir: true, mode: MODO_DIR, mtimeMs: Date.now(), atimeMs: Date.now(), ctimeMs: Date.now(), uid: 1000, gid: 1000 }, a));
       } catch (e) { llamar(cb)(err("ENOENT", a)); }
@@ -600,8 +617,10 @@ export function crearFs(carpeta) {
             await caminar(mango, ruta);
           } else {
             // el contenido aún NO está: se lee al abrir o al extraer. Se marca, porque un nodo
-            // de 0 bytes descubierto y un nodo de 0 bytes recién truncado no son lo mismo
-            const hallado = nuevoNodo(ruta, false);
+            // de 0 bytes descubierto y un nodo de 0 bytes recién truncado no son lo mismo.
+            // La fecha sale del File: si fuera Date.now(), cada recarga cambiaría el mtime del
+            // android.jar y la huella de I5 mandaría reindexar y recompilar I3 sin que nada cambiara.
+            const hallado = nuevoNodo(ruta, false, await fechaDeDisco(mango));
             hallado.descubierto = true;
           }
         }

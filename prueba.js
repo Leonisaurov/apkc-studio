@@ -17,6 +17,7 @@ import * as vistaXml from "./vista-xml.js";
 import * as layoutEditor from "./layout-editor.js";
 import * as depsMod from "./deps.js";
 import { bufferDelManifiesto } from "./ajustes.js";
+import { crearFs } from "./fs-fragmento.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const a = { buildProject, makeZip, analyze, RULES, crc32 };
@@ -2460,6 +2461,104 @@ public final class R {
       if (!dentro(m.index)) {
         mal("guardar() lee OPFS fuera de conBloqueo: la comprobación de «ya existe» sigue siendo TOCTOU");
       }
+    }
+  }
+
+  // 16. El mtime de lo que ya está en OPFS es el del File, no el de la sesión. apkc mete el mtime
+  //     del android.jar en la huella del jar (I5): si cambia al crear un worker nuevo, una recarga
+  //     reindexa y recompila I3 entero sin que el fichero haya cambiado. Se falsifica con un OPFS
+  //     de mentira, que es lo único que deja fijar el `lastModified` de un File en node.
+  {
+    const FECHA_JAR = 1700000000000;
+    const trozo = (bytes) => ({ arrayBuffer: async () => bytes.slice().buffer });
+    const ficheroFalso = (nombre, lastModified, contenido = "") => {
+      const datos = { bytes: new TextEncoder().encode(contenido), lastModified };
+      return {
+        kind: "file", name: nombre,
+        async getFile() {
+          // lastModified null simula un mango cuyo File no se puede leer (permiso retirado)
+          if (datos.lastModified === null) throw Object.assign(new Error("sin File"), { name: "NotReadableError" });
+          return {
+            name: nombre, size: datos.bytes.length, lastModified: datos.lastModified,
+            slice: (ini, fin) => trozo(datos.bytes.slice(ini, fin)),
+            arrayBuffer: async () => datos.bytes.slice().buffer,
+          };
+        },
+        async createSyncAccessHandle() {
+          return {
+            getSize: () => datos.bytes.length,
+            read: (buf, { at = 0 } = {}) => { buf.set(datos.bytes.subarray(at, at + buf.length)); return buf.length; },
+            write: (buf, { at = 0 } = {}) => {
+              const salida = new Uint8Array(Math.max(datos.bytes.length, at + buf.length));
+              salida.set(datos.bytes); salida.set(buf, at); datos.bytes = salida;
+              return buf.length;
+            },
+            truncate: (largo) => { datos.bytes = datos.bytes.slice(0, largo); },
+            flush: () => {}, close: () => {},
+          };
+        },
+      };
+    };
+    const carpetaFalsa = (nombre, hijos = {}) => ({
+      kind: "directory", name: nombre,
+      async getDirectoryHandle(n, { create } = {}) {
+        const h = hijos[n];
+        if (h && h.kind === "directory") return h;
+        if (h) throw Object.assign(new Error("TypeMismatchError"), { name: "TypeMismatchError" });
+        if (!create) throw Object.assign(new Error("NotFoundError"), { name: "NotFoundError" });
+        const d = carpetaFalsa(n); hijos[n] = d; return d;
+      },
+      async getFileHandle(n, { create } = {}) {
+        const h = hijos[n];
+        if (h && h.kind === "file") return h;
+        if (h) throw Object.assign(new Error("TypeMismatchError"), { name: "TypeMismatchError" });
+        if (!create) throw Object.assign(new Error("NotFoundError"), { name: "NotFoundError" });
+        const f = ficheroFalso(n, Date.now()); hijos[n] = f; return f;
+      },
+      async removeEntry(n) { delete hijos[n]; },
+      async *entries() { for (const [n, h] of Object.entries(hijos)) yield [n, h]; },
+    });
+    const opfsFalso = () => carpetaFalsa("/", {
+      sdk: carpetaFalsa("sdk", { "android.jar": ficheroFalso("android.jar", FECHA_JAR, "PK") }),
+      proyecto: carpetaFalsa("proyecto", {
+        "A.java": ficheroFalso("A.java", FECHA_JAR + 1000, "class A {}"),
+        "sin-file.bin": ficheroFalso("sin-file.bin", null, "x"),
+      }),
+    });
+    const statDe = (sistema, ruta) => new Promise((ok, falla) =>
+      sistema.fs.stat(ruta, (e, s) => (e ? falla(e) : ok(s))));
+
+    const primera = crearFs(opfsFalso());
+    await primera.sincronizar();
+    const jarUno = await statDe(primera, "/sdk/android.jar");
+    const jarDos = await statDe(primera, "/sdk/android.jar");
+    if (jarUno.mtimeMs !== FECHA_JAR || jarDos.mtimeMs !== FECHA_JAR) {
+      mal(`el stat inventa el mtime del jar: ${jarUno.mtimeMs} y ${jarDos.mtimeMs}, el File dice ${FECHA_JAR}`);
+    }
+    // un worker nuevo (la recarga de la pestaña) barre OPFS otra vez: mismo File, mismo mtime
+    const segunda = crearFs(opfsFalso());
+    await segunda.sincronizar();
+    const jarRecargado = await statDe(segunda, "/sdk/android.jar");
+    if (jarRecargado.mtimeMs !== jarUno.mtimeMs) {
+      mal(`tras recargar el jar cambia de mtime: ${jarUno.mtimeMs} -> ${jarRecargado.mtimeMs} (otra huella de I5)`);
+    }
+    // sin nodo en memoria (no se barrió) el stat tampoco puede inventarse la fecha
+    const sinBarrer = crearFs(opfsFalso());
+    const jarSinBarrer = await statDe(sinBarrer, "/sdk/android.jar");
+    if (jarSinBarrer.mtimeMs !== FECHA_JAR) {
+      mal("el stat de un fichero aún no descubierto inventa el mtime: " + jarSinBarrer.mtimeMs);
+    }
+    // un mango sin File legible cae a Date.now(), no a NaN ni a 0
+    const antes = Date.now();
+    const sinFile = await statDe(primera, "/proyecto/sin-file.bin");
+    if (!Number.isFinite(sinFile.mtimeMs) || sinFile.mtimeMs < antes - 1000 || sinFile.mtimeMs > Date.now() + 1000) {
+      mal("sin File el stat no deja una fecha válida de la sesión: " + sinFile.mtimeMs);
+    }
+    // y un fichero creado ahora mismo sigue teniendo una fecha válida
+    await primera.montar("/proyecto/Nuevo.java", new TextEncoder().encode("class Nuevo {}"));
+    const recienCreado = await statDe(primera, "/proyecto/Nuevo.java");
+    if (!Number.isFinite(recienCreado.mtimeMs) || recienCreado.mtimeMs < antes - 1000) {
+      mal("un fichero montado en la sesión no tiene mtime válido: " + recienCreado.mtimeMs);
     }
   }
 
