@@ -2186,6 +2186,323 @@ async function conductor() {
       trasRecargaEmulador.oyentes.join() === "id/pulsar",
       JSON.stringify(trasRecargaEmulador).slice(0, 300));
 
+    // D7. la navegación entre actividades propias, que el gate no ejercía: la app de dos pantallas
+    // abre la segunda con `startActivity` desde el primer clic y vuelve con `finish()` desde el
+    // segundo. Sin clics se ve la lanzadora; el primero deja delante la segunda, con su layout y su
+    // actividad en el modelo; el segundo vuelve a la primera conservando «Pulsos: 1»; y el recorrido
+    // se ve en las dos superficies del emulador, sin código de UI nuevo.
+    const layoutDosPantallas = [
+      '<?xml version="1.0" encoding="utf-8"?>',
+      '<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"',
+      '    android:orientation="vertical"',
+      '    android:layout_width="match_parent"',
+      '    android:layout_height="match_parent"',
+      '    android:gravity="center">',
+      '    <TextView',
+      '        android:id="@+id/total"',
+      '        android:layout_width="wrap_content"',
+      '        android:layout_height="wrap_content"',
+      '        android:text="Pulsos: 0"/>',
+      '    <Button',
+      '        android:id="@+id/abrir"',
+      '        android:layout_width="wrap_content"',
+      '        android:layout_height="wrap_content"',
+      '        android:text="Abrir"/>',
+      '</LinearLayout>',
+      "",
+    ].join("\n");
+    const layoutSegundaPantalla = [
+      '<?xml version="1.0" encoding="utf-8"?>',
+      '<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"',
+      '    android:orientation="vertical"',
+      '    android:layout_width="match_parent"',
+      '    android:layout_height="match_parent"',
+      '    android:gravity="center">',
+      '    <TextView',
+      '        android:id="@+id/texto"',
+      '        android:layout_width="wrap_content"',
+      '        android:layout_height="wrap_content"',
+      '        android:text="Segunda"/>',
+      '    <Button',
+      '        android:id="@+id/volver"',
+      '        android:layout_width="wrap_content"',
+      '        android:layout_height="wrap_content"',
+      '        android:text="Volver"/>',
+      '</LinearLayout>',
+      "",
+    ].join("\n");
+    const fuenteMainNavega = [
+      "package com.myapp;",
+      "",
+      "import android.app.*;",
+      "import android.content.*;",
+      "import android.os.*;",
+      "import android.view.*;",
+      "import android.widget.*;",
+      "",
+      "public class MainActivity extends Activity {",
+      "    int pulsos = 0;",
+      "    TextView total;",
+      "",
+      "    @Override",
+      "    public void onCreate(Bundle savedInstanceState) {",
+      "        super.onCreate(savedInstanceState);",
+      "        setContentView(R.layout.main);",
+      "        total = (TextView) findViewById(R.id.total);",
+      "        findViewById(R.id.abrir).setOnClickListener(new View.OnClickListener() {",
+      "            public void onClick(View v) {",
+      "                abrir();",
+      "            }",
+      "        });",
+      "    }",
+      "",
+      "    void abrir() {",
+      "        pulsos = pulsos + 1;",
+      "        total.setText(\"Pulsos: \" + pulsos);",
+      "        startActivity(new Intent(this, SegundaActivity.class));",
+      "    }",
+      "}",
+      "",
+    ].join("\n");
+    const fuenteSegundaNavega = [
+      "package com.myapp;",
+      "",
+      "import android.app.*;",
+      "import android.os.*;",
+      "import android.view.*;",
+      "import android.widget.*;",
+      "",
+      "public class SegundaActivity extends Activity {",
+      "    @Override",
+      "    public void onCreate(Bundle savedInstanceState) {",
+      "        super.onCreate(savedInstanceState);",
+      "        setContentView(R.layout.segunda);",
+      "        TextView texto = (TextView) findViewById(R.id.texto);",
+      "        texto.setText(\"Pantalla 2\");",
+      "        findViewById(R.id.volver).setOnClickListener(new View.OnClickListener() {",
+      "            public void onClick(View v) {",
+      "                finish();",
+      "            }",
+      "        });",
+      "    }",
+      "}",
+      "",
+    ].join("\n");
+    // el modelo del emulador y lo que enseña cada superficie: el panel del editor y la vista
+    // Pantalla pintan el mismo modelo, pero cada una tiene su cuenta de clics, su estado y sus
+    // botones de pulsar, que es lo que se compara aquí
+    const estadoNavega = async (esperadas) => evaluar(`(async () => {
+      const vp = await import("/vista-previa.js");
+      const leer = () => {
+        const m = vp.modeloActual();
+        return { m,
+          pantallas: m && m.ejecucion ? (m.ejecucion.pantallas || []) : [],
+          actividad: (m && m.actividad) || "",
+          layout: (m && m.layout) || "",
+          error: m && m.ejecucion ? (m.ejecucion.error || "") : "",
+          textos: m && m.raiz ? (m.raiz.hijos || []).map((h) => h.textoDinamico || h.texto || "") : [],
+          oyentes: m && m.ejecucion ? (m.ejecucion.oyentes || []).map((o) => o.id) : [],
+          idRefs: m && m.ejecucion ? (m.ejecucion.oyentes || []).map((o) => o.idRef) : [] };
+      };
+      let visto = leer();
+      for (let i = 0; i < 150 && visto.pantallas.length !== ${esperadas}; i++) {
+        await new Promise((ok) => setTimeout(ok, 100));
+        visto = leer();
+      }
+      const superficie = (cuentaId, estadoId, cajaId) => ({
+        cuenta: (document.getElementById(cuentaId) || {}).textContent || "",
+        estado: (document.getElementById(estadoId) || {}).textContent || "",
+        oyentes: [...document.querySelectorAll("#" + cajaId + " .previa-oyente")]
+          .map((b) => b.dataset.idref),
+      });
+      const vista = document.getElementById("vista-previa");
+      const espacio = vista && vista.__espacio;
+      const rectAbrir = espacio && visto.m
+        ? vp.rectsEscalados(visto.m, espacio.ancho, espacio.alto).find((r) => r.id === "id/abrir") : null;
+      return { pantallas: visto.pantallas, actividad: visto.actividad, layout: visto.layout,
+        textos: visto.textos, error: visto.error, oyentes: visto.oyentes, idRefs: visto.idRefs,
+        panel: superficie("previa-pulsos-cuenta", "previa-render-estado", "previa-oyentes"),
+        vista: superficie("vista-pulsos-cuenta", "vista-previa-estado", "vista-oyentes"),
+        vistaEspacio: espacio ? { ancho: espacio.ancho, alto: espacio.alto } : null,
+        vistaAbrir: rectAbrir ? { id: rectAbrir.id, texto: rectAbrir.texto } : null };
+    })()`);
+    // el punto de un clic se mide con el espacio de la última pintura del canvas, igual que el
+    // manejador de la página: un rectángulo en otro espacio mandaría el puntero a otro píxel
+    const puntoDeClic = async (canvasId, id) => evaluar(`(async () => {
+      const vp = await import("/vista-previa.js");
+      const modelo = vp.modeloActual();
+      const canvas = document.getElementById(${JSON.stringify(canvasId)});
+      if (!modelo || !canvas) return { punto: null, motivo: "sin modelo o canvas" };
+      const espacio = canvas.__espacio || { ancho: canvas.clientWidth, alto: canvas.clientHeight };
+      const rect = vp.rectsEscalados(modelo, espacio.ancho, espacio.alto)
+        .find((r) => r.id === ${JSON.stringify(id)});
+      const caja = canvas.getBoundingClientRect();
+      if (!rect || !(espacio.ancho > 0) || !(espacio.alto > 0) || !(caja.width > 0)) {
+        return { punto: null, rect: rect || null, espacio };
+      }
+      const punto = {
+        x: caja.left + (rect.x + rect.ancho / 2) * (caja.width / espacio.ancho),
+        y: caja.top + (rect.y + rect.alto / 2) * (caja.height / espacio.alto),
+      };
+      const el = typeof document.elementFromPoint === "function"
+        ? document.elementFromPoint(punto.x, punto.y) : null;
+      return { punto, rect: { x: rect.x, y: rect.y, ancho: rect.ancho, alto: rect.alto,
+        oyente: rect.oyente === true }, encima: el ? (el.id || el.tagName) : null };
+    })()`);
+    const clicEn = async (punto) => {
+      await exec("Input.dispatchMouseEvent",
+        { type: "mousePressed", x: punto.x, y: punto.y, button: "left", clickCount: 1 });
+      await exec("Input.dispatchMouseEvent",
+        { type: "mouseReleased", x: punto.x, y: punto.y, button: "left", clickCount: 1 });
+    };
+    const navegaPreparado = await evaluar(`(async () => {
+      const manifiesto = String(await hospedador.texto("/proyecto/AndroidManifest.xml"));
+      const conSegunda = manifiesto.replace("</application>",
+        '    <activity android:name=".SegundaActivity"/>\\n    </application>');
+      await hospedador.escribir("/proyecto/AndroidManifest.xml", new TextEncoder().encode(conSegunda));
+      await hospedador.escribir("/proyecto/res/layout/main.xml",
+        new TextEncoder().encode(${JSON.stringify(layoutDosPantallas)}));
+      await hospedador.escribir("/proyecto/res/layout/segunda.xml",
+        new TextEncoder().encode(${JSON.stringify(layoutSegundaPantalla)}));
+      await hospedador.escribir("/proyecto/src/com/myapp/MainActivity.java",
+        new TextEncoder().encode(${JSON.stringify(fuenteMainNavega)}));
+      await hospedador.escribir("/proyecto/src/com/myapp/SegundaActivity.java",
+        new TextEncoder().encode(${JSON.stringify(fuenteSegundaNavega)}));
+      await hospedador.limpiar("/proyecto/build");
+      await refrescarArbol();
+      document.querySelector('nav.actividad [data-vista="pestana"]').click();
+      if (!PREVIA_PANEL.estado().visible) document.getElementById("previa-alternar").click();
+      document.getElementById("previa-modo-render").click();
+      // build completo: la app estrena manifiesto, layout y clase, y el incremental no tiene por
+      // qué ver un fichero nuevo como cambio de entrada
+      const k = await asegurarDebugKeystore();
+      const build = await compilarCon(k, "debug", { incremental: false });
+      await new Promise((ok) => setTimeout(ok, 250));
+      return { declarado: conSegunda !== manifiesto && /SegundaActivity/.test(conSegunda),
+        codigo: build ? build.codigo : -1,
+        consola: String((build && build.consola) || "").slice(-400) };
+    })()`);
+    const arranqueNavega = await estadoNavega(1);
+    comprueba("la app de dos actividades arranca en la lanzadora, sin clics (D7)",
+      navegaPreparado.declarado === true && navegaPreparado.codigo === 0 &&
+      arranqueNavega.pantallas.join() === "com.myapp.MainActivity" &&
+      arranqueNavega.actividad === "com.myapp.MainActivity" &&
+      arranqueNavega.layout === "res/layout/main.xml" &&
+      (arranqueNavega.textos || []).includes("Pulsos: 0") &&
+      (arranqueNavega.oyentes || []).join() === "id/abrir" &&
+      arranqueNavega.error === "" &&
+      /sin clics/.test(String(arranqueNavega.panel.cuenta)) &&
+      /sin clics/.test(String(arranqueNavega.vista.cuenta)) &&
+      /res\/layout\/main\.xml/.test(String(arranqueNavega.panel.estado)) &&
+      /res\/layout\/main\.xml/.test(String(arranqueNavega.vista.estado)),
+      JSON.stringify({ codigo: navegaPreparado.codigo, consola: navegaPreparado.consola,
+        pantallas: arranqueNavega.pantallas, actividad: arranqueNavega.actividad,
+        layout: arranqueNavega.layout, textos: arranqueNavega.textos,
+        oyentes: arranqueNavega.oyentes, error: arranqueNavega.error }).slice(0, 500));
+    const puntoAbrir = await puntoDeClic("previa-lateral-canvas", "id/abrir");
+    if (!puntoAbrir.punto) {
+      comprueba("el panel del editor tiene un rectángulo pulsable para id/abrir (D7)", false,
+        JSON.stringify(puntoAbrir).slice(0, 300));
+    } else {
+      comprueba("el punto de id/abrir cae sobre el canvas del panel y no sobre otra capa (D7)",
+        puntoAbrir.encima === "previa-lateral-canvas" && puntoAbrir.rect.oyente === true,
+        JSON.stringify(puntoAbrir).slice(0, 300));
+      await clicEn(puntoAbrir.punto);
+      const trasAbrir = await estadoNavega(2);
+      comprueba("un clic en id/abrir abre la segunda actividad propia y el modelo lo dice (D7)",
+        trasAbrir.pantallas.join() === "com.myapp.MainActivity,com.myapp.SegundaActivity" &&
+        trasAbrir.actividad === "com.myapp.SegundaActivity" &&
+        trasAbrir.layout === "res/layout/segunda.xml" &&
+        (trasAbrir.textos || []).includes("Pantalla 2") &&
+        (trasAbrir.oyentes || []).join() === "id/volver" &&
+        trasAbrir.error === "" &&
+        /1 clic/.test(String(trasAbrir.panel.cuenta)) &&
+        /1 clic/.test(String(trasAbrir.vista.cuenta)) &&
+        /res\/layout\/segunda\.xml/.test(String(trasAbrir.vista.estado)),
+        JSON.stringify({ pantallas: trasAbrir.pantallas, actividad: trasAbrir.actividad,
+          layout: trasAbrir.layout, textos: trasAbrir.textos, oyentes: trasAbrir.oyentes,
+          panel: trasAbrir.panel.cuenta, vista: trasAbrir.vista.cuenta,
+          error: trasAbrir.error }).slice(0, 500));
+      const puntoVolver = await puntoDeClic("previa-lateral-canvas", "id/volver");
+      if (!puntoVolver.punto) {
+        comprueba("la segunda pantalla tiene un rectángulo pulsable para id/volver (D7)", false,
+          JSON.stringify(puntoVolver).slice(0, 300));
+      } else {
+        await clicEn(puntoVolver.punto);
+        const trasVolver = await estadoNavega(3);
+        comprueba("el segundo clic (finish) vuelve a la lanzadora conservando «Pulsos: 1» (D7)",
+          trasVolver.pantallas.join() ===
+            "com.myapp.MainActivity,com.myapp.SegundaActivity,com.myapp.MainActivity" &&
+          trasVolver.actividad === "com.myapp.MainActivity" &&
+          trasVolver.layout === "res/layout/main.xml" &&
+          (trasVolver.textos || []).includes("Pulsos: 1") &&
+          !(trasVolver.textos || []).includes("Pulsos: 0") &&
+          (trasVolver.oyentes || []).join() === "id/abrir" &&
+          trasVolver.error === "" &&
+          /2 clics/.test(String(trasVolver.panel.cuenta)),
+          JSON.stringify({ pantallas: trasVolver.pantallas, actividad: trasVolver.actividad,
+            layout: trasVolver.layout, textos: trasVolver.textos,
+            panel: trasVolver.panel.cuenta, error: trasVolver.error }).slice(0, 500));
+      }
+    }
+    // la vista Pantalla repinta el mismo modelo y sus contadores y botones son suyos: el recorrido
+    // de dos actividades se ve igual en las dos superficies, sin tocar la UI
+    await evaluar(`(() => {
+      document.querySelector('nav.actividad [data-vista="vista"]').click();
+      document.getElementById("vista-modo-emulador").click();
+    })()`);
+    await esperar(400);
+    const dosSuperficies = await estadoNavega(3);
+    comprueba("el recorrido de dos actividades se ve igual en el panel y en la vista Pantalla (D7)",
+      dosSuperficies.pantallas.join() ===
+        "com.myapp.MainActivity,com.myapp.SegundaActivity,com.myapp.MainActivity" &&
+      dosSuperficies.actividad === "com.myapp.MainActivity" &&
+      (dosSuperficies.textos || []).includes("Pulsos: 1") &&
+      /2 clics/.test(String(dosSuperficies.panel.cuenta)) &&
+      /2 clics/.test(String(dosSuperficies.vista.cuenta)) &&
+      /res\/layout\/main\.xml/.test(String(dosSuperficies.panel.estado)) &&
+      /res\/layout\/main\.xml/.test(String(dosSuperficies.vista.estado)) &&
+      (dosSuperficies.panel.oyentes || []).join() === (dosSuperficies.idRefs || []).join() &&
+      (dosSuperficies.vista.oyentes || []).join() === (dosSuperficies.idRefs || []).join() &&
+      (dosSuperficies.idRefs || []).length === 1 &&
+      dosSuperficies.vistaEspacio !== null && dosSuperficies.vistaEspacio.ancho > 0 &&
+      dosSuperficies.vistaAbrir !== null && dosSuperficies.vistaAbrir.id === "id/abrir" &&
+      dosSuperficies.error === "",
+      JSON.stringify({ pantallas: dosSuperficies.pantallas, textos: dosSuperficies.textos,
+        panel: dosSuperficies.panel, vista: dosSuperficies.vista,
+        idRefs: dosSuperficies.idRefs, espacio: dosSuperficies.vistaEspacio,
+        abrir: dosSuperficies.vistaAbrir }).slice(0, 600));
+    // el proyecto vuelve a la app del Clicker que había antes: los tramos que vienen detrás
+    // encuentran el mismo árbol y el mismo apk, y ninguna clase de la prueba se queda en OPFS
+    const navegaRestaurado = await evaluar(`(async () => {
+      const sinSegunda = String(await hospedador.texto("/proyecto/AndroidManifest.xml"))
+        .replace('    <activity android:name=".SegundaActivity"/>\\n', "");
+      await hospedador.escribir("/proyecto/AndroidManifest.xml", new TextEncoder().encode(sinSegunda));
+      await hospedador.escribir("/proyecto/res/layout/main.xml",
+        new TextEncoder().encode(${JSON.stringify(layoutDeclarativa)}));
+      await hospedador.escribir("/proyecto/src/com/myapp/MainActivity.java",
+        new TextEncoder().encode(${JSON.stringify(fuenteDeclarativa)}));
+      await hospedador.limpiar("/proyecto/res/layout/segunda.xml");
+      await hospedador.limpiar("/proyecto/src/com/myapp/SegundaActivity.java");
+      await hospedador.limpiar("/proyecto/build");
+      await refrescarArbol();
+      document.querySelector('nav.actividad [data-vista="pestana"]').click();
+      document.getElementById("previa-modo-render").click();
+      const k = await asegurarDebugKeystore();
+      const build = await compilarCon(k, "debug", { incremental: false });
+      await new Promise((ok) => setTimeout(ok, 250));
+      const vp = await import("/vista-previa.js");
+      const m = vp.modeloActual();
+      return { codigo: build ? build.codigo : -1, manifiesto: sinSegunda,
+        oyentes: m && m.ejecucion ? (m.ejecucion.oyentes || []).map((o) => o.id) : [],
+        pantallas: m && m.ejecucion ? (m.ejecucion.pantallas || []) : [] };
+    })()`);
+    comprueba("el proyecto vuelve a la app del Clicker tras la navegación de D7",
+      navegaRestaurado.codigo === 0 && !/SegundaActivity/.test(String(navegaRestaurado.manifiesto)) &&
+      navegaRestaurado.pantallas.join() === "com.myapp.MainActivity" &&
+      (navegaRestaurado.oyentes || []).join() === "id/pulsar",
+      JSON.stringify(navegaRestaurado).slice(0, 400));
+
     // 12a-ter-sexies. el texto del intérprete es dato: un `<script>` en un `texto` sale escapado y
     // nunca se convierte en marcado. Y el fallo del preview limpia la consola, sin tocar la de apkc.
     const escapado = await evaluar(`(async () => {
