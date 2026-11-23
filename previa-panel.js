@@ -43,6 +43,7 @@ import {
   leerPropiedades, escribirPropiedad, tiposRaizDisponibles, cambiarTipoRaiz,
   infoTipo, iconosSistema, tamanoDeTipo,
 } from "./layout-editor.js";
+import { RUTA_ULTIMA_APK, leerUltimaApk, fechaDeMeta, EVENTO_ULTIMA_APK } from "./ultima-apk.js";
 
 // Persistencia de la vista dividida. Son preferencias de esta ventana, no del proyecto.
 const CLAVE_ANCHO = "apkc-studio/previa-ancho";
@@ -54,6 +55,12 @@ const CLAVE_MODO = "apkc-studio/previa-modo";
 const CLAVE_LADO = "apkc-studio/previa-lado";
 const CLAVE_LADO_ALTO = "apkc-studio/previa-lado-alto";
 const CLAVE_LADO_ARRIBA = "apkc-studio/previa-lado-arriba";
+// el emulador guarda su energía, el tamaño de pantalla y si el inspector está abierto. Son
+// preferencias de la ventana: apagar o cambiar de tamaño no toca la última apk ni el proyecto.
+const CLAVE_ENERGIA = "apkc-studio/previa-energia";
+const CLAVE_PANTALLA = "apkc-studio/previa-pantalla";
+const CLAVE_INSPECTOR_PANEL = "apkc-studio/previa-inspector";
+const CLAVE_INSPECTOR_VISTA = "apkc-studio/vista-inspector";
 
 const ANCHO_POR_DEFECTO = 340;
 const ANCHO_MINIMO = 240;
@@ -83,6 +90,15 @@ const MENSAJE_SIN_ABRIR = "Abre un res/layout/*.xml en el editor para ver aquí 
   "sin compilar.";
 const MENSAJE_SIN_PULSOS = "Compila el proyecto (Editor → Compilar → Compilar debug) para ver las " +
   "vistas que responden a un clic.";
+const MENSAJE_APAGADO = "Emulador apagado. Enciéndelo para volver a ejecutar la última APK " +
+  "guardada, sin compilar.";
+const MENSAJE_SIN_ULTIMA = "No hay ninguna última APK guardada todavía: compila una vez y el build " +
+  "dejará una copia estable para el emulador.";
+const PANTALLAS = {
+  "360x640": { ancho: 360, alto: 640 },
+  "411x823": { ancho: 411, alto: 823 },
+};
+const PANTALLA_POR_DEFECTO = { ancho: 360, alto: 640 };
 
 // Una medida utilizable: siempre entera, dentro de [minimo, maximo] y con un respaldo si lo pedido
 // no es un número (una preferencia corrupta no puede dejar el panel en 0 px).
@@ -238,6 +254,54 @@ export function resumenEjecucion(modelo) {
   };
 }
 
+// El modelo de `apkc preview` trae su pantalla declarada (360×640 dp si no dice otra). El
+// selector de tamaño no vuelve a ejecutar la app: reescala el MISMO modelo al tamaño pedido para
+// que el lienzo y el marco de la pantalla coincidan. Es una transformación de vista, no una
+// medida nueva del layout; por eso conserva el modelo original sin tocarlo.
+export function modeloConPantalla(modelo, ancho, alto) {
+  if (!modelo || typeof modelo !== "object") return modelo;
+  const destinoAncho = Number.isFinite(Number(ancho)) && Number(ancho) > 0
+    ? Math.round(Number(ancho)) : PANTALLA_POR_DEFECTO.ancho;
+  const destinoAlto = Number.isFinite(Number(alto)) && Number(alto) > 0
+    ? Math.round(Number(alto)) : PANTALLA_POR_DEFECTO.alto;
+  const pantalla = modelo.pantalla && typeof modelo.pantalla === "object" ? modelo.pantalla : {};
+  const baseAncho = Number.isFinite(Number(pantalla.ancho)) && Number(pantalla.ancho) > 0
+    ? Number(pantalla.ancho) : destinoAncho;
+  const baseAlto = Number.isFinite(Number(pantalla.alto)) && Number(pantalla.alto) > 0
+    ? Number(pantalla.alto) : destinoAlto;
+  if (baseAncho === destinoAncho && baseAlto === destinoAlto) return modelo;
+  const sx = destinoAncho / baseAncho;
+  const sy = destinoAlto / baseAlto;
+  const escalarRect = (rect) => {
+    if (!rect || typeof rect !== "object") return rect;
+    const copia = { ...rect };
+    for (const clave of ["x", "ancho"]) {
+      if (Number.isFinite(Number(rect[clave]))) copia[clave] = Number(rect[clave]) * sx;
+    }
+    for (const clave of ["y", "alto"]) {
+      if (Number.isFinite(Number(rect[clave]))) copia[clave] = Number(rect[clave]) * sy;
+    }
+    return copia;
+  };
+  const copiarNodo = (nodo) => {
+    if (!nodo || typeof nodo !== "object") return nodo;
+    const copia = { ...nodo };
+    if (nodo.rect) copia.rect = escalarRect(nodo.rect);
+    if (Array.isArray(nodo.hijos)) copia.hijos = nodo.hijos.map(copiarNodo);
+    return copia;
+  };
+  return {
+    ...modelo,
+    pantalla: {
+      x: (Number.isFinite(Number(pantalla.x)) ? Number(pantalla.x) : 0) * sx,
+      y: (Number.isFinite(Number(pantalla.y)) ? Number(pantalla.y) : 0) * sy,
+      ancho: destinoAncho,
+      alto: destinoAlto,
+    },
+    raiz: copiarNodo(modelo.raiz),
+  };
+}
+
 // Las vistas que responden a un clic, con su aspecto en el modelo. `ejecucion.oyentes` es la fuente
 // (lo que el intérprete registró); el árbol solo aporta el tipo y el texto para la etiqueta. El
 // `idRef` es lo que se manda a `apkc preview --pulsar`, porque no depende del idioma ni del nombre.
@@ -296,6 +360,26 @@ function leerClave(clave, respaldo) {
 
 function guardarClave(clave, valor) {
   try { localStorage.setItem(clave, String(valor)); } catch (e) { /* preferencia, no dato */ }
+}
+
+// El tamaño elegido: un preset de `PANTALLAS` o un par ancho×alto en dp. Se guarda como JSON para
+// que el personalizado sobreviva a recargar sin una segunda clave por eje.
+function leerPantalla() {
+  const crudo = leerClave(CLAVE_PANTALLA, "");
+  if (!crudo) return { ...PANTALLA_POR_DEFECTO };
+  try {
+    const datos = JSON.parse(crudo);
+    const ancho = Number(datos && datos.ancho);
+    const alto = Number(datos && datos.alto);
+    if (Number.isFinite(ancho) && Number.isFinite(alto) && ancho >= 200 && alto >= 240) {
+      return { ancho: Math.round(ancho), alto: Math.round(alto) };
+    }
+  } catch (e) { /* una preferencia corrupta no puede romper el arranque */ }
+  return { ...PANTALLA_POR_DEFECTO };
+}
+
+function guardarPantalla() {
+  guardarClave(CLAVE_PANTALLA, JSON.stringify(pantalla));
 }
 
 // Las dos superficies donde se pinta lo mismo: el panel de la vista dividida y la vista Pantalla.
@@ -368,6 +452,22 @@ export function crearPreviaPanel({ hospedador, proyecto, estadoPestana, editor }
   // que es lo que hace reproducible la pantalla (el comando no guarda estado entre invocaciones)
   let pulsos = [];
   let pulsando = false;
+  // Energía del emulador y tamaño de su lienzo. Apagar no borra nada: solo deja la pantalla en
+  // negro y evita ejecutar; encender vuelve a pedir `apkc preview` sobre la copia estable.
+  let apagado = leerClave(CLAVE_ENERGIA, "encendido") === "apagado";
+  let pantalla = leerPantalla();
+  let inspectorAbierto = {
+    panel: leerClave(CLAVE_INSPECTOR_PANEL, "1") !== "0",
+    vista: leerClave(CLAVE_INSPECTOR_VISTA, "1") !== "0",
+  };
+  const completa = { panel: false, vista: false };
+  let ultimaMeta = null;
+  // el apk que respalda el modelo en pantalla: el del build o la copia estable. Los clics repiten
+  // `apkc preview` sobre el mismo fichero, así no dependen de que `build/app.apk` siga ahí.
+  let apkActual = "build/app.apk";
+  // distingue el modelo que llega de la última apk del que llega de un build, para no perder la
+  // fuente al repintar desde el evento de `vista-previa.js`
+  let origenPrevia = "build";
   // El modo editar no es un tercer modo de lectura: es un interruptor sobre «Vista previa». Guarda
   // la ruta del nodo seleccionado (índices desde la raíz, sin contar los nodos de texto) y el
   // arrastre de un nodo en curso. Nada de esto se persiste: al recargar se vuelve a la lectura.
@@ -711,6 +811,11 @@ export function crearPreviaPanel({ hospedador, proyecto, estadoPestana, editor }
   function aplicarModo(valor, persistir) {
     // una preferencia vieja (`xml`) era el nombre anterior del mismo panel dibujado
     modo = valor === "render" ? "render" : "vivo";
+    // salir del emulador no puede dejar su superficie fija tapando la vista previa del layout
+    if (modo !== "render") {
+      if (completa.panel) aplicarCompleta("panel", false);
+      if (completa.vista) aplicarCompleta("vista", false);
+    }
     // el modo editar no existe sobre el emulador con eventos: cambiar de lectura lo apaga
     if (modo === "render" && editando) aplicarEditable(false);
     const grupos = [
@@ -954,6 +1059,7 @@ export function crearPreviaPanel({ hospedador, proyecto, estadoPestana, editor }
   // anteriores), así que la pantalla resultante es la misma siempre para la misma lista: el comando
   // no puede guardar la máquina entre invocaciones y no lo finge.
   async function pulsar(idRef) {
+    if (apagado) { mensajeVistaPreviaRender(MENSAJE_APAGADO); return null; }
     if (pulsando || typeof idRef !== "string" || !idRef) return null;
     // el clic puede venir del panel o de la vista Pantalla: con que una superficie esté montada
     // ya hay dónde escribir el «Ejecutando el clic…» y el fallo
@@ -966,7 +1072,7 @@ export function crearPreviaPanel({ hospedador, proyecto, estadoPestana, editor }
       await hospedador.cwd(carpeta);
       const argv = ["preview"];
       for (const p of pulsos) argv.push("--pulsar", p);
-      argv.push("build/app.apk");
+      argv.push(apkActual);
       const r = await hospedador.ejecutar(argv);
       const modelo = modeloDeSalida(r && r.consola);
       if (!modelo) {
@@ -994,6 +1100,288 @@ export function crearPreviaPanel({ hospedador, proyecto, estadoPestana, editor }
     }
   }
 
+  // --- energía, tamaño y última apk ---------------------------------------------------------
+  // La copia estable la escribe `pestana.js` después de un build correcto. Aquí solo se lee para
+  // decir si hay, y se usa como fuente de `apkc preview` sin volver a compilar.
+  function actualizarEnergiaBotones() {
+    for (const id of ["previa-energia", "vista-energia"]) {
+      const boton = el(id);
+      if (!boton) continue;
+      boton.setAttribute("aria-pressed", String(!apagado));
+      const titulo = apagado ? "Encender el emulador con la última apk guardada" : "Apagar el emulador";
+      boton.title = titulo;
+      boton.setAttribute("aria-label", titulo);
+      const texto = boton.querySelector(".texto-boton");
+      if (texto) texto.textContent = apagado ? "Apagado" : "Encendido";
+    }
+  }
+
+  async function actualizarUltima() {
+    let hay = false;
+    try {
+      const ultima = await leerUltimaApk(hospedador);
+      hay = ultima.hay;
+      ultimaMeta = hay ? ultima.meta : null;
+    } catch (e) {
+      hay = false;
+      ultimaMeta = null;
+    }
+    const fecha = fechaDeMeta(ultimaMeta);
+    const hash = ultimaMeta && typeof ultimaMeta.sha256 === "string" && ultimaMeta.sha256
+      ? ultimaMeta.sha256.slice(0, 12) : "";
+    for (const id of ["previa-usar-ultima", "vista-usar-ultima"]) {
+      const boton = el(id);
+      if (!boton) continue;
+      boton.textContent = hay ? "Usar última APK" : "Usar última APK · sin copia";
+      boton.title = hay
+        ? "Ejecutar el emulador con la apk guardada" + (fecha ? " el " + fecha : "") +
+          (hash ? " (sha256 " + hash + "…)" : "") + ", sin compilar"
+        : "Todavía no hay una copia: compila una vez y el build la guardará";
+      boton.setAttribute("aria-label", boton.title);
+    }
+    return hay;
+  }
+
+  async function ejecutarPreviewDe(ruta) {
+    const fuente = ruta === RUTA_ULTIMA_APK ? "ultima" : "build";
+    origenPrevia = fuente;
+    try {
+      await hospedador.cwd(carpeta);
+      const r = await hospedador.ejecutar(["preview", ruta]);
+      const modelo = modeloDeSalida(r && r.consola);
+      if (!modelo) {
+        const lineas = String((r && (r.error || r.consola)) || "").trim().split("\n").filter(Boolean);
+        const motivo = lineas.length ? lineas[lineas.length - 1].trim() : "";
+        mensajeEmulador("apkc preview no devolvió un modelo legible" + (motivo ? ": " + motivo : "."));
+        return null;
+      }
+      apkActual = fuente === "ultima" ? RUTA_ULTIMA_APK : "build/app.apk";
+      return pintarVistaPrevia(modelo);
+    } catch (e) {
+      mensajeEmulador("no se pudo leer la última apk: " + (e && e.message ? e.message : e));
+      return null;
+    } finally {
+      origenPrevia = "build";
+    }
+  }
+
+  // Enciende desde la copia estable. Si no hay copia no compila por su cuenta: lo dice y se queda
+  // apagado, que es más honesto que inventar una pantalla.
+  async function encenderDesdeUltima({ apagarSiNoHay = false } = {}) {
+    let ultima;
+    try {
+      ultima = await leerUltimaApk(hospedador);
+    } catch (e) {
+      ultima = { hay: false, meta: null, bytes: 0 };
+    }
+    ultimaMeta = ultima.hay ? ultima.meta : null;
+    if (!ultima.hay) {
+      if (apagarSiNoHay) {
+        apagado = true;
+        guardarClave(CLAVE_ENERGIA, "apagado");
+        actualizarEnergiaBotones();
+        pintarRender();
+      }
+      mensajeEmulador(MENSAJE_SIN_ULTIMA);
+      return null;
+    }
+    apagado = false;
+    guardarClave(CLAVE_ENERGIA, "encendido");
+    actualizarEnergiaBotones();
+    pulsos = [];
+    limpiarLog("Encendiendo desde la última APK guardada…");
+    mensajeEmulador("Encendiendo desde la última APK guardada…");
+    return ejecutarPreviewDe(RUTA_ULTIMA_APK);
+  }
+
+  async function aplicarEnergia(encendido, persistir = true) {
+    apagado = !encendido;
+    if (persistir) guardarClave(CLAVE_ENERGIA, apagado ? "apagado" : "encendido");
+    actualizarEnergiaBotones();
+    if (apagado) {
+      // apagar no ejecuta ni borra la última apk: solo deja el lienzo en negro
+      mensajeEmulador(MENSAJE_APAGADO);
+      pintarRender();
+      return null;
+    }
+    return encenderDesdeUltima({ apagarSiNoHay: true });
+  }
+
+  // Reiniciar es el ciclo del DISPOSITIVO: se limpia la pantalla y el registro y se vuelve a
+  // ejecutar desde `onCreate`. No es `--recrear`, que gira la actividad conservando su Bundle.
+  async function reiniciarEmulador() {
+    let ultima;
+    try {
+      ultima = await leerUltimaApk(hospedador);
+    } catch (e) {
+      ultima = { hay: false, meta: null, bytes: 0 };
+    }
+    ultimaMeta = ultima.hay ? ultima.meta : null;
+    if (!ultima.hay) {
+      mensajeEmulador(MENSAJE_SIN_ULTIMA);
+      return null;
+    }
+    apagado = false;
+    guardarClave(CLAVE_ENERGIA, "encendido");
+    actualizarEnergiaBotones();
+    pulsos = [];
+    apkActual = RUTA_ULTIMA_APK;
+    limpiarLog("Reiniciando el emulador desde onCreate…");
+    for (const superficie of SUPERFICIES) limpiarCanvas(el(superficie.canvasRender));
+    mensajeEmulador("Reiniciando el emulador desde onCreate…");
+    return ejecutarPreviewDe(RUTA_ULTIMA_APK);
+  }
+
+  function presetDe(ancho, alto) {
+    for (const [clave, valor] of Object.entries(PANTALLAS)) {
+      if (valor.ancho === ancho && valor.alto === alto) return clave;
+    }
+    return "personalizado";
+  }
+
+  function aplicarPantalla(datos, persistir = true) {
+    const ancho = Math.max(200, Math.min(1600, Math.round(Number(datos && datos.ancho) || PANTALLA_POR_DEFECTO.ancho)));
+    const alto = Math.max(240, Math.min(2000, Math.round(Number(datos && datos.alto) || PANTALLA_POR_DEFECTO.alto)));
+    pantalla = { ancho, alto };
+    if (persistir) guardarPantalla();
+    const preset = presetDe(ancho, alto);
+    for (const [idSelect, idPersonalizada, idAncho, idAlto] of [
+      ["previa-pantalla-tamano", "previa-pantalla-personalizada", "previa-pantalla-ancho", "previa-pantalla-alto"],
+      ["vista-pantalla-tamano", "vista-pantalla-personalizada", "vista-pantalla-ancho", "vista-pantalla-alto"],
+    ]) {
+      const select = el(idSelect);
+      if (select) select.value = preset;
+      const personalizada = el(idPersonalizada);
+      if (personalizada) personalizada.hidden = preset !== "personalizado";
+      const campoAncho = el(idAncho);
+      if (campoAncho && document.activeElement !== campoAncho) campoAncho.value = String(ancho);
+      const campoAlto = el(idAlto);
+      if (campoAlto && document.activeElement !== campoAlto) campoAlto.value = String(alto);
+    }
+    ajustarPantallas();
+    // mismo modelo, otro lienzo: se repinta sin lanzar `apkc preview`
+    pintarRender();
+  }
+
+  function aplicarCompleta(superficie, valor) {
+    completa[superficie] = !!valor;
+    const contenedor = superficie === "panel" ? el("previa-render") : el("vista-cuerpo");
+    if (contenedor) contenedor.classList.toggle("pantalla-completa", completa[superficie]);
+    const entrar = el(superficie === "panel" ? "previa-pantalla-completa" : "vista-pantalla-completa");
+    const salir = el(superficie === "panel" ? "previa-salir-completa" : "vista-salir-completa");
+    if (entrar) entrar.hidden = completa[superficie];
+    if (salir) salir.hidden = !completa[superficie];
+    const ajustar = () => { ajustarPantallas(); pintarRender(); };
+    // se ajusta ya (leer clientWidth fuerza el layout con la clase puesta) y otra vez en el
+    // siguiente cuadro por si el navegador termina de medir la superficie fija
+    ajustar();
+    if (typeof requestAnimationFrame === "function") requestAnimationFrame(ajustar);
+  }
+
+  function aplicarInspector(superficie, abierto, persistir = true) {
+    inspectorAbierto[superficie] = !!abierto;
+    const contenedor = superficie === "panel" ? el("previa-inspector") : el("marco-vista-lado");
+    const abrir = el(superficie === "panel" ? "previa-inspector-abrir" : "vista-inspector-abrir");
+    if (contenedor) contenedor.hidden = !abierto;
+    if (abrir) abrir.hidden = !!abierto;
+    if (persistir) {
+      guardarClave(superficie === "panel" ? CLAVE_INSPECTOR_PANEL : CLAVE_INSPECTOR_VISTA,
+        abierto ? "1" : "0");
+    }
+  }
+
+  function conectarArrastreInspector(contenedor, cabecera) {
+    if (!contenedor || !cabecera) return;
+    let mover = null;
+    cabecera.addEventListener("pointerdown", (e) => {
+      if (e.target && typeof e.target.closest === "function" && e.target.closest("button")) return;
+      const caja = contenedor.getBoundingClientRect();
+      const padre = contenedor.parentElement ? contenedor.parentElement.getBoundingClientRect() : null;
+      if (!padre) return;
+      // se fija la posición actual en left/top: el panel deja de estar pegado al borde y se mueve
+      // como una capa, sin cambiar el tamaño del canvas ni el reparto del marco
+      contenedor.style.left = (caja.left - padre.left) + "px";
+      contenedor.style.top = (caja.top - padre.top) + "px";
+      contenedor.style.right = "auto";
+      contenedor.style.bottom = "auto";
+      mover = {
+        x: e.clientX, y: e.clientY,
+        left: caja.left - padre.left, top: caja.top - padre.top,
+        ancho: caja.width, alto: caja.height,
+        padreAncho: padre.width, padreAlto: padre.height,
+      };
+      try { cabecera.setPointerCapture(e.pointerId); } catch (err) { /* puntero sintético */ }
+      e.preventDefault();
+    });
+    document.addEventListener("pointermove", (e) => {
+      if (!mover) return;
+      const maxLeft = Math.max(0, mover.padreAncho - mover.ancho);
+      const maxTop = Math.max(0, mover.padreAlto - mover.alto);
+      const left = Math.min(maxLeft, Math.max(0, mover.left + e.clientX - mover.x));
+      const top = Math.min(maxTop, Math.max(0, mover.top + e.clientY - mover.y));
+      contenedor.style.left = left + "px";
+      contenedor.style.top = top + "px";
+    });
+    const soltar = () => { mover = null; };
+    document.addEventListener("pointerup", soltar);
+    document.addEventListener("pointercancel", soltar);
+  }
+
+  function conectarControles() {
+    for (const superficie of ["panel", "vista"]) {
+      const prefijo = superficie === "panel" ? "previa" : "vista";
+      const energia = el(prefijo + "-energia");
+      if (energia) energia.addEventListener("click", () => aplicarEnergia(apagado));
+      const reiniciar = el(prefijo + "-reiniciar");
+      if (reiniciar) reiniciar.addEventListener("click", () => reiniciarEmulador());
+      const ultima = el(prefijo + "-usar-ultima");
+      if (ultima) ultima.addEventListener("click", () => encenderDesdeUltima());
+      const select = el(prefijo + "-pantalla-tamano");
+      if (select) select.addEventListener("change", () => {
+        if (select.value === "personalizado") {
+          // mostrar los dos campos no cambia el lienzo ni el modelo; solo deja editar el tamaño
+          for (const pref of ["previa", "vista"]) {
+            const otro = el(pref + "-pantalla-tamano");
+            if (otro) otro.value = "personalizado";
+            const campos = el(pref + "-pantalla-personalizada");
+            if (campos) campos.hidden = false;
+          }
+          return;
+        }
+        const preset = PANTALLAS[select.value];
+        if (preset) aplicarPantalla(preset, true);
+      });
+      for (const eje of ["ancho", "alto"]) {
+        const campo = el(prefijo + "-pantalla-" + eje);
+        if (!campo) continue;
+        campo.addEventListener("change", () => {
+          const ancho = Number(el(prefijo + "-pantalla-ancho")?.value) || pantalla.ancho;
+          const alto = Number(el(prefijo + "-pantalla-alto")?.value) || pantalla.alto;
+          aplicarPantalla({ ancho, alto }, true);
+        });
+      }
+      const entrar = el(prefijo + "-pantalla-completa");
+      if (entrar) entrar.addEventListener("click", () => aplicarCompleta(superficie, true));
+      const salir = el(prefijo + "-salir-completa");
+      if (salir) salir.addEventListener("click", () => aplicarCompleta(superficie, false));
+      const cerrar = el(prefijo + "-inspector-cerrar");
+      if (cerrar) cerrar.addEventListener("click", () => aplicarInspector(superficie, false));
+      const abrir = el(prefijo + "-inspector-abrir");
+      if (abrir) abrir.addEventListener("click", () => aplicarInspector(superficie, true));
+    }
+    const inspector = el("previa-inspector");
+    if (inspector) conectarArrastreInspector(inspector, inspector.querySelector(".previa-inspector-cab"));
+    // una pantalla completa no puede sobrevivir a cambiar de vista: taparía la vista nueva
+    if (typeof MutationObserver === "function" && document.body) {
+      new MutationObserver(() => {
+        const vista = document.body.dataset.vista;
+        if (vista !== "pestana" && completa.panel) aplicarCompleta("panel", false);
+        if (vista !== "vista" && completa.vista) aplicarCompleta("vista", false);
+      }).observe(document.body, { attributes: true, attributeFilter: ["data-vista"] });
+    }
+    document.addEventListener(EVENTO_ULTIMA_APK, () => { actualizarUltima(); });
+  }
+
   // Un clic en el canvas se traduce a la vista que hay debajo, en las coordenadas lógicas del
   // panel. Si esa vista no tiene listener, el clic no hace nada (y no se inventa un aviso). Los dos
   // canvas —el del panel de la vista dividida y el de Pantalla— se conectan igual.
@@ -1009,7 +1397,10 @@ export function crearPreviaPanel({ hospedador, proyecto, estadoPestana, editor }
       if (!(ancho > 0) || !(alto > 0) || !caja || !(caja.width > 0) || !(caja.height > 0)) return;
       const x = (e.clientX - caja.left) * (ancho / caja.width);
       const y = (e.clientY - caja.top) * (alto / caja.height);
-      const nodo = oyenteEnPunto(modeloActual(), ancho, alto, x, y);
+      // el mismo modelo reescalado que se pintó: con el tamaño de pantalla elegido, el modelo
+      // original no comparte la caja y el clic caería en otro nodo
+      if (apagado) return;
+      const nodo = oyenteEnPunto(modeloParaEmulador(), ancho, alto, x, y);
       if (!nodo) return;
       e.preventDefault();
       pulsar(nodo.idRef);
@@ -1078,14 +1469,90 @@ export function crearPreviaPanel({ hospedador, proyecto, estadoPestana, editor }
     return primero;
   }
 
+  // La línea de estado del emulador en las dos superficies, sin depender de si hay modelo.
+  function mensajeEmulador(texto) {
+    for (const superficie of SUPERFICIES) {
+      const estado = superficie.estadoRender ? el(superficie.estadoRender) : null;
+      if (estado) estado.textContent = texto;
+    }
+  }
+
+  function cajaUtil(marco) {
+    if (!marco || typeof getComputedStyle !== "function") return null;
+    const cs = getComputedStyle(marco);
+    const pl = parseFloat(cs.paddingLeft) || 0;
+    const pr = parseFloat(cs.paddingRight) || 0;
+    const pt = parseFloat(cs.paddingTop) || 0;
+    const pb = parseFloat(cs.paddingBottom) || 0;
+    const ancho = marco.clientWidth - pl - pr;
+    const alto = marco.clientHeight - pt - pb;
+    return ancho > 0 && alto > 0 ? { ancho, alto } : null;
+  }
+
+  // Ajusta el canvas a la relación del tamaño elegido dentro de su marco. Se hace con píxeles
+  // explícitos para que la relación no dependa de cómo negocie el navegador `aspect-ratio`; así el
+  // modelo y el lienzo dicen lo mismo y el dibujo no se deforma.
+  function ajustarCanvas(canvas, anchoDp, altoDp) {
+    if (!canvas) return;
+    const marco = canvas.parentElement;
+    const caja = cajaUtil(marco);
+    if (!caja) return;
+    const relacion = anchoDp / altoDp;
+    let ancho = caja.ancho;
+    let alto = ancho / relacion;
+    if (alto > caja.alto) { alto = caja.alto; ancho = alto * relacion; }
+    ancho = Math.max(1, Math.floor(ancho));
+    alto = Math.max(1, Math.floor(alto));
+    if (canvas.style.width !== ancho + "px") canvas.style.width = ancho + "px";
+    if (canvas.style.height !== alto + "px") canvas.style.height = alto + "px";
+  }
+
+  function ajustarPantallas() {
+    ajustarCanvas(el("previa-lateral-canvas"), pantalla.ancho, pantalla.alto);
+    ajustarCanvas(el("vista-previa"), pantalla.ancho, pantalla.alto);
+  }
+
+  // La pantalla apagada: un lienzo negro con el rótulo, sin tocar la última apk ni el modelo que
+  // quedó en memoria. Encender vuelve a pedir `apkc preview` y pinta lo que devuelva.
+  function dibujarApagado(canvas) {
+    if (!canvas || !canvas.getContext) return;
+    const ctx = canvas.getContext("2d");
+    if (!ctx) return;
+    const ancho = Math.max(1, Math.round(canvas.clientWidth || canvas.width || 1));
+    const alto = Math.max(1, Math.round(canvas.clientHeight || canvas.height || 1));
+    const dpr = typeof window !== "undefined" && window.devicePixelRatio
+      ? Math.min(2, Math.max(1, window.devicePixelRatio)) : 1;
+    if (canvas.width !== Math.round(ancho * dpr) || canvas.height !== Math.round(alto * dpr)) {
+      canvas.width = Math.round(ancho * dpr);
+      canvas.height = Math.round(alto * dpr);
+    }
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    ctx.fillStyle = "#000";
+    ctx.fillRect(0, 0, ancho, alto);
+    canvas.__espacio = { ancho, alto };
+    if (canvas.dataset) canvas.dataset.nodos = "";
+  }
+
+  function modeloParaEmulador() {
+    const modelo = modeloActual();
+    if (!modelo) return null;
+    return modeloConPantalla(modelo, pantalla.ancho, pantalla.alto);
+  }
+
   function pintarRender(motivo) {
     if (!conDocumento()) return null;
-    const modelo = modeloActual();
+    if (!apagado) ajustarPantallas();
+    const modelo = apagado ? null : modeloParaEmulador();
     let primero = null;
     for (const superficie of SUPERFICIES) {
       const canvas = el(superficie.canvasRender);
       if (!canvas) continue;
       const estado = superficie.estadoRender ? el(superficie.estadoRender) : null;
+      if (apagado) {
+        dibujarApagado(canvas);
+        if (estado) estado.textContent = MENSAJE_APAGADO;
+        continue;
+      }
       if (!modelo) {
         // el motivo del último fallo viene del evento: «no hay apk», «el preview falló» o el de arranque
         limpiarCanvas(canvas);
@@ -1114,7 +1581,7 @@ export function crearPreviaPanel({ hospedador, proyecto, estadoPestana, editor }
       pintarLog(modelo);
       pintarConsola(modelo);
       pintarOyentes(modelo);
-    } else {
+    } else if (!apagado) {
       limpiarLog(motivo || MENSAJE_SIN_MODELO);
       pintarConsola(modelo);
       pintarOyentes(modelo);
@@ -1330,7 +1797,10 @@ export function crearPreviaPanel({ hospedador, proyecto, estadoPestana, editor }
       if (!visible && !vistaActiva()) return;
       const detalle = e && e.detail ? e.detail : {};
       // un modelo que no viene de un clic es un build nuevo: la lista de clics vuelve a empezar
-      if (!pulsando) pulsos = [];
+      if (!pulsando) {
+        pulsos = [];
+        apkActual = origenPrevia === "ultima" ? RUTA_ULTIMA_APK : "build/app.apk";
+      }
       // el modelo cambió: el canvas y los dos paneles se pintan ya. Un rAF dejaría la consola con
       // las capturas del build anterior justo cuando el preview falla, que es cuando más importa.
       pintarRender(detalle.mensaje);
@@ -2811,6 +3281,12 @@ export function crearPreviaPanel({ hospedador, proyecto, estadoPestana, editor }
     conectarCanvas("previa-lateral-canvas");
     conectarCanvas("vista-previa");
     conectarEditable();
+    conectarControles();
+    actualizarEnergiaBotones();
+    aplicarPantalla(pantalla, false);
+    aplicarInspector("panel", inspectorAbierto.panel, false);
+    aplicarInspector("vista", inspectorAbierto.vista, false);
+    actualizarUltima();
     const alternar = el("previa-alternar");
     if (alternar) alternar.addEventListener("click", () => aplicarVisible(!visible, true));
     const cerrar = el("previa-cerrar");
@@ -2822,6 +3298,7 @@ export function crearPreviaPanel({ hospedador, proyecto, estadoPestana, editor }
         // alto disponible también cambia: se recorta la preferencia guardada, no la de un rato
         aplicarPanel(false);
         aplicarLado(false);
+        ajustarPantallas();
         if (!visible && !vistaActiva()) return;
         programarPintado();
       });
@@ -2845,6 +3322,7 @@ export function crearPreviaPanel({ hospedador, proyecto, estadoPestana, editor }
   function repintar() {
     aplicarPanel(false);
     aplicarLado(false);
+    ajustarPantallas();
     if (modo === "render") pintarRender();
     else { pintarVivo(); programarVivo(0); }
   }

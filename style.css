@@ -440,6 +440,7 @@ kbd {
 .previa-modos-vista { flex: 0 0 auto; margin-bottom: 10px; }
 .previa-modos-vista .previa-modo { padding: 6px 12px; font-size: 12px; }
 .previa-cuerpo-vista {
+  position: relative;
   display: flex;
   gap: 18px;
   align-items: stretch;
@@ -455,6 +456,7 @@ kbd {
   min-height: 0;
 }
 .previa-modo-vista {
+  position: relative;
   flex: 1 1 auto;
   display: flex;
   flex-direction: column;
@@ -486,7 +488,24 @@ kbd {
   max-width: 380px;
   min-height: 200px;
 }
-.marco-vista-lado { flex: 0 0 var(--previa-ancho, 380px); }
+/* La columna de la vista Pantalla es una capa flotante sobre el dibujo, no una columna del
+   reparto: cerrarla no cambia el tamaño ni la posición del canvas. Los ocho tiradores siguen
+   funcionando porque el marco es el mismo, ahora absoluto. */
+.marco-vista-lado,
+.marco-vista-lado[data-alto="propio"] {
+  position: absolute;
+  z-index: 4;
+  top: 0;
+  right: 0;
+  bottom: 0;
+  left: auto;
+  width: var(--previa-ancho, 380px);
+  max-width: calc(100% - 8px);
+  height: auto;
+  margin-top: 0;
+  flex: 0 0 auto;
+}
+.marco-vista-lado[hidden] { display: none; }
 .vista-lado {
   flex: 1 1 auto;
   display: flex;
@@ -494,13 +513,18 @@ kbd {
   gap: 8px;
   min-width: 0;
   min-height: 0;
+  max-height: 100%;
   padding: 8px;
   overflow: hidden;
   background: var(--superficie2);
-  border-left: 1px solid var(--borde2);
+  background: color-mix(in srgb, var(--superficie2) 96%, transparent);
+  border: 1px solid var(--borde2);
+  border-radius: 6px;
+  box-shadow: 0 8px 22px rgba(0, 0, 0, .38);
 }
 .vista-lado .nota { margin: 0; }
 .vista-lado .previa-log { flex: 1 1 auto; }
+.vista-lado > .previa-seccion { min-height: 0; overflow-y: auto; overscroll-behavior: contain; }
 
 /* ---- secciones del emulador ---------------------------------------------
    El registro, la consola de la app y los controles de pulsar no son tres bloques apilados: son
@@ -519,6 +543,147 @@ kbd {
 .previa-seccion[hidden] { display: none; }
 .previa-seccion.previa-pulsos,
 .previa-seccion.previa-log { flex: 1 1 auto; }
+
+/* ---- capas flotantes del emulador ---------------------------------------
+   El registro, la consola, la lista de oyentes y los controles no participan en el reparto del
+   panel: son capas absolutas sobre el dibujo. Abrirlas, cerrarlas o cambiar de sección no cambia
+   el tamaño del canvas ni mueve nada; el contenido de cada capa se conserva con [hidden]. */
+.previa-controles {
+  position: relative;
+  z-index: 6;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px;
+  flex: 0 0 auto;
+  padding: 4px;
+  background: var(--superficie2);
+  background: color-mix(in srgb, var(--superficie2) 92%, transparent);
+  border: 1px solid var(--borde2);
+  border-radius: 6px;
+  box-shadow: 0 4px 14px rgba(0, 0, 0, .25);
+}
+.previa-controles[hidden] { display: none; }
+.previa-control {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  background: var(--boton);
+  border: 1px solid var(--borde2);
+  border-radius: 4px;
+  color: var(--texto-fuerte);
+  font: inherit;
+  font-size: 11px;
+  padding: 2px 6px;
+  cursor: pointer;
+  white-space: nowrap;
+}
+.previa-control:hover { background: var(--boton-hover); color: var(--blanco); }
+.previa-control:focus-visible { outline: 2px solid var(--foco); outline-offset: -2px; }
+.previa-control svg {
+  width: 14px;
+  height: 14px;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.8;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+.previa-control[aria-pressed="true"] { background: var(--acento); color: var(--blanco); }
+.previa-control-campo {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  color: var(--texto-medio);
+  font-size: 11px;
+}
+.previa-control-campo[hidden] { display: none; }
+.previa-control-campo input,
+.previa-control-campo select {
+  background: var(--superficie);
+  border: 1px solid var(--borde2);
+  border-radius: 4px;
+  color: var(--texto-fuerte);
+  font: inherit;
+  font-size: 11px;
+  padding: 1px 3px;
+}
+.previa-control-campo input { width: 4.2em; }
+.previa-inspector {
+  position: absolute;
+  z-index: 5;
+  left: 4px;
+  right: 4px;
+  bottom: 4px;
+  height: 46%;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  background: var(--superficie2);
+  background: color-mix(in srgb, var(--superficie2) 94%, transparent);
+  border: 1px solid var(--borde2);
+  border-radius: 6px;
+  box-shadow: 0 8px 22px rgba(0, 0, 0, .38);
+  overflow: hidden;
+}
+.previa-inspector[hidden] { display: none; }
+.previa-inspector-cab {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  flex: 0 0 auto;
+  padding: 2px 2px 2px 8px;
+  border-bottom: 1px solid var(--borde);
+  cursor: move;
+  touch-action: none;
+}
+.previa-inspector-titulo {
+  flex: 1 1 auto;
+  min-width: 0;
+  color: var(--texto-medio);
+  font-size: 11px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.previa-inspector > .previa-seccion {
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+.previa-inspector-abrir {
+  position: absolute;
+  z-index: 5;
+  right: 4px;
+  bottom: 4px;
+  background: var(--boton);
+  border: 1px solid var(--borde2);
+  border-radius: 999px;
+  color: var(--texto-fuerte);
+  font: inherit;
+  font-size: 11px;
+  padding: 3px 10px;
+  cursor: pointer;
+  box-shadow: 0 4px 14px rgba(0, 0, 0, .3);
+}
+.previa-inspector-abrir:hover { background: var(--boton-hover); color: var(--blanco); }
+.previa-inspector-abrir[hidden] { display: none; }
+/* Pantalla completa: la superficie sale del reparto y cubre la ventana; el canvas se ajusta y
+   las capas flotantes siguen donde estaban. No hay recarga ni otro comando. */
+.pantalla-completa {
+  position: fixed;
+  inset: 0;
+  z-index: 70;
+  width: auto;
+  height: auto;
+  max-width: none;
+  max-height: none;
+  margin: 0;
+  padding: 8px;
+  background: var(--fondo);
+  border-radius: 0;
+}
+#previa-render.pantalla-completa { overflow: hidden; }
+#vista-cuerpo.pantalla-completa { height: auto; min-height: 0; }
 
 /* ---- vista dividida: editor + previa del teléfono ------------------------
    La fila sustituye al editor suelto como hijo flexible de #pestana: el editor conserva su
@@ -1000,19 +1165,28 @@ body.arrastrando-paleta { cursor: grabbing; }
   min-height: 120px;
   max-width: 360px;
 }
-/* El render lleva dos paneles debajo (registro y consola) y los botones de pulsar: con la ventana
-   baja, el marco del teléfono no puede quedarse en cero (sin altura, el canvas no recibe clics y
-   el modo Render se ve vacío). El marco conserva un mínimo y el panel entero se desplaza. */
+/* El render lleva las capas flotantes encima: el marco del teléfono ocupa todo el alto y el
+   registro/consola se abre sobre él sin comprimirlo. */
 #previa-render {
-  overflow-y: auto;
+  position: relative;
+  overflow: hidden;
 }
 #previa-render .previa-marco-lateral {
-  flex: 0 0 auto;
+  flex: 1 1 auto;
   min-height: 220px;
 }
 #previa-render .previa-canvas-lateral {
   min-height: 220px;
 }
+/* El tamaño de pantalla lo fija `previa-panel.js` en píxeles al ajustar la relación dp elegida;
+   las reglas de ancho/alto al 100 % no pueden recortarlo. */
+#previa-lateral-canvas,
+#vista-previa {
+  max-width: none;
+  min-height: 0;
+  flex: 0 0 auto;
+}
+#previa-render #previa-lateral-canvas { min-height: 0; }
 .previa-log {
   flex: 1 1 44%;
   display: flex;

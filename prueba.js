@@ -930,8 +930,8 @@ if (previaPanel.resumenEjecucion({ ejecucion: { capturas: [{ texto: "<script>x</
 const muchas = { ejecucion: { capturas: Array.from({ length: 90 }, (_, i) => ({ origen: "Log.d", texto: "v" + i })),
   avisos: Array.from({ length: 40 }, (_, i) => "a" + i) } };
 const acotado = previaPanel.resumenEjecucion(muchas);
-if (acotado.capturas.length !== 64 || acotado.avisos.length !== 24) {
-  mal("resumenEjecucion no acota capturas/avisos: " + acotado.capturas.length + "/" + acotado.avisos.length);
+if (acotado.capturas.length !== 90 || acotado.avisos.length !== 40) {
+  mal("resumenEjecucion recorta capturas/avisos: " + acotado.capturas.length + "/" + acotado.avisos.length);
 }
 const basura = previaPanel.resumenEjecucion({ ejecucion: { capturas: "no", avisos: [1, null, {}], pasos: -3, error: 42 } });
 if (!basura || basura.capturas.length !== 0 || basura.avisos.length !== 0 || basura.pasos !== 0 ||
@@ -970,7 +970,30 @@ if (consolaHostil.consola.length !== 0 || consolaHostil.oyentes.length !== 0 ||
 const consolaLarga = previaPanel.resumenEjecucion({ ejecucion: {
   consola: Array.from({ length: 200 }, (_, i) => ({ origen: "println", texto: "l" + i, secuencia: i + 1 })),
 } });
-if (consolaLarga.consola.length !== 128) mal("resumenEjecucion no acota la consola: " + consolaLarga.consola.length);
+if (consolaLarga.consola.length !== 200) mal("resumenEjecucion recorta la consola: " + consolaLarga.consola.length);
+
+// El selector de tamaño no ejecuta la app: reescala el mismo modelo y conserva el original. La
+// pantalla destino y todos los rect se ajustan por eje; el objeto de entrada no se muta.
+const modeloBase = {
+  pantalla: { x: 0, y: 0, ancho: 360, alto: 640 },
+  raiz: { tipo: "LinearLayout", rect: { x: 0, y: 0, ancho: 360, alto: 640 }, hijos: [
+    { tipo: "Button", rect: { x: 18, y: 32, ancho: 324, alto: 48 } },
+  ] },
+};
+const modelo411 = previaPanel.modeloConPantalla(modeloBase, 411, 823);
+const cerca = (a, b) => Math.abs(a - b) < 0.001;
+if (!modelo411 || modelo411.pantalla.ancho !== 411 || modelo411.pantalla.alto !== 823) {
+  mal("modeloConPantalla no cambia la pantalla destino");
+} else if (!cerca(modelo411.raiz.rect.ancho, 411) || !cerca(modelo411.raiz.rect.alto, 823) ||
+    !cerca(modelo411.raiz.hijos[0].rect.x, 18 * 411 / 360) ||
+    !cerca(modelo411.raiz.hijos[0].rect.alto, 48 * 823 / 640)) {
+  mal("modeloConPantalla no reescala los rectángulos por eje: " + JSON.stringify(modelo411.raiz));
+} else if (modeloBase.pantalla.ancho !== 360 || modeloBase.raiz.rect.ancho !== 360) {
+  mal("modeloConPantalla muta el modelo original");
+}
+if (previaPanel.modeloConPantalla(modeloBase, 360, 640) !== modeloBase) {
+  mal("modeloConPantalla clona sin cambiar cuando el tamaño ya es el del modelo");
+}
 
 // las vistas que responden a un clic, con su etiqueta tomada del árbol, y la vista bajo un punto del
 // canvas: las dos son puras y son lo que convierte un clic en un `--pulsar`
@@ -1125,6 +1148,32 @@ for (const [id, donde] of [
   ["vista-consola-cabecera", "el resumen de la consola de la app en la vista Pantalla"],
   ["vista-consola-vacio", "el mensaje de «sin salida» en la vista Pantalla"],
   ["previa-pulsos-nota", "la nota de las vistas que responden a un clic"],
+  ["previa-emulador-controles", "la barra de controles del emulador"],
+  ["previa-energia", "el control de energía del emulador"],
+  ["previa-reiniciar", "el botón de reiniciar el emulador"],
+  ["previa-usar-ultima", "el botón de usar la última apk guardada"],
+  ["previa-pantalla-tamano", "el selector de tamaño de pantalla del emulador"],
+  ["previa-pantalla-personalizada", "los campos del tamaño personalizado del emulador"],
+  ["previa-pantalla-ancho", "el ancho personalizado del emulador"],
+  ["previa-pantalla-alto", "el alto personalizado del emulador"],
+  ["previa-pantalla-completa", "el botón de pantalla completa del emulador"],
+  ["previa-salir-completa", "el botón de salir de pantalla completa del emulador"],
+  ["previa-inspector", "la capa flotante de registro y consola del panel"],
+  ["previa-inspector-cerrar", "el botón que cierra el registro y la consola del panel"],
+  ["previa-inspector-abrir", "el botón que abre el registro y la consola del panel"],
+  ["vista-cuerpo", "la superficie del emulador de la vista Pantalla"],
+  ["vista-emulador-controles", "la barra de controles del emulador en Pantalla"],
+  ["vista-energia", "el control de energía del emulador en Pantalla"],
+  ["vista-reiniciar", "el botón de reiniciar el emulador en Pantalla"],
+  ["vista-usar-ultima", "el botón de usar la última apk guardada en Pantalla"],
+  ["vista-pantalla-tamano", "el selector de tamaño de pantalla en Pantalla"],
+  ["vista-pantalla-personalizada", "los campos del tamaño personalizado en Pantalla"],
+  ["vista-pantalla-ancho", "el ancho personalizado en Pantalla"],
+  ["vista-pantalla-alto", "el alto personalizado en Pantalla"],
+  ["vista-pantalla-completa", "el botón de pantalla completa en Pantalla"],
+  ["vista-salir-completa", "el botón de salir de pantalla completa en Pantalla"],
+  ["vista-inspector-cerrar", "el botón que cierra el registro y la consola en Pantalla"],
+  ["vista-inspector-abrir", "el botón que abre el registro y la consola en Pantalla"],
 ]) {
   if (!ids.has(id)) mal(`${donde} (${id}) no está en index.html`);
 }

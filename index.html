@@ -574,52 +574,102 @@
               </div>
 
               <div id="previa-render" class="previa-render" role="tabpanel" aria-labelledby="previa-modo-render" hidden>
+                <div id="previa-emulador-controles" class="previa-controles" role="toolbar"
+                     aria-label="Controles del emulador">
+                  <button id="previa-energia" class="previa-control" type="button"
+                          title="Apagar el emulador" aria-label="Apagar el emulador" aria-pressed="true">
+                    <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3v8"/><path d="M6.6 6.6a8 8 0 1010.8 0"/></svg>
+                    <span class="texto-boton">Encendido</span>
+                  </button>
+                  <button id="previa-reiniciar" class="previa-control" type="button"
+                          title="Reiniciar el emulador desde onCreate" aria-label="Reiniciar el emulador desde onCreate">
+                    <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M20 11a8 8 0 10-2.3 5.7"/><path d="M20 4v7h-7"/></svg>
+                    <span class="texto-boton">Reiniciar</span>
+                  </button>
+                  <button id="previa-usar-ultima" class="previa-control" type="button"
+                          title="Ejecutar el emulador con la última apk guardada, sin compilar"
+                          aria-label="Usar la última apk guardada">Usar última APK</button>
+                  <label class="previa-control-campo">Tamaño
+                    <select id="previa-pantalla-tamano" aria-label="Tamaño de pantalla del emulador">
+                      <option value="360x640">360 × 640 dp</option>
+                      <option value="411x823">411 × 823 dp</option>
+                      <option value="personalizado">Personalizado</option>
+                    </select>
+                  </label>
+                  <span id="previa-pantalla-personalizada" class="previa-control-campo" hidden>
+                    <label>Ancho <input id="previa-pantalla-ancho" type="number" min="200" max="1600" step="1" value="360"></label>
+                    <label>Alto <input id="previa-pantalla-alto" type="number" min="240" max="2000" step="1" value="640"></label>
+                  </span>
+                  <button id="previa-pantalla-completa" class="previa-control" type="button"
+                          title="Expandir el emulador a toda la ventana" aria-label="Pantalla completa">
+                    <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 9V4h5"/><path d="M20 9V4h-5"/><path d="M4 15v5h5"/><path d="M20 15v5h-5"/></svg>
+                    <span class="texto-boton">Pantalla completa</span>
+                  </button>
+                  <button id="previa-salir-completa" class="previa-control" type="button" hidden
+                          title="Salir de pantalla completa" aria-label="Salir de pantalla completa">
+                    <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M9 4v5H4"/><path d="M15 4v5h5"/><path d="M9 20v-5H4"/><path d="M15 20v-5h5"/></svg>
+                    <span class="texto-boton">Salir</span>
+                  </button>
+                </div>
+                <p id="previa-render-estado" class="previa-estado" role="status" aria-live="polite">Compila el
+                  proyecto para ver aquí la pantalla del emulador.</p>
                 <div class="previa-marco previa-marco-lateral">
                   <canvas id="previa-lateral-canvas" class="previa-canvas previa-canvas-lateral" width="360" height="640"
                           tabindex="0" role="img" aria-label="Emulador: pantalla del apk con los eventos de la app; se puede pulsar sobre las vistas que tienen OnClickListener"
                           aria-describedby="previa-render-estado"></canvas>
                 </div>
-                <p id="previa-render-estado" class="previa-estado" role="status" aria-live="polite">Compila el
-                  proyecto para ver aquí la pantalla del emulador.</p>
-                <div class="previa-secciones" role="tablist" aria-label="Secciones del emulador">
-                  <button id="previa-seccion-pulsos" class="previa-modo activo" type="button" role="tab"
-                          aria-selected="true" aria-controls="previa-pulsos" data-seccion="pulsos">Pulsar</button>
-                  <button id="previa-seccion-registro" class="previa-modo" type="button" role="tab"
-                          aria-selected="false" aria-controls="previa-log" data-seccion="registro">Registro</button>
-                  <button id="previa-seccion-consola" class="previa-modo" type="button" role="tab"
-                          aria-selected="false" aria-controls="previa-consola" data-seccion="consola">Consola</button>
+                <div id="previa-inspector" class="previa-inspector">
+                  <div class="previa-inspector-cab">
+                    <span class="previa-inspector-titulo">Registro y consola</span>
+                    <button id="previa-inspector-cerrar" class="icono-boton" type="button"
+                            title="Cerrar el registro y la consola" aria-label="Cerrar el registro y la consola">
+                      <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18"/></svg>
+                    </button>
+                  </div>
+                  <div class="previa-secciones" role="tablist" aria-label="Secciones del emulador">
+                    <button id="previa-seccion-pulsos" class="previa-modo activo" type="button" role="tab"
+                            aria-selected="true" aria-controls="previa-pulsos" data-seccion="pulsos">Pulsar</button>
+                    <button id="previa-seccion-registro" class="previa-modo" type="button" role="tab"
+                            aria-selected="false" aria-controls="previa-log" data-seccion="registro">Registro</button>
+                    <button id="previa-seccion-consola" class="previa-modo" type="button" role="tab"
+                            aria-selected="false" aria-controls="previa-consola" data-seccion="consola">Consola</button>
+                  </div>
+                  <section id="previa-pulsos" class="previa-pulsos previa-seccion" role="tabpanel"
+                           aria-label="Pulsar en la app" data-seccion="pulsos">
+                    <div class="previa-log-cab">
+                      <span class="previa-log-titulo">Pulsar en la app</span>
+                      <span id="previa-pulsos-cuenta" class="nota">sin clics</span>
+                    </div>
+                    <div id="previa-oyentes" class="previa-oyentes"></div>
+                    <p id="previa-pulsos-nota" class="nota">Compila el proyecto para ver las vistas que
+                      responden a un clic. También puedes pulsar directamente sobre el dibujo.</p>
+                  </section>
+                  <section id="previa-log" class="previa-log previa-seccion" role="log"
+                           aria-label="Registro del emulador" data-seccion="registro" hidden>
+                    <div class="previa-log-cab">
+                      <span class="previa-log-titulo">Registro del emulador</span>
+                      <span id="previa-log-cabecera" class="nota">sin ejecución</span>
+                    </div>
+                    <ol id="previa-log-lista" class="previa-log-lista"></ol>
+                    <p id="previa-log-vacio" class="nota">Compila el proyecto para ver las capturas y los avisos
+                      del intérprete.</p>
+                  </section>
+                  <section id="previa-consola" class="previa-log previa-consola previa-seccion" role="log"
+                           aria-label="Consola de la app" data-seccion="consola" hidden>
+                    <div class="previa-log-cab">
+                      <span class="previa-log-titulo">Consola de la app</span>
+                      <span id="previa-consola-cabecera" class="nota">sin salida</span>
+                    </div>
+                    <ol id="previa-consola-lista" class="previa-log-lista previa-consola-lista"></ol>
+                    <p id="previa-consola-vacio" class="nota">Aquí sale lo que la app imprime:
+                      <code>System.out.println</code> y <code>Log.*</code>. La consola de los comandos de
+                      compilación es la del panel inferior.</p>
+                  </section>
                 </div>
-                <section id="previa-pulsos" class="previa-pulsos previa-seccion" role="tabpanel"
-                         aria-label="Pulsar en la app" data-seccion="pulsos">
-                  <div class="previa-log-cab">
-                    <span class="previa-log-titulo">Pulsar en la app</span>
-                    <span id="previa-pulsos-cuenta" class="nota">sin clics</span>
-                  </div>
-                  <div id="previa-oyentes" class="previa-oyentes"></div>
-                  <p id="previa-pulsos-nota" class="nota">Compila el proyecto para ver las vistas que
-                    responden a un clic. También puedes pulsar directamente sobre el dibujo.</p>
-                </section>
-                <section id="previa-log" class="previa-log previa-seccion" role="log"
-                         aria-label="Registro del emulador" data-seccion="registro" hidden>
-                  <div class="previa-log-cab">
-                    <span class="previa-log-titulo">Registro del emulador</span>
-                    <span id="previa-log-cabecera" class="nota">sin ejecución</span>
-                  </div>
-                  <ol id="previa-log-lista" class="previa-log-lista"></ol>
-                  <p id="previa-log-vacio" class="nota">Compila el proyecto para ver las capturas y los avisos
-                    del intérprete.</p>
-                </section>
-                <section id="previa-consola" class="previa-log previa-consola previa-seccion" role="log"
-                         aria-label="Consola de la app" data-seccion="consola" hidden>
-                  <div class="previa-log-cab">
-                    <span class="previa-log-titulo">Consola de la app</span>
-                    <span id="previa-consola-cabecera" class="nota">sin salida</span>
-                  </div>
-                  <ol id="previa-consola-lista" class="previa-log-lista previa-consola-lista"></ol>
-                  <p id="previa-consola-vacio" class="nota">Aquí sale lo que la app imprime:
-                    <code>System.out.println</code> y <code>Log.*</code>. La consola de los comandos de
-                    compilación es la del panel inferior.</p>
-                </section>
+                <button id="previa-inspector-abrir" class="previa-inspector-abrir" type="button" hidden
+                        title="Abrir el registro y la consola" aria-label="Abrir el registro y la consola">
+                  Registro y consola
+                </button>
               </div>
               <p id="previa-aviso-estrecho" class="nota previa-aviso-estrecho">Pantalla estrecha: la vista
                 previa va debajo del editor y no se redimensiona; usa una ventana más ancha para arrastrar
@@ -845,7 +895,7 @@
             <button id="vista-modo-emulador" class="previa-modo" type="button" role="tab"
                     aria-selected="false" aria-controls="vista-emulador">Emulador</button>
           </div>
-          <div class="previa-cuerpo-vista">
+          <div id="vista-cuerpo" class="previa-cuerpo-vista">
             <div class="previa-zona-vista">
               <div id="vista-layout" class="previa-modo-vista" role="tabpanel" aria-labelledby="vista-modo-previa">
                 <div class="previa-marco previa-marco-vista">
@@ -857,13 +907,57 @@
               </div>
               <div id="vista-emulador" class="previa-modo-vista" role="tabpanel"
                    aria-labelledby="vista-modo-emulador" hidden>
+                <div id="vista-emulador-controles" class="previa-controles" role="toolbar"
+                     aria-label="Controles del emulador">
+                  <button id="vista-energia" class="previa-control" type="button"
+                          title="Apagar el emulador" aria-label="Apagar el emulador" aria-pressed="true">
+                    <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3v8"/><path d="M6.6 6.6a8 8 0 1010.8 0"/></svg>
+                    <span class="texto-boton">Encendido</span>
+                  </button>
+                  <button id="vista-reiniciar" class="previa-control" type="button"
+                          title="Reiniciar el emulador desde onCreate" aria-label="Reiniciar el emulador desde onCreate">
+                    <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M20 11a8 8 0 10-2.3 5.7"/><path d="M20 4v7h-7"/></svg>
+                    <span class="texto-boton">Reiniciar</span>
+                  </button>
+                  <button id="vista-usar-ultima" class="previa-control" type="button"
+                          title="Ejecutar el emulador con la última apk guardada, sin compilar"
+                          aria-label="Usar la última apk guardada">Usar última APK</button>
+                  <label class="previa-control-campo">Tamaño
+                    <select id="vista-pantalla-tamano" aria-label="Tamaño de pantalla del emulador">
+                      <option value="360x640">360 × 640 dp</option>
+                      <option value="411x823">411 × 823 dp</option>
+                      <option value="personalizado">Personalizado</option>
+                    </select>
+                  </label>
+                  <span id="vista-pantalla-personalizada" class="previa-control-campo" hidden>
+                    <label>Ancho <input id="vista-pantalla-ancho" type="number" min="200" max="1600" step="1" value="360"></label>
+                    <label>Alto <input id="vista-pantalla-alto" type="number" min="240" max="2000" step="1" value="640"></label>
+                  </span>
+                  <button id="vista-pantalla-completa" class="previa-control" type="button"
+                          title="Expandir el emulador a toda la ventana" aria-label="Pantalla completa">
+                    <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 9V4h5"/><path d="M20 9V4h-5"/><path d="M4 15v5h5"/><path d="M20 15v5h-5"/></svg>
+                    <span class="texto-boton">Pantalla completa</span>
+                  </button>
+                  <button id="vista-salir-completa" class="previa-control" type="button" hidden
+                          title="Salir de pantalla completa" aria-label="Salir de pantalla completa">
+                    <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M9 4v5H4"/><path d="M15 4v5h5"/><path d="M9 20v-5H4"/><path d="M15 20v-5h5"/></svg>
+                    <span class="texto-boton">Salir</span>
+                  </button>
+                </div>
                 <div class="previa-marco previa-marco-vista">
                   <canvas id="vista-previa" class="previa-canvas previa-canvas-vista" width="360" height="640"
                           tabindex="0" role="img" aria-label="Emulador: pantalla del apk con los eventos de la app; se puede pulsar sobre las vistas que responden a un clic"
                           aria-describedby="vista-previa-estado"></canvas>
                 </div>
+                <p id="vista-previa-estado" class="previa-estado" role="status" aria-live="polite">Emulador: compila
+                  el proyecto (Editor → Compilar → Compilar debug) para ver aquí la pantalla que ejecuta
+                  la app.</p>
                 <p class="nota">Se actualiza al compilar. Fuentes, imágenes, márgenes finos y estilos
                   fieles quedan fuera de esta fase: el modelo lo dice con <code>"aproximado": true</code>.</p>
+                <button id="vista-inspector-abrir" class="previa-inspector-abrir" type="button" hidden
+                        title="Abrir el registro y la consola" aria-label="Abrir el registro y la consola">
+                  Registro y consola
+                </button>
               </div>
             </div>
 
@@ -896,9 +990,13 @@
                    aria-controls="vista-lado"></div>
 
               <div id="vista-lado" class="vista-lado">
-                <p class="nota" id="vista-previa-estado" role="status" aria-live="polite">Emulador: compila
-                  el proyecto (Editor → Compilar → Compilar debug) para ver aquí la pantalla que ejecuta
-                  la app.</p>
+                <div class="previa-inspector-cab">
+                  <span class="previa-inspector-titulo">Registro y consola</span>
+                  <button id="vista-inspector-cerrar" class="icono-boton" type="button"
+                          title="Cerrar el registro y la consola" aria-label="Cerrar el registro y la consola">
+                    <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18"/></svg>
+                  </button>
+                </div>
                 <div class="previa-secciones" role="tablist" aria-label="Secciones del emulador">
                   <button id="vista-seccion-pulsos" class="previa-modo activo" type="button" role="tab"
                           aria-selected="true" aria-controls="vista-pulsos" data-seccion="pulsos">Pulsar</button>

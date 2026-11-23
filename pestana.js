@@ -11,6 +11,7 @@ import { leerZip, normalizarEntradas, zipDelArbol, paqueteDelManifiesto, nombreD
 import { modeloDeSalida, pintarVistaPrevia, mensajeVistaPrevia } from "./vista-previa.js";
 import { crearPreviaPanel } from "./previa-panel.js";
 import { crearPanelDeps } from "./deps.js";
+import { guardarUltimaApk, EVENTO_ULTIMA_APK } from "./ultima-apk.js";
 
 // La pestaña que hace: editor de fuente + un arbol en OPFS + los comandos de apkc.wasm.
 //
@@ -2739,6 +2740,17 @@ async function compilarCon(k, tipo, opciones = {}) {
     await descargar(PROYECTO + "/build/app.apk", "descargar-apk-compilada");
     await ofrecerDescarga(PROYECTO + "/build/app.apk.idsig", "descargar-idsig-compilada");
     await verificarLoCompilado();
+    // la copia estable es lo que permite encender el emulador después sin compilar; si OPFS
+    // falla se dice en la barra, pero no se invalida un build que ya salió bien
+    try {
+      const meta = await guardarUltimaApk(hospedador, PROYECTO + "/build/app.apk", { tipo });
+      if (meta && typeof document !== "undefined") {
+        document.dispatchEvent(new CustomEvent(EVENTO_ULTIMA_APK, { detail: meta }));
+      }
+    } catch (e) {
+      nota("el build salió bien, pero no se pudo guardar la última apk: " +
+        (e && e.message ? e.message : e));
+    }
     // el build ya está bien; la vista previa es un extra y su fallo no puede convertirlo en fallo
     await previsualizarLoCompilado();
   }
