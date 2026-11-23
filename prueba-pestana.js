@@ -1963,6 +1963,18 @@ async function conductor() {
         comprueba("el canvas de Pantalla tiene un rectángulo pulsable para id/pulsar", false,
           JSON.stringify(puntoVista).slice(0, 300));
       } else {
+        // el panel ya entregó dos clics y entrar en Pantalla repinta el MISMO modelo que produjo el
+        // último: `reiniciaPulsos` (previa-panel.js:375-378, 2185) solo borra la lista cuando el
+        // modelo no viene de un clic, así que ese repintado conserva los dos clics del panel y el
+        // primer toque en el teléfono grande es el tercero. Se exige la conservación, no un reinicio.
+        const heredadoVista = await evaluar(`(async () => {
+          const vp = await import("/vista-previa.js");
+          const m = vp.modeloActual();
+          return { pulsos: m && m.ejecucion ? (m.ejecucion.pulsaciones || []).length : -1,
+            cuenta: document.getElementById("vista-pulsos-cuenta").textContent };
+        })()`);
+        const siguienteVista = heredadoVista.pulsos + 1;
+        const textoVista = "Pulsos: " + siguienteVista;
         await exec("Input.dispatchMouseEvent",
           { type: "mousePressed", x: puntoVista.punto.x, y: puntoVista.punto.y, button: "left", clickCount: 1 });
         await exec("Input.dispatchMouseEvent",
@@ -1975,7 +1987,7 @@ async function conductor() {
             return t ? (t.textoDinamico || "") : null;
           };
           let texto = leer();
-          for (let i = 0; i < 150 && texto !== "Pulsos: 1"; i++) {
+          for (let i = 0; i < 150 && texto !== ${JSON.stringify(textoVista)}; i++) {
             await new Promise((ok) => setTimeout(ok, 100));
             texto = leer();
           }
@@ -1984,13 +1996,14 @@ async function conductor() {
             cuenta: document.getElementById("vista-pulsos-cuenta").textContent,
             pares: document.querySelectorAll("#vista-oyentes .previa-oyente").length };
         })()`);
-        // entrar en Pantalla repinta el último modelo, y un modelo que no viene de un clic reinicia
-        // la lista de clics: este primer toque en el teléfono grande arranca de cero y deja el 1
         comprueba("un clic real en el canvas de Pantalla ejecuta su onClick y actualiza el texto",
-          clicVista.texto === "Pulsos: 1" && clicVista.pulsaciones === 1 &&
-          /1 clic/.test(String(clicVista.cuenta)) && clicVista.pares === 1,
-          JSON.stringify({ texto: clicVista.texto, pulsaciones: clicVista.pulsaciones,
-            cuenta: clicVista.cuenta, encima: puntoVista.encima }).slice(0, 400));
+          heredadoVista.pulsos === 2 && heredadoVista.cuenta === "2 clics" &&
+          clicVista.texto === textoVista && clicVista.pulsaciones === siguienteVista &&
+          clicVista.cuenta === siguienteVista + (siguienteVista === 1 ? " clic" : " clics") &&
+          clicVista.pares === 1,
+          JSON.stringify({ heredado: heredadoVista, texto: clicVista.texto,
+            pulsaciones: clicVista.pulsaciones, cuenta: clicVista.cuenta,
+            encima: puntoVista.encima }).slice(0, 400));
       }
       await evaluar(`document.querySelector('nav.actividad [data-vista="pestana"]').click()`);
       await esperar(300);
@@ -2386,10 +2399,15 @@ async function conductor() {
         consola: String((build && build.consola) || "").slice(-400) };
     })()`);
     const arranqueNavega = await estadoNavega(1);
+    // sin navegación, `apkc preview` publica `actividad` tal como la declara el manifiesto
+    // (preview.go:495-497); solo la sustituye por el nombre cualificado de la ejecución cuando la
+    // pantalla delante NO es la lanzadora, es decir, con más de una pantalla en la pila
+    // (preview.go:514-518). Por eso aquí se exige el relativo `.MainActivity` y en `pantallas` el
+    // cualificado; exigir `com.myapp.MainActivity` antes de navegar contradice al producto.
     comprueba("la app de dos actividades arranca en la lanzadora, sin clics (D7)",
       navegaPreparado.declarado === true && navegaPreparado.codigo === 0 &&
       arranqueNavega.pantallas.join() === "com.myapp.MainActivity" &&
-      arranqueNavega.actividad === "com.myapp.MainActivity" &&
+      arranqueNavega.actividad === ".MainActivity" &&
       arranqueNavega.layout === "res/layout/main.xml" &&
       (arranqueNavega.textos || []).includes("Pulsos: 0") &&
       (arranqueNavega.oyentes || []).join() === "id/abrir" &&
