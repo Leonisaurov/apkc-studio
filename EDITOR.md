@@ -185,6 +185,8 @@ del panel, que a su vez contiene los ocho tiradores y el `<aside>`:
 | `#previa-lateral-canvas`, `#previa-render-estado` | el canvas del emulador (enfocable y pulsable) y su línea de estado |
 | `#previa-seccion-pulsos`, `#previa-seccion-registro`, `#previa-seccion-consola` | las tres secciones del emulador en el panel (`role="tab"`, `aria-selected`, `aria-controls`); Pulsar es la de por defecto |
 | `#previa-pulsos`, `#previa-oyentes`, `#previa-pulsos-cuenta`, `#previa-pulsos-nota` | la sección de pulsar: los botones de las vistas con `OnClickListener`, la cuenta de clics y la nota cuando no hay a quién pulsar |
+| `#previa-menu-opciones`, `#previa-menu-lista` | el **menú de opciones**: el botón de tres puntos de la barra del emulador (`aria-haspopup="menu"`, `aria-expanded`, `aria-controls`) y su desplegable (`role="menu"`), que `previa-panel.js` **monta en `iniciar()`** porque el HTML no los trae; los ítems son `button.previa-menu-item` con `data-idref="menu/N"` |
+| `#vista-menu-opciones`, `#vista-menu-lista` | los mismos dos, montados en la barra del emulador de la vista Pantalla |
 | `#previa-log`, `#previa-log-cabecera`, `#previa-log-lista`, `#previa-log-vacio` | la sección **registro del emulador** (`role="log"`) |
 | `#previa-consola`, `#previa-consola-cabecera`, `#previa-consola-lista`, `#previa-consola-vacio` | la sección **consola de la app** (`role="log"`): `println` y `Log.*` |
 | `#vista-seccion-pulsos`, `#vista-seccion-registro`, `#vista-seccion-consola` | las mismas tres secciones en la vista Pantalla |
@@ -429,6 +431,22 @@ oyentes al leer el layout —como el inflado del framework— y los publica con 
 nodo queda `oyente: true` y `--pulsar` lo ejecuta. Si el método no existe o la vista no tiene
 `android:id`, no se inventa el oyente y el registro del emulador lo dice en un aviso.
 
+**El menú de opciones se abre y se pulsa.** Una app con `onCreateOptionsMenu(Menu)` añade sus
+ítems con `menu.add(...)` y, en el aparato, los enseña al tocar el desbordamiento de la ActionBar o
+la tecla Menú. Aquí no hay barra del sistema, así que el panel monta un **botón de tres puntos** en
+la barra del emulador (`#previa-menu-opciones` y `#vista-menu-opciones`, con `aria-haspopup="menu"`)
+y un desplegable sobre el marco del teléfono. Abrirlo pide `apkc preview --menu`: el intérprete
+ejecuta `onCreateOptionsMenu` (y `onPrepareOptionsMenu`, si existe) y publica lo que la app añadió en
+`ejecucion.menu` (`abierto`, `items` con `id:"menu/N"`, `titulo` e `itemId`, y `seleccionado`).
+Pulsar un ítem manda `--menu-item menu/N` con el guion entero —los clics anteriores, el `--menu` y
+la elección, en orden—: el intérprete llama primero al `OnMenuItemClickListener` del ítem y, si no
+lo consume, a `onOptionsItemSelected` de la actividad; después cierra el menú. El Toast, el
+`setText` y la consola que la app produzca llegan al modelo como los de un clic. Un ítem invisible
+no se publica ni se puede pulsar, y su índice real no se corre por saltarlo. Un menú XML
+(`MenuInflater.inflate` sobre `res/menu`) **no** está en el subconjunto del intérprete: el registro
+del emulador lo avisa y el botón queda con su nota; el camino soportado es `menu.add` en
+`onCreateOptionsMenu`.
+
 **La nota de «Pulsar» no miente.** Sin modelo (antes de compilar o con el preview fallido) dice que
 compiles; con la ejecución detenida, el error; y solo cuando `onCreate` corrió de verdad y no
 registró ningún listener con id dice «Esta ejecución no registró ningún OnClickListener sobre una
@@ -436,7 +454,8 @@ vista con id».
 
 `resumenEjecucion(modelo)` (puro) acota `ejecucion` antes de pintarlo: `capturas` (máximo 64,
 `origen`, `id`, `texto`), `consola` (máximo 128, `origen`, `texto`, `secuencia`), `oyentes`,
-`pulsaciones`, `avisos` (máximo 24), `pasos`, `interacciones` (los clics entregados, que es lo que
+`pulsaciones`, `menu` (`abierto`, `items` con `id`/`titulo`/`itemId` y `seleccionado`), `avisos`
+(máximo 24), `pasos`, `interacciones` (los clics entregados, que es lo que
 la cabecera cuenta como «N clics»), `actividad`, `metodo` y `error`.
 Solo acepta cadenas donde el JSON promete cadenas y números finitos donde promete números.
 
@@ -1100,7 +1119,7 @@ En `@media (max-width: 760px)`:
 | Comando | Que cubre |
 | --- | --- |
 | `node studio/prueba.js` | genera el zip, comprueba EOCD, plantillas, reglas, ids de `index.html` (de `diagnostico.js`, `temas.js`, `historial.js`, `vista-previa.js`, `previa-panel.js`, `autocompletado.js`, `diagnostico-vivo.js`), ids viejos prohibidos, sin `<pre>` en el panel, el resaltador puro, el modelo del layout dibujado en vivo, los datos del autocompletado (recursos, `R.java`, contexto y lector de zip/.class), el XML del editor (contexto, catálogo, linter con columna en runes), las funciones puras de los tiradores y las del editor de layout (`leerPropiedades`/`escribirPropiedad`, colores, paleta y `cambiarTipoRaiz`), y el bucle de los **18 tipos** de la paleta: cada uno entra como el tipo pedido, solo (los contenedores sin hijos) y con el tamaño de `tamanoDeTipo` |
-| `node studio/prueba-navegador.js` | `http` sin COOP/COEP: DOM, tres vistas, tres botones de actividad, reflejo del nombre/package, aviso de que no hay OPFS, localStorage, el diagnóstico, los temas y la paleta ANSI, y el contrato de la vista dividida (separador con teclado, alternancia Vista previa/Emulador, los dos modos y la consola de Pantalla, que no haya `<pre>` con el XML y consola vacía con su motivo) |
+| `node studio/prueba-navegador.js` | `http` sin COOP/COEP: DOM, tres vistas, tres botones de actividad, reflejo del nombre/package, aviso de que no hay OPFS, localStorage, el diagnóstico, los temas y la paleta ANSI, el contrato de la vista dividida (separador con teclado, alternancia Vista previa/Emulador, los dos modos y la consola de Pantalla, que no haya `<pre>` con el XML y consola vacía con su motivo) y el **menú de opciones** montado en las dos barras (botón de tres puntos con `aria-haspopup="menu"`, desplegable oculto y, sin ejecución, el aviso de compilar) |
 | `APKC_WASM=... node studio/prueba-crear.js` | por http con OPFS: crear, escribir el proyecto, abrir el manifiesto, comprobar `data-ruta` del arbol, API 34, el árbol cerrado, subir/mover ficheros, exportar/importar el `.zip`, ajustes, pestañas, undo tree, dos ventanas y fusión/conflicto |
 | `APKC_WASM=... APK_EJEMPLO=... KS_EJEMPLO=... ANDROID_JAR=... node studio/prueba-pestana.js` | la pestaña completa: editar, guardar, recargar, jar del SDK, compilar debug/release, firmar, verificar, recargar sin red, cero peticiones fuera del origen, autocompletado y linter XML separados del Java, vista dividida con ocho tiradores por marco, compilar→pintar sin mover el cursor, layout dibujado en vivo, Vista previa/Emulador en las dos superficies, consola con `<script>` escapado y nodo sin rótulo de tipo/id; el **modo editar** (paleta flotante con scroll, arrastre con una sombra del tamaño del nodo que se inserta y recortada al canvas, 7 tipos que entran como el tipo pedido —contenedores vacíos—, undo del diseñador, basura, jerarquía con «↑ Padre», ficha de propiedades, imágenes y `contentDescription`) sin cambiar `clientWidth/clientHeight` del canvas; y que **recompilar recarga el Emulador** (SHA del apk distinto, modelo nuevo, evento publicado otra vez) y **compilar guarda antes lo sucio** (el layout tecleado sin `Ctrl+S` llega al apk y al modelo) |
 | `APKC=... APKC_WASM=... sh studio/e2e.sh` | todo lo anterior más los apk/aab nativos y la plantilla Contador; el número exacto de comprobaciones se mide en cada gate |

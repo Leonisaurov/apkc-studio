@@ -214,6 +214,25 @@ const conductor = `(async () => {
   r.tiradoresPrevia = document.querySelectorAll("#marco-previa .tirador-previa").length;
   r.modosPrevia = [document.getElementById("previa-modo-vivo").textContent,
     document.getElementById("previa-modo-render").textContent];
+  // el menú de opciones: las dos superficies montan el botón de tres puntos y su desplegable. Sin
+  // compilar no hay ejecución, así que pulsarlo pide compilar en vez de inventar un menú; el enganche
+  // se comprueba aquí, y los ítems reales en las pruebas de apkc y de la pestaña.
+  const botonMenu = document.getElementById("previa-menu-opciones");
+  const botonMenuVista = document.getElementById("vista-menu-opciones");
+  const listaMenu = document.getElementById("previa-menu-lista");
+  if (botonMenu) botonMenu.click();
+  r.menu = {
+    panel: !!botonMenu,
+    vista: !!botonMenuVista,
+    lista: !!listaMenu,
+    etiqueta: botonMenu ? botonMenu.getAttribute("aria-label") : "",
+    titulo: botonMenu ? botonMenu.title : "",
+    desplegable: botonMenu ? botonMenu.getAttribute("aria-haspopup") : "",
+    controles: botonMenu ? botonMenu.getAttribute("aria-controls") : "",
+    expandido: botonMenu ? botonMenu.getAttribute("aria-expanded") : "",
+    oculto: listaMenu ? listaMenu.hidden : null,
+    estado: document.getElementById("previa-render-estado").textContent,
+  };
   r.avisoEstrecho = getComputedStyle(document.getElementById("previa-aviso-estrecho")).display;
   r.cursorOeste = getComputedStyle(document.getElementById("tirador-previa-noroeste")).cursor;
   r.cursorSur = getComputedStyle(document.getElementById("tirador-previa-sur")).cursor;
@@ -365,6 +384,15 @@ function comprueba(cond, msg) { if (!cond) { fallos++; console.log("  FALLO:", m
       "la vista dividida no tiene sus ocho tiradores, sus nombres o sus cursores: " +
       JSON.stringify({ tiradores: v.tiradoresPrevia, modos: v.modosPrevia,
         cursorOeste: v.cursorOeste, cursorSur: v.cursorSur }));
+    // el menú de opciones se monta en las dos superficies y, sin ejecución, pide compilar
+    comprueba(v.menu && v.menu.panel && v.menu.vista && v.menu.lista &&
+      v.menu.desplegable === "menu" && v.menu.controles === "previa-menu-lista" &&
+      v.menu.expandido === "false" && v.menu.oculto === true &&
+      /men[uú] de opciones/i.test(String(v.menu.etiqueta)) &&
+      /onCreateOptionsMenu/.test(String(v.menu.titulo)) &&
+      /[Cc]ompila/.test(String(v.menu.estado)),
+      "el menú de opciones del emulador no está montado o no pide compilar sin ejecución: " +
+      JSON.stringify(v.menu));
     comprueba(v.icono, "falta el campo del icono");
     // Sin APKC_WASM esta prueba es solo de DOM: basta con que el SW haya aislado la página y el
     // create no culpe a OPFS. Con el binario presente (es lo que hace e2e.sh) tiene que crear.

@@ -469,6 +469,8 @@ kbd {
   border: 1px solid var(--borde2);
   border-radius: 6px;
   padding: 10px;
+  /* el desplegable del menú de opciones se ancla sobre el marco del teléfono */
+  position: relative;
 }
 .previa-marco-vista {
   flex: 1 1 auto;
@@ -1415,6 +1417,48 @@ body.arrastrando-paleta { cursor: grabbing; }
 }
 .previa-oyente:hover { border-color: var(--acento); }
 .previa-oyente:focus-visible { outline: 2px solid var(--acento); outline-offset: 1px; }
+/* El menú de opciones del emulador: el botón de tres puntos de la barra y su desplegable sobre el
+   marco del teléfono. Solo lee el modelo de `apkc preview`; no escribe OPFS ni el documento. */
+.previa-menu-opciones[aria-expanded="true"] {
+  background: var(--acento);
+  color: var(--blanco);
+}
+.previa-menu-lista {
+  position: absolute;
+  top: 8px;
+  right: 8px;
+  z-index: 6;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 150px;
+  max-width: min(280px, calc(100% - 16px));
+  max-height: 60%;
+  overflow: auto;
+  padding: 4px;
+  background: var(--superficie2);
+  border: 1px solid var(--borde2);
+  border-radius: 6px;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.35);
+}
+.previa-menu-lista[hidden] { display: none; }
+.previa-menu-item {
+  width: 100%;
+  padding: 5px 10px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  text-align: left;
+  color: var(--texto-editor);
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: 4px;
+  font: var(--ed-fuente);
+  font-size: 12px;
+  cursor: pointer;
+}
+.previa-menu-item:hover { background: var(--boton-hover); border-color: var(--acento); }
+.previa-menu-item:focus-visible { outline: 2px solid var(--acento); outline-offset: -1px; }
 .previa-consola-linea {
   display: flex;
   gap: 6px;

@@ -258,6 +258,22 @@ export function resumenEjecucion(modelo) {
     .filter((o) => o && typeof o === "object")
     .map((o) => ({ id: comoTexto(o.id), idRef: comoTexto(o.idRef) }))
     .filter((o) => o.id || o.idRef);
+  // el menú de opciones es un dato aparte del árbol: el intérprete publica lo que la app añadió con
+  // `menu.add`, con su id `menu/N` y su título. `abierto` dice si el último `--menu` lo dejó
+  // desplegado y `seleccionado`, qué ítem se pulsó. Sin `ejecucion.menu` no hay nada que enseñar.
+  const menu = (() => {
+    const crudo = ejecucion.menu;
+    if (!crudo || typeof crudo !== "object") return null;
+    const items = (Array.isArray(crudo.items) ? crudo.items : [])
+      .filter((i) => i && typeof i === "object")
+      .map((i) => ({
+        id: comoTexto(i.id),
+        titulo: comoTexto(i.titulo),
+        itemId: Number.isFinite(Number(i.itemId)) ? Number(i.itemId) : 0,
+      }))
+      .filter((i) => i.id);
+    return { abierto: crudo.abierto === true, items, seleccionado: comoTexto(crudo.seleccionado) };
+  })();
   return {
     actividad: comoTexto(ejecucion.actividad),
     metodo: comoTexto(ejecucion.metodo),
@@ -267,9 +283,33 @@ export function resumenEjecucion(modelo) {
     consola,
     pulsaciones,
     oyentes,
+    menu,
     avisos,
     error: comoTexto(ejecucion.error),
   };
+}
+
+// Los ítems del menú de opciones que publicó el intérprete, ya acotados y con tipos seguros.
+// Devuelve null cuando el modelo no trae menú (no se abrió o la app no tiene
+// `onCreateOptionsMenu`), que es distinto de un menú vacío.
+export function menuDeModelo(modelo) {
+  const resumen = resumenEjecucion(modelo);
+  return resumen ? resumen.menu : null;
+}
+
+// La línea de comandos de `apkc preview` para el guion de la pestaña. Cada paso conserva su orden:
+// un clic es `--pulsar`, desplegar el menú es `--menu` y elegir un ítem, `--menu-item menu/N`. Se
+// repite el guion entero en cada invocación porque el comando no guarda la máquina.
+export function argvDePrevia(guion, apk) {
+  const argv = ["preview"];
+  for (const paso of Array.isArray(guion) ? guion : []) {
+    const tipo = paso && paso.tipo;
+    if (tipo === "menu") argv.push("--menu");
+    else if (tipo === "menu-item") argv.push("--menu-item", String(paso.valor));
+    else argv.push("--pulsar", String(paso && paso.valor));
+  }
+  argv.push(String(apk));
+  return argv;
 }
 
 // El modelo de `apkc preview` trae su pantalla declarada (360×640 dp si no dice otra). El
@@ -421,6 +461,8 @@ const SUPERFICIES = [
     log: { lista: "previa-log-lista", cabecera: "previa-log-cabecera", vacio: "previa-log-vacio" },
     consola: { lista: "previa-consola-lista", cabecera: "previa-consola-cabecera", vacio: "previa-consola-vacio" },
     pulsos: { caja: "previa-oyentes", cuenta: "previa-pulsos-cuenta", nota: "previa-pulsos-nota" },
+    controles: "previa-emulador-controles",
+    menu: { control: "previa-menu-opciones", lista: "previa-menu-lista" },
   },
   {
     id: "vista",
@@ -432,6 +474,8 @@ const SUPERFICIES = [
     log: { lista: "vista-log-lista", cabecera: "vista-log-cabecera", vacio: "vista-log-vacio" },
     consola: { lista: "vista-consola-lista", cabecera: "vista-consola-cabecera", vacio: "vista-consola-vacio" },
     pulsos: { caja: "vista-oyentes", cuenta: "vista-pulsos-cuenta", nota: "vista-pulsos-nota" },
+    controles: "vista-emulador-controles",
+    menu: { control: "vista-menu-opciones", lista: "vista-menu-lista" },
   },
 ];
 
@@ -524,7 +568,18 @@ export function crearPreviaPanel({ hospedador, proyecto, estadoPestana, editor, 
   // la lista de clics entregados desde la última compilación: se repite entera en cada `--pulsar`,
   // que es lo que hace reproducible la pantalla (el comando no guarda estado entre invocaciones)
   let pulsos = [];
+  // El guion completo, en orden: clics (`pulsar`), aperturas del menú (`menu`) y su selección
+  // (`menu-item`). Se repite entero en cada invocación, igual que `pulsos`, porque `apkc preview` no
+  // guarda la máquina; conservar el orden es lo que hace que un clic posterior al menú vea el mismo
+  // estado que en el aparato.
+  let guion = [];
   let pulsando = false;
+  // si el desplegable del menú de opciones está abierto en la interfaz. No se persiste: la app que
+  // lo pinta es la que decide si hay ítems; al reiniciar o compilar vuelve a cerrarse.
+  let menuDesplegado = false;
+  // lo que ya está pintado en el desplegable, para no reconstruirlo en cada repintado y no robar el
+  // foco al botón que se acaba de pulsar
+  let claveMenu = "";
   // el modelo que produjo el último clic, por identidad. Un repintado del MISMO modelo —entrar en
   // Pantalla, cambiar el tamaño, mover la consola— llega con `pulsando` ya en false y antes se
   // confundía con un build nuevo: borraba `pulsos` y el primer toque volvía a «Pulsos: 1».
@@ -1354,6 +1409,118 @@ export function crearPreviaPanel({ hospedador, proyecto, estadoPestana, editor, 
     }
   }
 
+  // La línea de comandos del guion completo, en el orden en que se pidió. `apkc preview` no guarda
+  // la máquina entre invocaciones: repetir el guion entero es lo que hace reproducible la pantalla.
+  function argvDelGuion() {
+    return argvDePrevia(guion, apkActual);
+  }
+
+  // Corre el guion entero y pinta el modelo que devuelva. Si la orden no se pudo entregar, deshace
+  // el último paso para que la lista siga siendo válida y escribe el motivo en la línea del
+  // emulador. Es el mismo camino para un clic, para abrir el menú y para elegir un ítem.
+  async function ejecutaGuion(desde, mensaje) {
+    pulsando = true;
+    mensajeVistaPreviaRender(mensaje);
+    try {
+      await hospedador.cwd(carpeta);
+      const r = await hospedador.ejecutar(argvDelGuion());
+      const modelo = modeloDeSalida(r && r.consola);
+      if (!modelo) {
+        guion.length = desde;
+        const lineas = String((r && (r.error || r.consola)) || "").trim().split("\n").filter(Boolean);
+        mensajeVistaPreviaRender(lineas.length ? lineas[lineas.length - 1].trim()
+          : "la orden no devolvió un modelo legible");
+        return null;
+      }
+      // `pintarVistaPrevia` avisa por el evento; el panel se repinta con el modelo nuevo. La
+      // identidad se guarda ANTES de avisar: el listener del evento ya puede reconocerlo como
+      // «modelo de un clic» y no reiniciar `pulsos`, ni siquiera si el repintado llega más tarde.
+      modeloDeClics = modelo;
+      return pintarVistaPrevia(modelo);
+    } catch (e) {
+      guion.length = desde;
+      mensajeVistaPreviaRender("no se pudo ejecutar la orden: " + (e && e.message ? e.message : e));
+      return null;
+    } finally {
+      pulsando = false;
+    }
+  }
+
+  // --- el menú de opciones --------------------------------------------------------------------
+  // El desplegable del menú: lo que la app añadió con `menu.add` en `onCreateOptionsMenu`. El botón
+  // de tres puntos vive en la barra del emulador (se monta en `iniciar`, porque la página no lo
+  // trae en su HTML) y la lista se pinta en una capa sobre el marco del teléfono. Es la única forma
+  // de llegar a un menú que, en el aparato, abre la tecla Menú o el desbordamiento de la ActionBar.
+  function montarMenuDeOpciones() {
+    for (const superficie of SUPERFICIES) {
+      const barra = el(superficie.controles);
+      const canvas = el(superficie.canvasRender);
+      if (!barra || !canvas || el(superficie.menu.control) || el(superficie.menu.lista)) continue;
+      const boton = document.createElement("button");
+      boton.id = superficie.menu.control;
+      boton.type = "button";
+      boton.className = "previa-control previa-menu-opciones";
+      boton.title = "Abrir el menú de opciones de la app (onCreateOptionsMenu)";
+      boton.setAttribute("aria-label", "Abrir el menú de opciones de la app");
+      boton.setAttribute("aria-haspopup", "menu");
+      boton.setAttribute("aria-expanded", "false");
+      boton.setAttribute("aria-controls", superficie.menu.lista);
+      boton.innerHTML = '<svg viewBox="0 0 24 24" aria-hidden="true">' +
+        '<circle cx="12" cy="5" r="1.6"/><circle cx="12" cy="12" r="1.6"/>' +
+        '<circle cx="12" cy="19" r="1.6"/></svg><span class="texto-boton">Menú</span>';
+      boton.addEventListener("click", (e) => {
+        e.preventDefault();
+        alternarMenu(boton);
+      });
+      barra.appendChild(boton);
+
+      const lista = document.createElement("div");
+      lista.id = superficie.menu.lista;
+      lista.className = "previa-menu-lista";
+      lista.setAttribute("role", "menu");
+      lista.setAttribute("aria-label", "Menú de opciones de la app");
+      lista.hidden = true;
+      (canvas.parentElement || canvas).appendChild(lista);
+    }
+  }
+
+  // Pinta el desplegable con lo que el modelo publicó. Solo se reconstruye cuando cambian el estado
+  // o los ítems: un repintado del mismo modelo no puede robar el foco al botón recién pulsado.
+  function pintarMenu(modelo) {
+    const menu = menuDesplegado ? menuDeModelo(modelo) : null;
+    const abierto = !!(menuDesplegado && menu && menu.abierto && menu.items.length);
+    const clave = JSON.stringify({ abierto, items: abierto ? menu.items : null });
+    if (clave === claveMenu) return;
+    claveMenu = clave;
+    for (const superficie of SUPERFICIES) {
+      const boton = el(superficie.menu.control);
+      const lista = el(superficie.menu.lista);
+      if (boton) {
+        boton.setAttribute("aria-expanded", abierto ? "true" : "false");
+        boton.classList.toggle("activo", abierto);
+      }
+      if (!lista) continue;
+      lista.textContent = "";
+      lista.hidden = !abierto;
+      if (!abierto) continue;
+      for (const item of menu.items) {
+        const opcion = document.createElement("button");
+        opcion.type = "button";
+        opcion.className = "previa-menu-item";
+        opcion.dataset.idref = item.id;
+        opcion.setAttribute("role", "menuitem");
+        opcion.textContent = item.titulo || item.id;
+        opcion.title = "Pulsar «" + (item.titulo || item.id) + "» del menú de opciones";
+        opcion.addEventListener("click", (e) => {
+          e.preventDefault();
+          e.stopPropagation();
+          pulsarItemMenu(item.id);
+        });
+        lista.appendChild(opcion);
+      }
+    }
+  }
+
   // Pide la pantalla después de un clic. Se repite TODO el estado desde `onCreate` (más los clics
   // anteriores), así que la pantalla resultante es la misma siempre para la misma lista: el comando
   // no puede guardar la máquina entre invocaciones y no lo finge.
@@ -1363,36 +1530,88 @@ export function crearPreviaPanel({ hospedador, proyecto, estadoPestana, editor, 
     // el clic puede venir del panel o de la vista Pantalla: con que una superficie esté montada
     // ya hay dónde escribir el «Ejecutando el clic…» y el fallo
     if (!SUPERFICIES.some((s) => s.estadoRender && document.getElementById(s.estadoRender))) return null;
-    const antes = pulsos.length;
+    const antesPulsos = pulsos.length;
+    const antesGuion = guion.length;
     pulsos.push(idRef);
-    pulsando = true;
-    mensajeVistaPreviaRender("Ejecutando el clic " + pulsos.length + "…");
-    try {
-      await hospedador.cwd(carpeta);
-      const argv = ["preview"];
-      for (const p of pulsos) argv.push("--pulsar", p);
-      argv.push(apkActual);
-      const r = await hospedador.ejecutar(argv);
-      const modelo = modeloDeSalida(r && r.consola);
-      if (!modelo) {
-        // el clic no se pudo entregar: se deshace para que la lista siga siendo válida y se dice por qué
-        pulsos.length = antes;
-        const lineas = String((r && (r.error || r.consola)) || "").trim().split("\n").filter(Boolean);
-        mensajeVistaPreviaRender(lineas.length ? lineas[lineas.length - 1].trim() : "el clic no devolvió un modelo legible");
-        return null;
-      }
-      // `pintarVistaPrevia` avisa por el evento; el panel se repinta con el modelo nuevo. La
-      // identidad se guarda ANTES de avisar: el listener del evento ya puede reconocerlo como
-      // «modelo de un clic» y no reiniciar `pulsos`, ni siquiera si el repintado llega más tarde.
-      modeloDeClics = modelo;
-      return pintarVistaPrevia(modelo);
-    } catch (e) {
-      pulsos.length = antes;
-      mensajeVistaPreviaRender("no se pudo ejecutar el clic: " + (e && e.message ? e.message : e));
-      return null;
-    } finally {
-      pulsando = false;
+    guion.push({ tipo: "pulsar", valor: idRef });
+    const pintado = await ejecutaGuion(antesGuion, "Ejecutando el clic " + pulsos.length + "…");
+    if (!pintado) {
+      pulsos.length = antesPulsos;
+      guion.length = antesGuion;
     }
+    return pintado;
+  }
+
+  // Despliega el menú de opciones: añade `--menu` al guion y pinta los ítems que la app construyó
+  // con `menu.add` en su `onCreateOptionsMenu`. Sin ejecución no se inventa nada: se pide compilar.
+  async function abrirMenu() {
+    if (apagado) { mensajeVistaPreviaRender(MENSAJE_APAGADO); return null; }
+    if (pulsando) return null;
+    if (!SUPERFICIES.some((s) => s.estadoRender && document.getElementById(s.estadoRender))) return null;
+    const resumen = resumenEjecucion(modeloActual());
+    if (!resumen) { mensajeVistaPreviaRender(MENSAJE_SIN_PULSOS); return null; }
+    const antesGuion = guion.length;
+    guion.push({ tipo: "menu" });
+    const pintado = await ejecutaGuion(antesGuion, "Abriendo el menú de opciones…");
+    if (!pintado) { menuDesplegado = false; pintarMenu(modeloActual()); return null; }
+    const menu = menuDeModelo(modeloDeClics);
+    if (!menu || !menu.items.length) {
+      menuDesplegado = false;
+      mensajeVistaPreviaRender(menu && !menu.abierto
+        ? "onCreateOptionsMenu devolvió false: el menú de opciones no se muestra."
+        : "La app no añadió ningún ítem al menú de opciones (menu.add).");
+      pintarMenu(modeloDeClics);
+      return null;
+    }
+    if (!menu.abierto) {
+      menuDesplegado = false;
+      mensajeVistaPreviaRender("onCreateOptionsMenu devolvió false: el menú de opciones no se muestra.");
+      pintarMenu(modeloDeClics);
+      return null;
+    }
+    menuDesplegado = true;
+    pintarMenu(modeloDeClics);
+    return pintado;
+  }
+
+  // Pulsa un ítem del menú abierto: añade `--menu-item` al guion y deja que el intérprete corra su
+  // `OnMenuItemClickListener` y, si no lo consume, el `onOptionsItemSelected` de la actividad.
+  async function pulsarItemMenu(idRef) {
+    if (apagado) { mensajeVistaPreviaRender(MENSAJE_APAGADO); return null; }
+    if (pulsando || typeof idRef !== "string" || !idRef) return null;
+    if (!SUPERFICIES.some((s) => s.estadoRender && document.getElementById(s.estadoRender))) return null;
+    const antesGuion = guion.length;
+    guion.push({ tipo: "menu-item", valor: idRef });
+    menuDesplegado = false;
+    const pintado = await ejecutaGuion(antesGuion, "Pulsando el ítem " + idRef + " del menú…");
+    if (!pintado) { menuDesplegado = false; pintarMenu(modeloActual()); }
+    return pintado;
+  }
+
+  // Abre o cierra el desplegable desde el botón de tres puntos. Cerrarlo no ejecuta nada: es estado
+  // de la interfaz; los ítems solo se piden al intérprete al abrir y al pulsarlos.
+  function alternarMenu(boton) {
+    if (menuDesplegado) { cerrarMenu(); if (boton && boton.focus) boton.focus(); return; }
+    const modelo = modeloActual();
+    if (apagado) { mensajeVistaPreviaRender(MENSAJE_APAGADO); return; }
+    if (!resumenEjecucion(modelo)) { mensajeVistaPreviaRender(MENSAJE_SIN_PULSOS); return; }
+    abrirMenu();
+  }
+
+  function cerrarMenu() {
+    if (!menuDesplegado) return;
+    menuDesplegado = false;
+    pintarMenu(modeloActual());
+  }
+
+  // Un modelo nuevo (compilación, apk soltada, reinicio) empieza otra ejecución: los clics y las
+  // órdenes del menú anteriores dejan de valer y el desplegable se cierra.
+  function reiniciarGuion() {
+    pulsos = [];
+    guion = [];
+    modeloDeClics = null;
+    menuDesplegado = false;
+    claveMenu = "";
   }
 
   function mensajeVistaPreviaRender(texto) {
@@ -1520,7 +1739,10 @@ export function crearPreviaPanel({ hospedador, proyecto, estadoPestana, editor, 
     guardarClave(CLAVE_ENERGIA, "encendido");
     actualizarEnergiaBotones();
     pulsos = [];
+    guion = [];
     modeloDeClics = null;
+    menuDesplegado = false;
+    claveMenu = "";
     rutaApkSoltada = RUTA_APK_SOLTADA;
     for (const superficie of SUPERFICIES) limpiarCanvas(el(superficie.canvasRender));
     mensajeEmulador("Cargando " + archivo.name + "…");
@@ -1571,8 +1793,7 @@ export function crearPreviaPanel({ hospedador, proyecto, estadoPestana, editor, 
     apagado = false;
     guardarClave(CLAVE_ENERGIA, "encendido");
     actualizarEnergiaBotones();
-    pulsos = [];
-    modeloDeClics = null;
+    reiniciarGuion();
     limpiarLog("Encendiendo desde la última APK guardada…");
     mensajeEmulador("Encendiendo desde la última APK guardada…");
     return ejecutarPreviewDe(RUTA_ULTIMA_APK);
@@ -1608,8 +1829,7 @@ export function crearPreviaPanel({ hospedador, proyecto, estadoPestana, editor, 
     apagado = false;
     guardarClave(CLAVE_ENERGIA, "encendido");
     actualizarEnergiaBotones();
-    pulsos = [];
-    modeloDeClics = null;
+    reiniciarGuion();
     apkActual = RUTA_ULTIMA_APK;
     limpiarLog("Reiniciando el emulador desde onCreate…");
     for (const superficie of SUPERFICIES) limpiarCanvas(el(superficie.canvasRender));
@@ -2070,6 +2290,9 @@ export function crearPreviaPanel({ hospedador, proyecto, estadoPestana, editor, 
       pintarConsola(modelo);
       pintarOyentes(modelo);
     }
+    // el menú de opciones sale del modelo, no del árbol: sin ejecución se cierra en vez de quedarse
+    // con los ítems de una pantalla anterior
+    pintarMenu(modelo);
     return primero;
   }
 
@@ -2284,8 +2507,7 @@ export function crearPreviaPanel({ hospedador, proyecto, estadoPestana, editor, 
       // Un repintado del mismo modelo que devolvió el clic (entrar en Pantalla, cambiar el tamaño,
       // mover la consola) llega con `pulsando` en false y NO puede borrar los clics ya entregados.
       if (reiniciaPulsos({ pulsando, modelo: detalle.modelo, modeloDeClics })) {
-        pulsos = [];
-        modeloDeClics = null;
+        reiniciarGuion();
         apkActual = origenPrevia === "ultima" ? RUTA_ULTIMA_APK
           : origenPrevia === "soltada" ? rutaApkSoltada : "build/app.apk";
       }
@@ -3784,6 +4006,25 @@ export function crearPreviaPanel({ hospedador, proyecto, estadoPestana, editor, 
     conectarCanvas("vista-previa");
     conectarEditable();
     conectarControles();
+    montarMenuDeOpciones();
+    // el desplegable del menú se cierra al tocar fuera o con Escape, como cualquier popup; no toca
+    // OPFS ni el documento: es estado de la interfaz
+    document.addEventListener("pointerdown", (e) => {
+      if (!menuDesplegado) return;
+      const dentro = SUPERFICIES.some((s) => {
+        const lista = el(s.menu.lista), boton = el(s.menu.control);
+        return (lista && lista.contains(e.target)) || (boton && boton.contains(e.target));
+      });
+      if (!dentro) cerrarMenu();
+    });
+    document.addEventListener("keydown", (e) => {
+      if (e.key !== "Escape" || !menuDesplegado) return;
+      e.preventDefault();
+      cerrarMenu();
+      const boton = SUPERFICIES.map((s) => el(s.menu.control))
+        .find((b) => b && b.offsetParent !== null);
+      if (boton) boton.focus();
+    });
     actualizarEnergiaBotones();
     aplicarPantalla(pantalla, false);
     aplicarInspector("panel", inspectorAbierto.panel, false);
@@ -3860,6 +4101,8 @@ export function crearPreviaPanel({ hospedador, proyecto, estadoPestana, editor, 
       ancho: caja.ancho, alto: caja.alto, arriba: caja.arriba,
       lado: cajaLado.ancho, ladoAlto: cajaLado.alto,
       visible, modo, ruta: rutaViva, pulsos: [...pulsos], editando,
+      guion: guion.map((p) => p.tipo + (p.valor ? ":" + p.valor : "")),
+      menuAbierto: menuDesplegado,
       seccionPanel: seccion.panel, seccionVista: seccion.vista,
       seleccion: seleccion ? seleccion.slice() : null,
     }),
