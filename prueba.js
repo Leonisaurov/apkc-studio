@@ -1362,6 +1362,12 @@ if (!pestanaMod.pareceManifiesto('<!DOCTYPE manifest><manifest/>'))
   mal("pareceManifiesto rechaza un DOCTYPE delante de manifest");
 if (!pestanaMod.pareceManifiesto('<!DOCTYPE manifest [ <!ENTITY x "y"> ]>\n<!--a\nb--><manifest\n package="x"/>'))
   mal("pareceManifiesto rechaza DOCTYPE con subconjunto interno y comentario multilínea");
+if (!pestanaMod.pareceManifiesto('<!doctype manifest><manifest/>'))
+  mal("pareceManifiesto rechaza un doctype en minúsculas");
+if (!pestanaMod.pareceManifiesto('<!DOCTYPE manifest SYSTEM "a>b"><manifest/>'))
+  mal("pareceManifiesto rechaza un DOCTYPE con > dentro de las comillas");
+if (!pestanaMod.pareceManifiesto("<!DOCTYPE manifest PUBLIC 'a>b' [ <!ENTITY x \"y>z\"> ]><manifest/>"))
+  mal("pareceManifiesto rechaza un DOCTYPE con comillas simples y dobles antes del manifiesto");
 if (!pestanaMod.pareceManifiesto('<manifest\n xmlns:android="http://schemas.android.com/apk/res/android">'))
   mal("pareceManifiesto rechaza manifest con salto de línea");
 if (pestanaMod.pareceManifiesto('<?xml version="1.0" encoding="utf-8"?>\n<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android" />'))

@@ -1688,9 +1688,9 @@ function rutaDeManifiesto(ruta) { return /(^|\/)AndroidManifest\.xml$/.test(Stri
 // Un AndroidManifest.xml siempre tiene `<manifest>` por raíz, pero delante caben prólogos que
 // apkc acepta porque lo lee con `encoding/xml.Unmarshal`: BOM, espacios, la declaración
 // `<?xml ...?>`, comentarios —también de varias líneas— y un DOCTYPE, con o sin subconjunto
-// interno `[ ... ]`. El veto se salta esos prólogos y mira qué etiqueta queda: así no rechaza
-// nada que el parser acepte, y sigue parando el XML de un layout pegado en esta pestaña, que
-// dejaría el proyecto roto con el error lejos de la causa.
+// interno `[ ... ]` y con comillas en el identificador de sistema. El veto se salta esos prólogos
+// y mira qué etiqueta queda: así no rechaza nada que el parser acepte, y sigue parando el XML de
+// un layout pegado en esta pestaña, que dejaría el proyecto roto con el error lejos de la causa.
 function pareceManifiesto(texto) {
   let resto = String(texto == null ? "" : texto).replace(/^\uFEFF/, "");
   for (;;) {
@@ -1707,13 +1707,19 @@ function pareceManifiesto(texto) {
       resto = resto.slice(fin + 3);
       continue;
     }
-    if (resto.startsWith("<!DOCTYPE")) {
-      // termina en el primer `>` que no esté dentro del subconjunto interno `[ ... ]`
-      let i = 9, corchetes = 0;
+    // el nombre de la declaración no distingue mayúsculas: `<!doctype` y `<!DOCTYPE` son lo mismo
+    if (resto.slice(0, 9).toUpperCase() === "<!DOCTYPE") {
+      // termina en el primer `>` que no esté dentro del subconjunto interno `[ ... ]` ni entre
+      // comillas: en `SYSTEM "a>b"` el `>` va dentro del literal y no cierra el DOCTYPE
+      let i = 9, corchetes = 0, comilla = "";
       for (; i < resto.length; i++) {
-        if (resto[i] === "[") corchetes += 1;
-        else if (resto[i] === "]") corchetes = Math.max(0, corchetes - 1);
-        else if (resto[i] === ">" && corchetes === 0) break;
+        const c = resto[i];
+        if (comilla) {
+          if (c === comilla) comilla = "";
+        } else if (c === '"' || c === "'") comilla = c;
+        else if (c === "[") corchetes += 1;
+        else if (c === "]") corchetes = Math.max(0, corchetes - 1);
+        else if (c === ">" && corchetes === 0) break;
       }
       if (i >= resto.length) return false;
       resto = resto.slice(i + 1);
