@@ -153,6 +153,9 @@ export function rectsEscalados(modelo, ancho, alto) {
       // `src` y, si el panel ya lo decodificó, el mapa de bits del PNG del proyecto
       recurso: typeof nodo.recurso === "string" ? nodo.recurso : "",
       imagen: nodo.imagen || null,
+      // lo que el `onDraw` de una vista propia pidió al Canvas del modelo (`previewdibujo.go`):
+      // viaja con el nodo y se pinta dentro de este rect. Sin `dibujo` no cambia nada.
+      dibujo: nodo.dibujo && typeof nodo.dibujo === "object" ? nodo.dibujo : null,
       profundidad,
     };
     if (![escalado.x, escalado.y, escalado.ancho, escalado.alto].every(Number.isFinite)) continue;
@@ -170,6 +173,129 @@ function colorDe(nombre, respaldo) {
   if (typeof getComputedStyle !== "function" || typeof document === "undefined") return respaldo;
   const valor = getComputedStyle(document.documentElement).getPropertyValue(nombre).trim();
   return valor || respaldo;
+}
+
+// --- el dibujo de una vista propia ---------------------------------------------------------
+// `previewdibujo.go` publica en `nodo.dibujo.operaciones` lo que el `onDraw` de una vista del
+// proyecto pidió al Canvas del modelo, en el orden en que lo pidió: `color` (fondo), `linea`,
+// `rectangulo`, `circulo` y `texto`, con el `color` y el `grosor` del `Paint`. Aquí se consumen
+// dentro del rect del nodo y con la escala de la pantalla: no cambia el tamaño del canvas ni la
+// escala, y un nodo sin `dibujo` se pinta exactamente como antes. El modelo no publica el
+// `Style` del `Paint` (el intérprete acepta `setStyle` sin inventar el efecto): con `grosor`
+// mayor que cero se traza el contorno, que es lo que se busca al dar grosor, y con grosor cero se
+// rellena, que es el estilo por defecto del framework. La cota evita que un JSON hostil deje la
+// pestaña dibujando sin fin.
+const OPERACIONES_MAXIMAS = 256;
+const TEXTO_DIBUJO = 12; // el `textSize` por defecto de un `Paint`, en píxeles del modelo
+
+// El color de una operación como lo entiende el canvas. `formatoColor` de apkc imprime
+// `#rrggbb`, o `#aarrggbb` cuando hay alfa; el canvas de 8 dígitos espera RGBA, así que el alfa
+// se pasa a `rgba()`. Un color que no es un hex válido cae al respaldo del tema: nunca se pinta
+// con una cadena que el canvas descartaría en silencio.
+function colorDeOperacion(valor, respaldo) {
+  const texto = typeof valor === "string" ? valor.trim() : "";
+  if (!/^#[0-9a-fA-F]{3,8}$/.test(texto)) return respaldo;
+  let digitos = texto.slice(1);
+  if (digitos.length === 3 || digitos.length === 4) {
+    digitos = [...digitos].map((c) => c + c).join("");
+  }
+  if (digitos.length === 6) return "#" + digitos.toLowerCase();
+  if (digitos.length !== 8) return respaldo;
+  const alfa = parseInt(digitos.slice(0, 2), 16) / 255;
+  const rojo = parseInt(digitos.slice(2, 4), 16);
+  const verde = parseInt(digitos.slice(4, 6), 16);
+  const azul = parseInt(digitos.slice(6, 8), 16);
+  return "rgba(" + rojo + ", " + verde + ", " + azul + ", " + (Math.round(alfa * 1000) / 1000) + ")";
+}
+
+// Pinta las operaciones de `r.dibujo` dentro del rect ya escalado del nodo. `escala` es la de la
+// pantalla: las coordenadas del Canvas del modelo van en los mismos píxeles del modelo que el
+// `rect`. Devuelve cuántas operaciones se pintaron, que es lo que va al resumen de la prueba.
+function pintarOperaciones(ctx, r, escala, tinta) {
+  const dibujo = r.dibujo;
+  if (!dibujo || typeof dibujo !== "object" || !Array.isArray(dibujo.operaciones)) return 0;
+  const alLienzo = (v) => r.x + v * escala;
+  const altoLienzo = (v) => r.y + v * escala;
+  let pintadas = 0;
+  for (const op of dibujo.operaciones.slice(0, OPERACIONES_MAXIMAS)) {
+    if (!op || typeof op !== "object") continue;
+    const x1 = aNumeroOFinito(op.x1), y1 = aNumeroOFinito(op.y1);
+    const x2 = aNumeroOFinito(op.x2), y2 = aNumeroOFinito(op.y2);
+    const radio = aNumeroOFinito(op.radio);
+    const grosor = aNumeroOFinito(op.grosor);
+    const color = colorDeOperacion(op.color, tinta);
+    switch (op.operacion) {
+      case "color": {
+        // `drawColor` pinta todo el lienzo de la vista: el rect entero del nodo
+        ctx.fillStyle = color;
+        ctx.fillRect(r.x, r.y, r.ancho, r.alto);
+        pintadas++;
+        break;
+      }
+      case "linea": {
+        if (x1 === null || y1 === null || x2 === null || y2 === null) break;
+        ctx.strokeStyle = color;
+        ctx.lineWidth = grosor !== null && grosor > 0 ? Math.max(0.5, grosor * escala) : 1;
+        ctx.beginPath();
+        ctx.moveTo(alLienzo(x1), altoLienzo(y1));
+        ctx.lineTo(alLienzo(x2), altoLienzo(y2));
+        ctx.stroke();
+        pintadas++;
+        break;
+      }
+      case "rectangulo": {
+        if (x1 === null || y1 === null || x2 === null || y2 === null) break;
+        const ancho = Math.max(0, (x2 - x1) * escala);
+        const alto = Math.max(0, (y2 - y1) * escala);
+        if (grosor !== null && grosor > 0) {
+          ctx.strokeStyle = color;
+          ctx.lineWidth = Math.max(0.5, grosor * escala);
+          ctx.strokeRect(alLienzo(x1), altoLienzo(y1), ancho, alto);
+        } else {
+          ctx.fillStyle = color;
+          ctx.fillRect(alLienzo(x1), altoLienzo(y1), ancho, alto);
+        }
+        pintadas++;
+        break;
+      }
+      case "circulo": {
+        if (x1 === null || y1 === null || radio === null) break;
+        const rl = Math.max(0, radio * escala);
+        ctx.beginPath();
+        ctx.arc(alLienzo(x1), altoLienzo(y1), rl, 0, Math.PI * 2);
+        if (grosor !== null && grosor > 0) {
+          ctx.strokeStyle = color;
+          ctx.lineWidth = Math.max(0.5, grosor * escala);
+          ctx.stroke();
+        } else {
+          ctx.fillStyle = color;
+          ctx.fill();
+        }
+        pintadas++;
+        break;
+      }
+      case "texto": {
+        if (x1 === null || y1 === null) break;
+        const texto = typeof op.texto === "string" ? op.texto : "";
+        if (!texto) break;
+        // `drawText` recibe la línea base, no la esquina: se pinta con la base alfabética y se
+        // devuelve el lienzo a la de arriba que usa el texto del nodo
+        const tamano = Math.max(1, TEXTO_DIBUJO * escala);
+        ctx.font = tamano + "px ui-monospace, SFMono-Regular, Menlo, Consolas, monospace";
+        ctx.textBaseline = "alphabetic";
+        ctx.fillStyle = color;
+        ctx.fillText(texto, alLienzo(x1), altoLienzo(y1));
+        ctx.textBaseline = "top";
+        pintadas++;
+        break;
+      }
+      default:
+        // una operación que este pintor no conoce se ignora: el modelo puede crecer antes que la
+        // página y una vista no se queda en blanco por un `drawArc` que aún no se dibuja
+        break;
+    }
+  }
+  return pintadas;
 }
 
 // El estado del modelo vive en este módulo para poder repintar al cambiar de vista sin repetir el
@@ -272,6 +398,7 @@ export function pintarModelo(canvas, modelo, medir) {
   const rects = rectsEscalados(modelo, ancho, alto);
   ctx.font = "11px ui-monospace, SFMono-Regular, Menlo, Consolas, monospace";
   ctx.textBaseline = "top";
+  let operacionesPintadas = 0;
   for (const r of rects) {
     // el nodo raíz es el contenedor de toda la pantalla: se marca con el acento, no se rellena,
     // salvo que el layout le haya dado un fondo
@@ -283,6 +410,16 @@ export function pintarModelo(canvas, modelo, medir) {
       ctx.strokeStyle = acento;
       ctx.lineWidth = 2;
       ctx.strokeRect(r.x + 1, r.y + 1, Math.max(1, r.ancho - 2), Math.max(1, r.alto - 2));
+      // una vista propia puede ser la raíz del layout: su `onDraw` se pinta igual, recortado a la
+      // pantalla como el de cualquier otro nodo
+      if (r.dibujo) {
+        ctx.save();
+        ctx.beginPath();
+        ctx.rect(r.x + 1, r.y + 1, Math.max(1, r.ancho - 2), Math.max(1, r.alto - 2));
+        ctx.clip();
+        operacionesPintadas += pintarOperaciones(ctx, r, marcoRect.escala, tinta);
+        ctx.restore();
+      }
       continue;
     }
     ctx.fillStyle = r.fondo || marco;
@@ -316,6 +453,9 @@ export function pintarModelo(canvas, modelo, medir) {
       ctx.fillStyle = r.colorTexto || tinta;
       ctx.fillText(nombre, r.x + 4, r.y + 3, Math.max(0, r.ancho - 8));
     }
+    // El `onDraw` de una vista propia va antes que el texto del nodo: su `drawColor` no debe
+    // tapar el texto, y una vista propia no suele traer `texto` del layout.
+    operacionesPintadas += pintarOperaciones(ctx, r, marcoRect.escala, tinta);
     // El nodo pinta **solo su texto**. Antes se dibujaba encima una etiqueta con el tipo y el id
     // (`Button · id/pulsar`); sobre un botón parecía un diálogo pegado y el usuario pidió quitarlo.
     // El tipo y el id no se pierden: siguen en el modelo, en `rectsEscalados`, en el `resumen` que
@@ -336,7 +476,8 @@ export function pintarModelo(canvas, modelo, medir) {
   // el espacio con el que se pintó queda en el canvas: el manejador del clic mide con él y no con
   // el clientWidth del momento, que puede haber cambiado entre pintar y pulsar
   canvas.__espacio = { ancho, alto };
-  return { ancho, alto, nodos: rects.length, escala: marcoRect.escala, valida: true, modelo, resumen };
+  return { ancho, alto, nodos: rects.length, escala: marcoRect.escala, valida: true, modelo, resumen,
+    operaciones: operacionesPintadas };
 }
 
 // La línea de estado del Emulador, pura y compartida: la escriben la vista Pantalla (aquí) y el

@@ -345,6 +345,114 @@ for (let i = 0; i < 600; i++) {
 }
 if (vistaPrevia.nodosAplanados({ raiz: cadena }).length > 512) mal("nodosAplanados no pone cota al árbol");
 
+// 6b-sexies. el `onDraw` de una vista propia se pinta dentro de su rect: `previewdibujo.go` publica
+// `nodo.dibujo.operaciones` (color, linea, rectangulo, circulo y texto, con el color y el grosor
+// del Paint) y el pintor tiene que consumirlas. El canvas es falso y cuenta las llamadas: la
+// prueba no necesita navegador y falsifica el enganche (sin él, ninguna operación llega al ctx).
+function lienzoFalso(ancho, alto) {
+  const llamadas = [];
+  const ctx = new Proxy({}, {
+    get(_destino, propiedad) {
+      return (...args) => { llamadas.push({ tipo: "metodo", nombre: String(propiedad), args }); };
+    },
+    set(_destino, propiedad, valor) {
+      llamadas.push({ tipo: "propiedad", nombre: String(propiedad), valor });
+      return true;
+    },
+  });
+  const canvas = { width: 0, height: 0, clientWidth: ancho, clientHeight: alto, dataset: {},
+    getContext: () => ctx };
+  return { canvas, llamadas };
+}
+// el último valor que se puso a una propiedad antes de la llamada `indice`
+function estiloAntes(llamadas, indice, propiedad) {
+  for (let i = indice - 1; i >= 0; i--) {
+    if (llamadas[i].tipo === "propiedad" && llamadas[i].nombre === propiedad) return llamadas[i].valor;
+  }
+  return null;
+}
+const modeloDibujo = {
+  pantalla: { x: 0, y: 0, ancho: 100, alto: 100 }, aproximado: true, nodos: 2,
+  raiz: { tipo: "LinearLayout", rect: { x: 0, y: 0, ancho: 100, alto: 100 }, hijos: [{
+    tipo: "p.q.Lienzo", id: "id/lienzo", rect: { x: 10, y: 20, ancho: 50, alto: 40 },
+    dibujo: { operaciones: [
+      { operacion: "color", color: "#ffeedd" },
+      { operacion: "linea", x1: 0, y1: 0, x2: 20, y2: 10, color: "#336699", grosor: 4 },
+      { operacion: "rectangulo", x1: 1, y1: 2, x2: 11, y2: 12, color: "#112233", grosor: 2 },
+      { operacion: "circulo", x1: 5, y1: 5, radio: 3, color: "#80ff0000" },
+      { operacion: "texto", x1: 2, y1: 8, texto: "hola", color: "#445566" },
+      { operacion: "drawArc", x1: 1, y1: 1 },
+    ] },
+  }] },
+};
+{
+  const { canvas, llamadas } = lienzoFalso(100, 100);
+  const pintado = vistaPrevia.pintarModelo(canvas, modeloDibujo);
+  if (!pintado || pintado.valida !== true) mal("pintarModelo no pinta el modelo con dibujo");
+  // cinco operaciones pintadas: la desconocida (`drawArc`) se ignora sin romper el resto
+  if (!pintado || pintado.operaciones !== 5) {
+    mal("pintarModelo no consume las operaciones del dibujo: " + (pintado && pintado.operaciones));
+  }
+  // el tamaño del canvas y la escala no cambian por traer dibujo
+  if (pintado.escala !== 1 || canvas.width !== 100 || canvas.height !== 100) {
+    mal("el dibujo del nodo cambia el canvas o la escala: " + JSON.stringify(
+      { escala: pintado.escala, ancho: canvas.width, alto: canvas.height }));
+  }
+  // `color` rellena el rect entero del nodo con su color (el relleno del fondo del nodo usa el
+  // mismo rect, así que lo que distingue la operación es el color con el que se rellena)
+  const relleno = llamadas.findIndex((c, i) => c.nombre === "fillRect" &&
+    c.args.join(",") === "10,20,50,40" && estiloAntes(llamadas, i, "fillStyle") === "#ffeedd");
+  if (relleno < 0) mal("el drawColor no rellena el rect del nodo con el color del modelo");
+  // `linea`: del punto al punto, con el color y el grosor del Paint
+  const fin = llamadas.findIndex((c) => c.nombre === "lineTo" && c.args.join(",") === "30,30");
+  const trazo = llamadas.findIndex((c, i) => c.nombre === "stroke" && i > fin && fin >= 0);
+  if (fin < 0) mal("la linea no llega al segundo punto del modelo");
+  else if (llamadas.findIndex((c) => c.nombre === "moveTo" && c.args.join(",") === "10,20") < 0) {
+    mal("la linea no arranca en el primer punto del modelo");
+  }
+  if (trazo < 0) mal("la linea no se traza");
+  else if (estiloAntes(llamadas, trazo, "lineWidth") !== 4 ||
+    estiloAntes(llamadas, trazo, "strokeStyle") !== "#336699") {
+    mal("la linea no usa el grosor o el color del modelo: " + JSON.stringify(
+      [estiloAntes(llamadas, trazo, "lineWidth"), estiloAntes(llamadas, trazo, "strokeStyle")]));
+  }
+  // `rectangulo` con grosor se traza como contorno en su esquina escalada
+  const contorno = llamadas.findIndex((c) => c.nombre === "strokeRect" && c.args[0] === 11 && c.args[1] === 22);
+  if (contorno < 0) mal("el rectangulo del dibujo no se traza en su esquina");
+  else if (estiloAntes(llamadas, contorno, "lineWidth") !== 2 ||
+    estiloAntes(llamadas, contorno, "strokeStyle") !== "#112233") {
+    mal("el rectangulo no usa el grosor o el color del modelo");
+  }
+  // `circulo` sin grosor se rellena; el alfa ARGB del modelo pasa a `rgba()` del canvas
+  const arco = llamadas.findIndex((c) => c.nombre === "arc" && c.args[0] === 15 && c.args[1] === 25 &&
+    c.args[2] === 3);
+  const rellenoCirculo = llamadas.findIndex((c, i) => c.nombre === "fill" && i > arco && arco >= 0);
+  if (arco < 0) mal("el circulo no se centra donde dice el modelo");
+  if (rellenoCirculo < 0) mal("el circulo sin grosor no se rellena");
+  else if (estiloAntes(llamadas, rellenoCirculo, "fillStyle") !== "rgba(255, 0, 0, 0.502)") {
+    mal("el circulo no traduce el ARGB del modelo: " + estiloAntes(llamadas, rellenoCirculo, "fillStyle"));
+  }
+  // `texto`: en su punto, con la línea base de `drawText` y sin rotular el nodo con su tipo
+  const letras = llamadas.findIndex((c) => c.nombre === "fillText" && c.args[0] === "hola");
+  if (letras < 0) mal("el drawText del modelo no se pinta");
+  else if (llamadas[letras].args[1] !== 12 || llamadas[letras].args[2] !== 28 ||
+    estiloAntes(llamadas, letras, "textBaseline") !== "alphabetic") {
+    mal("el drawText no usa el punto ni la línea base del modelo: " +
+      JSON.stringify(llamadas[letras].args));
+  }
+  // y con una pantalla al doble, las coordenadas y el grosor se escalan, no el canvas
+  const doble = lienzoFalso(200, 200);
+  const pintadoDoble = vistaPrevia.pintarModelo(doble.canvas, modeloDibujo);
+  const dobleFin = doble.llamadas.findIndex((c) => c.nombre === "lineTo" && c.args.join(",") === "60,60");
+  if (pintadoDoble.escala !== 2 || dobleFin < 0) {
+    mal("el dibujo del nodo no se escala con la pantalla: " + (pintadoDoble && pintadoDoble.escala));
+  }
+  // un modelo sin `dibujo` se pinta exactamente como antes: cero operaciones
+  const sinDibujo = lienzoFalso(360, 640);
+  const pintadoSin = vistaPrevia.pintarModelo(sinDibujo.canvas, modeloPrevia);
+  if (!pintadoSin || pintadoSin.operaciones !== 0) mal("un modelo sin dibujo pinta operaciones");
+}
+
 // 6b-quater. el estado vacío y la línea del emulador son uno solo: el panel (`previa-panel.js`) los
 // importa de aquí, así que las dos superficies —la vista dividida y Pantalla— dicen lo mismo del
 // mismo modelo y ninguna llama «vista previa» al canvas que ejecuta la app.
