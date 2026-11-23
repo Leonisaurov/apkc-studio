@@ -316,6 +316,47 @@ async function conductor() {
   comprueba("los números de línea siguen al contenido", editado.lineas === fuente.split("\n").length - 1 || editado.lineas >= 3,
     editado.lineas + " líneas");
 
+  // 3a-bis. un manifiesto inválido no se guarda ni se compila a medias: en su pestaña el XML de un
+  //     layout dejaría el proyecto roto y el build fallaría lejos de la causa.
+  const vetoManifiesto = await evaluar(`(async () => {
+    const ruta = "/proyecto/AndroidManifest.xml";
+    const original = await hospedador.texto(ruta);
+    const area = document.getElementById("codigo");
+    await abrir(ruta);
+    const layout = '<?xml version="1.0" encoding="utf-8"?>\\n<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android" />\\n';
+    area.value = layout;
+    area.dispatchEvent(new Event("input", { bubbles: true }));
+    const rechazado = await guardar();
+    const trasRechazo = await hospedador.texto(ruta);
+    const motivo = document.getElementById("estado-pestana").textContent;
+    const alCompilar = await guardarParaCompilar();
+    const trasCompilar = await hospedador.texto(ruta);
+    const conDeclaracion = '<?xml version="1.0" encoding="utf-8"?>\\n<manifest xmlns:android="http://schemas.android.com/apk/res/android" package="com.myapp">\\n</manifest>\\n';
+    area.value = conDeclaracion;
+    area.dispatchEvent(new Event("input", { bubbles: true }));
+    const aceptado = await guardar();
+    const guardadoValido = await hospedador.texto(ruta);
+    area.value = original;
+    area.dispatchEvent(new Event("input", { bubbles: true }));
+    await guardar();
+    const restaurado = (await hospedador.texto(ruta)) === original;
+    await abrir("/proyecto/src/com/myapp/Editado.java");
+    return { rechazado, intacto: trasRechazo === original && trasCompilar === original,
+      motivo, alCompilar, aceptado, guardadoValido, restaurado };
+  })()`);
+  comprueba("un layout en AndroidManifest.xml no se guarda y el motivo lo dice",
+    vetoManifiesto.rechazado === false &&
+    /no se guardó .*AndroidManifest\.xml.*<manifest>/.test(vetoManifiesto.motivo || ""),
+    JSON.stringify(vetoManifiesto.motivo || "").slice(0, 200));
+  comprueba("el manifiesto en disco queda intacto tras el rechazo",
+    vetoManifiesto.intacto === true);
+  comprueba("guardarParaCompilar devuelve -1 con un manifiesto inválido",
+    vetoManifiesto.alCompilar === -1, "devolvió " + vetoManifiesto.alCompilar);
+  comprueba("un manifiesto con declaración XML delante sí se guarda",
+    vetoManifiesto.aceptado === true && vetoManifiesto.restaurado === true &&
+    /^<\?xml[^>]*\?>\n<manifest /.test(vetoManifiesto.guardadoValido || ""),
+    JSON.stringify(vetoManifiesto.guardadoValido || "").slice(0, 80));
+
   // 3b. el scroll del editor: las tres capas tienen que moverse juntas, también al pasar de la
   //     primera pantalla (con el transform viejo el <pre> recortaba el contenido y se veía vacío)
   const desplazado = await evaluar(`(async () => {

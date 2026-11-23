@@ -1683,6 +1683,28 @@ function actualizarAccionesFichero() {
 }
 function confirmarDescartes() { return window.confirm("Hay cambios sin guardar. ¿Descartarlos?"); }
 
+function rutaDeManifiesto(ruta) { return /(^|\/)AndroidManifest\.xml$/.test(String(ruta || "")); }
+
+// Un AndroidManifest.xml siempre empieza por <manifest>; el BOM y los espacios de delante son
+// legales, y la declaración `<?xml ...?>` puede precederle. Cualquier otra cosa —el XML de un
+// layout pegado en la pestaña del manifiesto— dejaría el proyecto roto y el error saldría del
+// build, lejos de la causa: se rechaza al guardar.
+function pareceManifiesto(texto) {
+  const limpio = String(texto == null ? "" : texto).replace(/^\uFEFF/, "").trimStart()
+    .replace(/^<\?xml[\s\S]*?\?>\s*/, "");
+  return /^<manifest(\s|\/?>)/.test(limpio);
+}
+
+// El motivo va a la barra (lo que se mira al volver a la pestaña) y a la consola de desarrollo.
+// Devuelve el texto para que las pruebas lo puedan exigir sin leer el DOM.
+function avisarManifiestoInvalido(ruta) {
+  const motivo = "no se guardó " + relativa(ruta) + ": su contenido no empieza por <manifest> " +
+    "(¿está el XML de un layout en la pestaña del manifiesto?)";
+  nota(motivo);
+  console.error(motivo);
+  return motivo;
+}
+
 async function guardar() {
   let doc = documentoActivo();
   if (!doc) {
@@ -1711,6 +1733,10 @@ async function guardar() {
     return false;
   }
   const revision = nuevaRevision();
+  if (rutaDeManifiesto(ruta) && !pareceManifiesto(guardado)) {
+    avisarManifiestoInvalido(ruta);
+    return false;
+  }
   try {
     await conBloqueo(async () => {
       const escrito = await hospedador.escribir(ruta, new TextEncoder().encode(guardado));
@@ -1773,6 +1799,12 @@ async function guardarParaCompilar() {
       return -1;
     }
     const texto = doc.texto;
+    // mismo veto que `guardar`: compilar con un manifiesto que no es manifiesto falla lejos
+    // de la causa, y dejar el fichero a medias es peor que no compilar
+    if (rutaDeManifiesto(doc.ruta) && !pareceManifiesto(texto)) {
+      avisarManifiestoInvalido(doc.ruta);
+      return -1;
+    }
     const revision = nuevaRevision();
     try {
       await conBloqueo(async () => {
@@ -3123,7 +3155,8 @@ if (typeof document !== "undefined") {
 
 export {
   PROYECTO, hospedador, estadoPestana, DOCUMENTOS, VENTANA, ARBOL,
-  EDITOR, CONSOLA, abrir, guardar, correr, compilarDelTodo, compilarDebug,
+  EDITOR, CONSOLA, abrir, guardar, guardarParaCompilar, pareceManifiesto, correr,
+  compilarDelTodo, compilarDebug,
   mostrarPanel, alternarPanel, marcarSucio, deshacer, rehacer,
   refrescarArbol, estaSucio, hayDocumentosSucios, confirmarDescartes,
   limpiarEstadoEditor, ponerJarDeUrl, usarJarElegido, cerrarMenuArchivo,
@@ -3151,7 +3184,8 @@ export {
 if (typeof window !== "undefined") {
   Object.assign(window, {
     PROYECTO, hospedador, estadoPestana, DOCUMENTOS, VENTANA, ARBOL,
-    EDITOR, CONSOLA, abrir, guardar, correr, compilarDelTodo, compilarDebug,
+    EDITOR, CONSOLA, abrir, guardar, guardarParaCompilar, pareceManifiesto, correr,
+    compilarDelTodo, compilarDebug,
     mostrarPanel, alternarPanel, marcarSucio, deshacer, rehacer,
     refrescarArbol, estaSucio, hayDocumentosSucios, confirmarDescartes,
     limpiarEstadoEditor, ponerJarDeUrl, usarJarElegido, cerrarMenuArchivo,

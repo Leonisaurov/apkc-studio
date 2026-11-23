@@ -1344,6 +1344,19 @@ if (pestanaMod.esXml("package x; import java.util.List; class X { List<String> x
 if (!pestanaMod.esXml('<!-- c --><resources><string name="x">y</string></resources>'))
   mal("esXml no reconoce un recurso que empieza por comentario");
 
+// el guardado del manifiesto tiene un veto: solo pasa lo que empieza por <manifest>, con BOM o
+// espacios delante y con la declaración XML delante. El XML de un layout no puede guardarse ahí.
+if (!pestanaMod.pareceManifiesto('<manifest xmlns:android="http://schemas.android.com/apk/res/android" package="x"/>'))
+  mal("pareceManifiesto rechaza un manifiesto sin declaración");
+if (!pestanaMod.pareceManifiesto('<?xml version="1.0" encoding="utf-8"?>\n<manifest package="x">\n</manifest>\n'))
+  mal("pareceManifiesto rechaza un manifiesto con declaración XML");
+if (!pestanaMod.pareceManifiesto('\uFEFF  \n<?xml version="1.0"?><manifest package="x"/>'))
+  mal("pareceManifiesto rechaza un manifiesto con BOM y espacios delante");
+if (pestanaMod.pareceManifiesto('<?xml version="1.0" encoding="utf-8"?>\n<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android" />'))
+  mal("pareceManifiesto acepta el XML de un layout");
+if (pestanaMod.pareceManifiesto("") || pestanaMod.pareceManifiesto("package x;"))
+  mal("pareceManifiesto acepta un contenido vacío o Java");
+
 // los códigos ANSI de apkc no se enseñan crudos: se convierten en spans con su color
 const color = pestanaMod.consolaHtml("\u001b[31mrojo\u001b[0m y \u001b[1;34mazul\u001b[0m");
 if (!/class="consola-fg-1">rojo</.test(color) || !/class="consola-fuerte consola-fg-4">azul</.test(color))
