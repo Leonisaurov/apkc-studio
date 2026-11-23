@@ -7,7 +7,7 @@ import { crearAjustes } from "./ajustes.js";
 import { CONSOLA, pintarConsola, consolaHtml, textoHtml, enlazarSalidas,
   mostrarCarga, ocultarCarga, conCarga } from "./consola.js";
 import { leerZip, normalizarEntradas, zipDelArbol, paqueteDelManifiesto, nombreDeZip,
-  ajustesDelManifiesto, conAjustes } from "./proyecto.js";
+  ajustesDelManifiesto, conAjustes, inflarConTope } from "./proyecto.js";
 import { modeloDeSalida, pintarVistaPrevia, mensajeVistaPrevia } from "./vista-previa.js";
 import { crearPreviaPanel } from "./previa-panel.js";
 import { crearPanelDeps } from "./deps.js";
@@ -2719,6 +2719,11 @@ async function jarDeSeleccion(datos) {
   return jar;
 }
 
+// El jar de una plataforma ronda los 26 MB y crecerá en las próximas APIs: 128 MiB deja sitio de
+// sobra y sigue cortando una bomba. El tope se cuenta sobre los bytes que el flujo produce, no
+// sobre el tamaño que declare el zip: uno hecho a mano puede decir 1024 B y expandirse a gigabytes.
+const MAX_JAR = 128 * 1024 * 1024;
+
 async function extraerJarDeZip(datos) {
   const dv = new DataView(datos.buffer, datos.byteOffset, datos.byteLength);
   const desde = Math.max(0, datos.length - 65557);
@@ -2754,8 +2759,8 @@ async function extraerJarDeZip(datos) {
         if (typeof DecompressionStream !== "function") {
           throw new Error("este navegador no descomprime deflate: descomprime el zip a mano");
         }
-        const flujo = new Blob([comprimido]).stream().pipeThrough(new DecompressionStream("deflate-raw"));
-        salida = new Uint8Array(await new Response(flujo).arrayBuffer());
+        // el mismo mecanismo que `leerZip`: se corta por bytes producidos, no por los declarados
+        salida = await inflarConTope(comprimido, MAX_JAR, "android.jar");
       } else {
         throw new Error("zip: método de compresión " + metodo + " no soportado");
       }

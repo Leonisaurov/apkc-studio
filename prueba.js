@@ -1874,6 +1874,57 @@ if (fusionar(baseFusion, "uno\nDOS\ntres\n", baseFusion).estado !== "nuestro") m
   catch (e) { rechazoCota = /demasiado grande/.test(String(e && e.message ? e.message : e)); }
   if (!rechazoCota) mal("leerZip no pone cota al tamaño declarado de una entrada");
 
+  // B5: el tamaño declarado es una promesa del fichero, no un hecho. La auditoría infló 1024 B
+  // declarados a 200 MiB; aquí el zip se fabrica con un central directory que dice poco y un flujo
+  // deflate que expande mucho. Sin el tope por bytes producidos, la entrada termina en «no cuadra»
+  // después de materializar los 200 MiB.
+  const zipBomba = async (megas, ruta, declarado) => {
+    const cero = new Uint8Array(1 << 20);
+    const origen = new ReadableStream({
+      start(c) { for (let i = 0; i < megas; i++) c.enqueue(cero); c.close(); },
+    });
+    const comprimido = new Uint8Array(await new Response(
+      origen.pipeThrough(new CompressionStream("deflate-raw"))).arrayBuffer());
+    const nombre = Buffer.from(ruta);
+    const local = Buffer.alloc(30);
+    local.writeUInt32LE(0x04034b50, 0); local.writeUInt16LE(20, 4); local.writeUInt16LE(0x0800, 6);
+    local.writeUInt16LE(8, 8); local.writeUInt32LE(a.crc32(cero), 14);
+    local.writeUInt32LE(comprimido.length, 18); local.writeUInt32LE(declarado, 22);
+    local.writeUInt16LE(nombre.length, 26);
+    const central = Buffer.alloc(46);
+    central.writeUInt32LE(0x02014b50, 0); central.writeUInt16LE(20, 4); central.writeUInt16LE(20, 6);
+    central.writeUInt16LE(0x0800, 8); central.writeUInt16LE(8, 10);
+    central.writeUInt32LE(a.crc32(cero), 16); central.writeUInt32LE(comprimido.length, 20);
+    central.writeUInt32LE(declarado, 24); central.writeUInt16LE(nombre.length, 28);
+    central.writeUInt32LE(0, 42);
+    const fin = Buffer.alloc(22);
+    fin.writeUInt32LE(0x06054b50, 0); fin.writeUInt16LE(1, 8); fin.writeUInt16LE(1, 10);
+    fin.writeUInt32LE(46 + nombre.length, 12); fin.writeUInt32LE(30 + nombre.length + comprimido.length, 16);
+    return new Uint8Array(Buffer.concat([local, nombre, comprimido, central, nombre, fin]));
+  };
+
+  const antesBomba = process.memoryUsage().rss;
+  let rechazoBomba = "";
+  try { await leerZip(await zipBomba(200, "res/bomba.bin", 1024)); }
+  catch (e) { rechazoBomba = String(e && e.message ? e.message : e); }
+  const rssBomba = (process.memoryUsage().rss - antesBomba) / (1024 * 1024);
+  if (!/demasiado grande/.test(rechazoBomba)) {
+    mal("leerZip no corta por los bytes producidos: " + (rechazoBomba || "la entrada pasó entera") +
+      "; pasaron " + Math.round(rssBomba) + " MB de RSS");
+  }
+  // el tope es 64 MiB: cortar en el flujo no puede engordar el proceso como los 653 MB del informe
+  if (rssBomba > 200) {
+    mal("leerZip se pasó de memoria con 1024 B declarados: " + Math.round(rssBomba) + " MB de RSS");
+  }
+
+  // el mismo agujero estaba en el jar anidado del paquete de la plataforma: se corta igual
+  let rechazoJarBomba = "";
+  try { await pestanaMod.jarDeSeleccion(await zipBomba(160, "android-34/android.jar", 1024)); }
+  catch (e) { rechazoJarBomba = String(e && e.message ? e.message : e); }
+  if (!/demasiado grande/.test(rechazoJarBomba)) {
+    mal("jarDeSeleccion no corta por los bytes producidos: " + (rechazoJarBomba || "la entrada pasó entera"));
+  }
+
   if (rutaSegura("../fuera.txt") || rutaSegura("/abs.txt") || rutaSegura("a\\b.txt") || !rutaSegura("a/b.txt")) {
     mal("rutaSegura no filtra las rutas que salen del proyecto");
   }

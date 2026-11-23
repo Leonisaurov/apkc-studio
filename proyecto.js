@@ -107,14 +107,38 @@ function buscaEocd(vista) {
   return -1;
 }
 
-// Un zip ajeno puede declarar tamaños pequeños y expandirse hasta llenar la memoria: se pone una
-// cota por entrada y otra para el conjunto antes de descomprimir (hallazgo B4 del informe).
+// Un zip ajeno puede declarar tamaños pequeños y expandirse hasta llenar la memoria: el tamaño
+// del directorio central es una promesa del fichero, no un hecho, y la auditoría de seguridad
+// infló 1024 B declarados a 200 MiB con 653 MB de RSS. Por eso la cota se aplica sobre los bytes
+// que el flujo llega a producir de verdad, cortando en cuanto pasa, y no sobre los declarados
+// (hallazgo B4 del informe).
 const MAX_ENTRADA = 64 * 1024 * 1024;
 const MAX_TOTAL = 256 * 1024 * 1024;
 
-async function inflar(bytes) {
-  const flujo = new Blob([bytes]).stream().pipeThrough(new DecompressionStream("deflate-raw"));
-  return new Uint8Array(await new Response(flujo).arrayBuffer());
+// inflarConTope descomprime `deflate-raw` contando lo que sale por el flujo y se detiene, y
+// cancela, en cuanto lo producido pasa de `tope`: nunca se materializa más que eso. `nombre` solo
+// va en el mensaje, que es el mismo que ve quien importa el fichero.
+export async function inflarConTope(bytes, tope, nombre) {
+  const lector = new Blob([bytes]).stream()
+    .pipeThrough(new DecompressionStream("deflate-raw"))
+    .getReader();
+  const trozos = [];
+  let producido = 0;
+  for (;;) {
+    const { done, value } = await lector.read();
+    if (done) break;
+    producido += value.length;
+    if (producido > tope) {
+      // cancelar cierra el flujo: lo que quedaba comprimido no se descomprime ni se guarda
+      await lector.cancel();
+      throw new Error("el fichero " + nombre + " es demasiado grande para importarlo");
+    }
+    trozos.push(value);
+  }
+  const salida = new Uint8Array(producido);
+  let at = 0;
+  for (const trozo of trozos) { salida.set(trozo, at); at += trozo.length; }
+  return salida;
 }
 
 // Devuelve [{ ruta, dir, datos }]. Los directorios llevan datos null.
@@ -164,8 +188,12 @@ export async function leerZip(bytes) {
 
     let datos;
     if (metodo === 0) datos = crudo;
-    else if (metodo === 8) datos = await inflar(crudo);
-    else throw new Error("método de compresión no soportado (" + metodo + "): " + nombre);
+    else if (metodo === 8) {
+      // el tope es el menor entre la cota de una entrada y lo que le queda al conjunto: así el
+      // total nunca se pasa ni un byte, aunque el central directory diga otra cosa
+      const restante = Math.min(MAX_ENTRADA, MAX_TOTAL - totalDescomprimido);
+      datos = await inflarConTope(crudo, restante, nombre);
+    } else throw new Error("método de compresión no soportado (" + metodo + "): " + nombre);
 
     if (tamano !== datos.length) {
       throw new Error("el tamaño de " + nombre + " no cuadra: " + datos.length + " de " + tamano);
