@@ -1032,8 +1032,9 @@ o lo cierra, y ``Ctrl + ` `` conserva la pestaña activa.
   `#keyalias-firmar`, `#apk-a-firmar`, `#firmar-aqui`, `#keystore-viejo`, `#storepass-viejo`,
   `#keyalias-viejo`, `#rotation-min-sdk`, `#usar-rotacion`, `#crear-linaje`, `#olvidar-linaje` y
   `#estado-linaje`.
-- `#panel-deps` es la sección de **Dependencias Maven**, aparte de Consola, Diagnóstico,
-  Historial, Compilar y Firmar. Sus ids son `#deps-coordenada` (por defecto
+- `#panel-deps` es la sección de **Dependencias**, aparte de Consola, Diagnóstico,
+  Historial, Compilar y Firmar. Tiene dos vías y ninguna habla con Maven. La primera importa un
+  artefacto publicado en el propio origen: sus ids son `#deps-coordenada` (por defecto
   `com.google.code.gson:gson:2.10.1`, de ejemplo), `#deps-resolver`, `#deps-estado`,
   `#deps-resultado`, `#deps-nombre`, `#deps-bytes`, `#deps-hash`, `#deps-ruta` y `#deps-indice`.
   `crearPanelDeps()` de `deps.js` solo engancha el botón y el Enter del campo: al cargar y al
@@ -1045,6 +1046,15 @@ o lo cierra, y ``Ctrl + ` `` conserva la pestaña activa.
   `.github/workflows/deps-maven.yml` en el runner y se sirve estático. Si el índice no existe,
   `#deps-estado` lo dice y manda al workflow; no se inventan coordenadas ni hashes. La sección no
   resuelve el grafo: importa lo que el índice publicó, sin transitivas.
+  La segunda vía es **local y sin red**: `#deps-ficheros` (`.jar`/`.aar` múltiples) o soltar un
+  `.zip` en `#deps-soltar`; el progreso va en `#deps-progreso`, el aviso en `#deps-importar-estado`
+  y el resultado en `#deps-importado` (`#deps-importado-ficheros`, `#deps-importado-bytes`,
+  `#deps-importado-destino`, `#deps-importado-descriptor`). El `.zip` se lee con `leerZip` (CRC y
+  rutas seguras) y solo se aceptan `jar/*.jar`, `lib/<abi>/*.so` y
+  `res/__deps/<isla>/<tipo>/<archivo>`; un `.aar` se abre igual y se reparte en esas tres carpetas
+  (`classes.jar` y `libs/*.jar` a `jar/`, `jni/<abi>/*.so` a `lib/<abi>/`, `res/**` a
+  `res/__deps/<isla>/`). Los bytes se escriben en OPFS bajo `/proyecto/` dentro de `conBloqueo`, se
+  pregunta antes de reemplazar y el sha256 de cada fichero queda en `/proyecto/deps.importado.json`.
 
 Las acciones concretas de compilar y firmar se documentan en `studio/README.md` y en
 `docs/evidencia.md` (§44-§47, §55, §117-§136). Este documento solo cubre la interfaz.

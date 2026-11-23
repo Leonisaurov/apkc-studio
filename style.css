@@ -2156,6 +2156,22 @@ pre {
 .deps-datos .deps-hash,
 .deps-datos .deps-ruta { font-family: var(--mono, ui-monospace, monospace); }
 .deps-datos .deps-ruta { color: var(--texto-medio); }
+/* Importación local: la zona de soltar y la barra de progreso. El borde discontinuo ya se usa en
+   el árbol para «soltar aquí», así que el gesto se reconoce sin leyenda. */
+.deps-subtitulo { margin: 18px 0 6px; font-size: 13px; color: var(--brillo); }
+.deps-soltar {
+  display: grid;
+  gap: 6px;
+  margin: 8px 0;
+  padding: 10px 12px;
+  border: 1px dashed var(--borde2);
+  border-radius: 8px;
+  font-size: 12px;
+}
+.deps-soltar.activa { border-color: var(--acento-claro); background: var(--fondo2); }
+.deps-soltar > label { display: grid; gap: 4px; color: var(--texto-medio); }
+.deps-soltar .nota { margin: 0; }
+#deps-progreso { width: 100%; height: 8px; margin: 4px 0; accent-color: var(--acento); }
 .diagnostico-vivo-cab { margin: 0 0 8px; }
 .diagnostico-vivo-lista { list-style: none; margin: 0 0 10px; padding: 0; }
 .diagnostico-vivo-lista li { margin: 0 0 4px; }

@@ -909,7 +909,7 @@ async function recibirRemoto(msg) {
       revelarRuta(estadoPestana.ruta);
     } else if (msg.accion === "borrar") {
       await aplicarBorradoRemoto(msg.ruta);
-    } else if (msg.accion === "subir" || msg.accion === "crear") {
+    } else if (msg.accion === "subir" || msg.accion === "crear" || msg.accion === "deps") {
       for (const ruta of msg.rutas || []) {
         await hospedador.refrescar(ruta).catch(() => {});
         const doc = documentoDe(ruta);
@@ -3265,8 +3265,19 @@ if (typeof document !== "undefined") {
     }
     // La sección de dependencias solo engancha su botón: nada se pide al cargar. Si el índice no
     // está publicado (hoy, hasta que corra el workflow), el primer clic lo dice en #deps-estado.
+    // La importación local escribe en OPFS; después hay que refrescar el árbol y avisar a las
+    // demás ventanas, o la de al lado seguiría con el espejo viejo.
     try {
-      crearPanelDeps({ hospedador, conBloqueo });
+      crearPanelDeps({
+        hospedador, conBloqueo,
+        alImportar: async (rutas) => {
+          for (const ruta of rutas) {
+            try { localStorage.setItem(claveRevision(ruta), nuevaRevision()); } catch (e) { /* sin revisión */ }
+          }
+          publicar({ tipo: "mutacion", accion: "deps", rutas });
+          await refrescarArbol();
+        },
+      });
     } catch (err) {
       mostrarFallo(err);
     }

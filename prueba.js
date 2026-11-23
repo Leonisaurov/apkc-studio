@@ -2140,9 +2140,147 @@ public final class R {
       mal("un artefacto alterado no se rechaza antes de escribir en OPFS: " + falloHash);
     }
 
+    // vía local, sin red: el .zip con la forma de apkc-deps se queda en jar/, lib/<abi>/ y
+    // res/__deps/; lo demás (src/, el res/ propio, assets/) no se pisa desde dependencias.
+    const texto = (s) => new TextEncoder().encode(s);
+    const paquete = [
+      { ruta: "res/__deps/0123456789ab/values/strings.xml", dir: false, datos: texto("<resources/>") },
+      { ruta: "jar/gson-2.10.1.jar", dir: false, datos: bytesFalsos },
+      { ruta: "lib/arm64-v8a/libgson.so", dir: false, datos: new Uint8Array([1, 2, 3]) },
+      { ruta: "src/com/example/Main.java", dir: false, datos: texto("class Main {}") },
+      { ruta: "res/values/strings.xml", dir: false, datos: texto("<resources/>") },
+      { ruta: "lib/../x.so", dir: false, datos: new Uint8Array([1]) },
+      { ruta: "res/__deps/no-es-hex/values/x.xml", dir: false, datos: texto("<resources/>") },
+      { ruta: "jar/sub/anidado.jar", dir: false, datos: new Uint8Array([1]) },
+    ];
+    const planPaquete = depsMod.planDePaquete(paquete);
+    if (JSON.stringify(planPaquete.ficheros.map((f) => f.ruta)) !== JSON.stringify([
+      "res/__deps/0123456789ab/values/strings.xml", "jar/gson-2.10.1.jar",
+      "lib/arm64-v8a/libgson.so",
+    ])) {
+      mal("planDePaquete no deja solo jar/, lib/<abi>/ y res/__deps/: " +
+        JSON.stringify(planPaquete.ficheros.map((f) => f.ruta)));
+    }
+    if (planPaquete.ignorados !== 5) mal("planDePaquete no cuenta los ficheros ignorados: " + planPaquete.ignorados);
+    let falloPaqueteVacio = "";
+    try { depsMod.planDePaquete([{ ruta: "src/A.java", dir: false, datos: texto("x") }]); }
+    catch (e) { falloPaqueteVacio = String(e && e.message ? e.message : e); }
+    if (!/no trae jar/.test(falloPaqueteVacio)) mal("un zip sin jar/, lib/ ni res/__deps/ no se rechaza: " + falloPaqueteVacio);
+
+    // un .aar se abre como zip y se reparte en las tres carpetas; el manifiesto y el R.txt no se
+    // finge que se fusionan
+    const aar = makeZip([
+      ["classes.jar", bytesFalsos],
+      ["libs/inner.jar", texto("PK\u0003\u0004interno")],
+      ["jni/arm64-v8a/libnativo.so", new Uint8Array([9, 9])],
+      ["res/values/strings.xml", texto("<resources/>")],
+      ["AndroidManifest.xml", texto("<manifest/>")],
+      ["R.txt", texto("")],
+    ]);
+    const planAar = depsMod.planDeAar("material-1.12.0.aar", await leerZip(new Uint8Array(aar)));
+    const isla = depsMod.hashCorto("material-1.12.0");
+    if (!/^[0-9a-f]{12}$/.test(isla) || isla !== depsMod.hashCorto("material-1.12.0")) {
+      mal("hashCorto no es estable ni de doce hex: " + isla);
+    }
+    if (JSON.stringify(planAar.ficheros.map((f) => f.ruta)) !== JSON.stringify([
+      "jar/material-1.12.0.jar", "jar/material-1.12.0-inner.jar", "lib/arm64-v8a/libnativo.so",
+      "res/__deps/" + isla + "/values/strings.xml",
+    ])) {
+      mal("planDeAar no reparte classes.jar, libs/, jni/ y res/: " +
+        JSON.stringify(planAar.ficheros.map((f) => f.ruta)));
+    }
+    if (planAar.ignorados !== 2) mal("planDeAar no ignora manifiesto y R.txt: " + planAar.ignorados);
+    const planJar = depsMod.planDeJar("gson-2.10.1.jar", bytesFalsos);
+    if (planJar.ficheros.length !== 1 || planJar.ficheros[0].ruta !== "jar/gson-2.10.1.jar") {
+      mal("planDeJar no deja el .jar en jar/: " + JSON.stringify(planJar.ficheros.map((f) => f.ruta)));
+    }
+
+    // el plan unido va en orden de ruta (el orden en el que se escribe) y dos artefactos que
+    // escriben la misma ruta son un error visible, no el último que gana
+    const planUnido = depsMod.unirPlanes([planAar, planJar]);
+    const ordenEsperado = [
+      "jar/gson-2.10.1.jar", "jar/material-1.12.0-inner.jar", "jar/material-1.12.0.jar",
+      "lib/arm64-v8a/libnativo.so", "res/__deps/" + isla + "/values/strings.xml",
+    ];
+    if (JSON.stringify(planUnido.ficheros.map((f) => f.ruta)) !== JSON.stringify(ordenEsperado)) {
+      mal("unirPlanes no ordena las rutas: " + JSON.stringify(planUnido.ficheros.map((f) => f.ruta)));
+    }
+    let falloDuplicado = "";
+    try { depsMod.unirPlanes([planJar, depsMod.planDeJar("gson-2.10.1.jar", bytesFalsos)]); }
+    catch (e) { falloDuplicado = String(e && e.message ? e.message : e); }
+    if (!/misma ruta/.test(falloDuplicado)) mal("unirPlanes acepta dos artefactos con la misma ruta: " + falloDuplicado);
+    let falloVacio = "";
+    try { depsMod.unirPlanes([]); } catch (e) { falloVacio = String(e && e.message ? e.message : e); }
+    if (!/nada que importar/.test(falloVacio)) mal("unirPlanes acepta un plan vacío: " + falloVacio);
+
+    // la escritura: dentro de conBloqueo, en el orden del plan y con el registro al final
+    const escritosImport = new Map();
+    const ordenImport = [];
+    const progresoImport = [];
+    const hospedadorImport = {
+      escribir: async (ruta, datos) => {
+        ordenImport.push("escribe:" + ruta);
+        escritosImport.set(ruta, datos);
+        return { tipo: "montado", ruta, bytes: datos.length };
+      },
+      leer: async () => ({ ok: false, error: "ENOENT" }),
+    };
+    const importadoLocal = await depsMod.importarDependencias({
+      plan: planUnido, hospedador: hospedadorImport,
+      conBloqueo: async (tarea) => {
+        ordenImport.push("toma");
+        try { return await tarea(); } finally { ordenImport.push("suelta"); }
+      },
+      alProgreso: (p) => progresoImport.push(p.hechos),
+    });
+    const ordenEscritura = ["toma"];
+    for (const ruta of ordenEsperado) ordenEscritura.push("escribe:/proyecto/" + ruta);
+    ordenEscritura.push("escribe:/proyecto/deps.importado.json", "suelta");
+    if (JSON.stringify(ordenImport) !== JSON.stringify(ordenEscritura)) {
+      mal("importarDependencias no escribe en orden dentro de conBloqueo: " + JSON.stringify(ordenImport));
+    }
+    if (JSON.stringify(progresoImport) !== JSON.stringify([0, 1, 2, 3, 4, 5])) {
+      mal("la barra de progreso no avanza de 0 a N: " + JSON.stringify(progresoImport));
+    }
+    if (importadoLocal.ficheros !== 5 || importadoLocal.bytes !==
+        ordenEsperado.reduce((n, ruta) => n + escritosImport.get("/proyecto/" + ruta).length, 0)) {
+      mal("importarDependencias no devuelve ficheros y bytes: " + JSON.stringify(importadoLocal).slice(0, 200));
+    }
+    const registroImport = JSON.parse(new TextDecoder().decode(escritosImport.get("/proyecto/deps.importado.json") || new Uint8Array([123, 125])));
+    if (!Array.isArray(registroImport.artefactos) || registroImport.artefactos.length !== 5 ||
+        registroImport.artefactos.map((a) => a.ruta).join(",") !== ordenEsperado.join(",")) {
+      mal("deps.importado.json no registra los artefactos en orden");
+    }
+    if (registroImport.artefactos[0].sha256 !== await depsMod.sha256Hex(planJar.ficheros[0].bytes)) {
+      mal("deps.importado.json no lleva el sha256 de lo que se escribió");
+    }
+
+    // pisar exige confirmación: si se dice que no, no se escribe nada
+    let escritosCancelados = 0;
+    let falloCancelado = "";
+    try {
+      await depsMod.importarDependencias({
+        plan: planUnido,
+        hospedador: { escribir: async () => { escritosCancelados++; return { tipo: "montado" }; },
+          leer: async () => ({ bytes: 1 }) },
+        confirmar: async () => false,
+      });
+    } catch (e) { falloCancelado = String(e && e.message ? e.message : e); }
+    if (!/cancelada/.test(falloCancelado) || escritosCancelados) {
+      mal("importarDependencias pisa sin confirmar: " + falloCancelado + " escritos=" + escritosCancelados);
+    }
+    // un fallo de cuota se explica como cuota, no como un error opaco
+    if (!depsMod.esFalloDeCuota({ name: "QuotaExceededError" }) ||
+        !/cuota de OPFS/.test(depsMod.mensajeDeImportacion({ message: "The quota has been exceeded." }))) {
+      mal("el fallo de cuota de OPFS no se explica");
+    }
+
     // ids contrato de la sección, y la pestaña propia separada de Compilar/Diagnóstico/Historial
     for (const id of ["deps-coordenada", "deps-resolver", "deps-estado", "deps-resultado",
-      "deps-nombre", "deps-bytes", "deps-hash", "deps-ruta", "deps-indice"]) {
+      "deps-nombre", "deps-bytes", "deps-hash", "deps-ruta", "deps-indice",
+      "deps-ficheros", "deps-soltar", "deps-progreso", "deps-importar-estado", "deps-importado",
+      "deps-importado-ficheros", "deps-importado-bytes", "deps-importado-destino",
+      "deps-importado-descriptor"]) {
       if (!ids.has(id)) mal("index.html no tiene el id de dependencias #" + id);
     }
     if (!/data-panel="deps"/.test(html) || !/id="panel-deps"/.test(html)) {

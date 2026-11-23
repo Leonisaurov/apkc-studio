@@ -896,6 +896,28 @@
                   <dt>en OPFS</dt><dd id="deps-ruta" class="deps-ruta"></dd>
                   <dt>origen</dt><dd id="deps-indice"></dd>
                 </dl>
+
+                <h3 class="deps-subtitulo">Importar desde disco</h3>
+                <p class="nota"><strong>Sin red</strong>: elige <code>.jar</code>/<code>.aar</code> o
+                  suelta un <code>.zip</code> con <code>jar/</code>, <code>lib/&lt;abi&gt;/</code> y
+                  <code>res/__deps/</code>. Un <code>.aar</code> se abre aquí mismo: su
+                  <code>classes.jar</code> y sus <code>libs/*.jar</code> van a <code>jar/</code>, sus
+                  <code>.so</code> a <code>lib/&lt;abi&gt;/</code> y sus recursos a
+                  <code>res/__deps/&lt;isla&gt;/</code>. Nada se descarga: los bytes salen del disco y
+                  se escriben en el proyecto del navegador (OPFS).</p>
+                <div id="deps-soltar" class="deps-soltar">
+                  <label>ficheros <input type="file" id="deps-ficheros" multiple
+                    accept=".jar,.aar,.zip,application/java-archive,application/zip"></label>
+                  <p class="nota">o suelta aquí el <code>.zip</code> con las tres carpetas</p>
+                </div>
+                <progress id="deps-progreso" max="1" value="0" hidden></progress>
+                <p class="nota" id="deps-importar-estado" role="status" aria-live="polite">sin importar todavía</p>
+                <dl id="deps-importado" class="deps-datos" hidden>
+                  <dt>ficheros</dt><dd id="deps-importado-ficheros"></dd>
+                  <dt>tamaño</dt><dd id="deps-importado-bytes"></dd>
+                  <dt>en OPFS</dt><dd id="deps-importado-destino" class="deps-ruta"></dd>
+                  <dt>registro</dt><dd id="deps-importado-descriptor" class="deps-ruta"></dd>
+                </dl>
               </div>
             </div>
           </div>
