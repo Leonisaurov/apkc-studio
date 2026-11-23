@@ -35,8 +35,53 @@ if (!GOROOT) {
   try { GOROOT = execSync("go env GOROOT", { encoding: "utf8" }).trim(); } catch (e) { GOROOT = ""; }
 }
 const WASM_EXEC = path.join(GOROOT, "lib", "wasm", "wasm_exec.js");
+
+// El android.jar no se versiona: se lee del SDK local, como hace `servidor.js`. La prueba completa
+// de la pestaña lo sirve por su propio origen para que el build de wasm pueda compilar.
+function jarDelSdk() {
+  if (process.env.ANDROID_JAR && fs.existsSync(process.env.ANDROID_JAR)) return process.env.ANDROID_JAR;
+  const raices = [process.env.ANDROID_HOME, process.env.ANDROID_SDK_ROOT,
+    process.env.HOME ? path.join(process.env.HOME, "Android") : ""].filter(Boolean);
+  const PREFERIDA = 34;
+  for (const raiz of raices) {
+    const plataformas = path.join(raiz, "platforms");
+    if (!fs.existsSync(plataformas)) continue;
+    let candidatas;
+    try {
+      candidatas = fs.readdirSync(plataformas)
+        .map((nombre) => ({ nombre, version: Number((/^android-(\d+)$/.exec(nombre) || [])[1]) }))
+        .filter((x) => Number.isInteger(x.version))
+        .sort((a, b) => (Number(b.version === PREFERIDA) - Number(a.version === PREFERIDA)) ||
+          (b.version - a.version));
+    } catch (e) { continue; }
+    for (const c of candidatas) {
+      const jar = path.join(plataformas, c.nombre, "android.jar");
+      if (fs.existsSync(jar)) return jar;
+    }
+  }
+  return null;
+}
+
 const servidor = http.createServer((peticion, respuesta) => {
   const ruta = decodeURIComponent((peticion.url || "/").split("?")[0]);
+  // el jar del SDK y su ficha, solo si hay wasm: sin binario la prueba es de DOM y no compila
+  if (WASM && ruta === "/android-jar-info") {
+    const jar = jarDelSdk();
+    const version = jar ? Number((/android-(\d+)/.exec(path.basename(path.dirname(jar))) || [])[1]) : null;
+    respuesta.writeHead(200, { "Content-Type": "application/json; charset=utf-8" });
+    return void respuesta.end(JSON.stringify({
+      disponible: !!jar, version, bytes: jar ? fs.statSync(jar).size : 0,
+    }));
+  }
+  if (WASM && ruta === "/android-jar") {
+    const jar = jarDelSdk();
+    if (!jar) {
+      respuesta.writeHead(404, { "Content-Type": "text/plain; charset=utf-8" });
+      return void respuesta.end("no hay android.jar del SDK local\n");
+    }
+    respuesta.writeHead(200, { "Content-Type": "application/java-archive" });
+    return void respuesta.end(fs.readFileSync(jar));
+  }
   let fichero = path.normalize(path.join(__dirname, ruta === "/" ? "index.html" : ruta));
   if (ruta === "/wasm_exec.js" && fs.existsSync(WASM_EXEC)) fichero = WASM_EXEC;
   else if (ruta === "/apkc.wasm" && WASM && fs.existsSync(WASM)) fichero = WASM;
@@ -113,7 +158,22 @@ async function target() {
 
 const conductor = `(async () => {
   const r = {};
+  const HAY_WASM = ${WASM ? "true" : "false"};
   const sa = (f) => { try { return f(); } catch (e) { return "EXCEPCION: " + e.message; } };
+  // Abre un desplegable de menú y espera a que la lista tenga contenido. El modelo de la compilación
+  // puede llegar un instante después de #ultimo-codigo: si la lista sigue cerrada se reintenta; si
+  // está abierta pero vacía, se devuelve vacía (el fallo se explica en la comprobación).
+  const abrirMenuYEsperar = async (botonId, listaId, intentos = 8) => {
+    const boton = document.getElementById(botonId);
+    const lista = document.getElementById(listaId);
+    if (!boton || !lista) return [];
+    for (let i = 0; i < intentos; i++) {
+      if (lista.hidden) boton.click();
+      await new Promise((ok) => setTimeout(ok, 900));
+      if (!lista.hidden) break;
+    }
+    return [...lista.children].map((b) => b.textContent);
+  };
   r.aislada = crossOriginIsolated;
   r.recarga = sessionStorage.getItem("apkc-coi-reintento");
   r.titulo = document.title;
@@ -238,6 +298,17 @@ const conductor = `(async () => {
     oculto: listaMenu ? listaMenu.hidden : null,
     estado: document.getElementById("previa-render-estado").textContent,
   };
+  // la capa del Toast se monta con el panel y empieza oculta; su contenido llega del modelo
+  const capaToast = document.getElementById("previa-toast");
+  const capaToastVista = document.getElementById("vista-toast");
+  r.toastCapa = {
+    panel: !!capaToast,
+    vista: !!capaToastVista,
+    oculto: capaToast ? capaToast.hidden : null,
+    rol: capaToast ? capaToast.getAttribute("role") : "",
+    vivo: capaToast ? capaToast.getAttribute("aria-live") : "",
+    texto: capaToast ? capaToast.textContent : "",
+  };
   // soltar un fichero en las tres superficies del emulador: el enganche tiene que estar en los tres
   // canvas, el drop no puede dejar que el navegador se quede el fichero, y un apk soltado en
   // Pantalla tiene que verse (barra con el nombre, después el resultado) y quedar en el registro.
@@ -327,10 +398,92 @@ const conductor = `(async () => {
   r.cursorSur = getComputedStyle(document.getElementById("tirador-previa-sur")).cursor;
   r.canvasDeLaPrevia = document.querySelectorAll("canvas.previa-canvas").length;
 
-  // sin cabeceras del servidor, el SW debió aislar la página y el create tiene que funcionar
+  // sin cabeceras del servidor, el SW debió aislar la página y el create tiene que funcionar. Con
+  // APKC_WASM se crea la plantilla «Menú de opciones» para compilarla y probar su Toast sobre el
+  // teléfono; sin binario la prueba sigue siendo solo de DOM y se queda en «Hola mundo».
+  if (HAY_WASM) {
+    const plantilla = document.getElementById("plantilla");
+    if (plantilla) {
+      plantilla.value = "menu";
+      plantilla.dispatchEvent(new Event("change", { bubbles: true }));
+    }
+  }
   document.getElementById("crear-proyecto").click();
   await new Promise((ok) => setTimeout(ok, 1200));
   r.avisoCrear = document.getElementById("estado-crear").textContent;
+
+  // La plantilla real «Menú de opciones»: compilar en wasm, abrir ⋮ Menú, pulsar «Opciones» y exigir
+  // que «Menu pulsado» se vea como capa sobre el emulador, no solo en la consola. Se hace en las dos
+  // superficies porque las dos comparten el modelo y el resumen.
+  if (HAY_WASM) {
+    document.querySelector('.pestana-vista[data-vista="pestana"]').click();
+    document.getElementById("compilar-debug").click();
+    for (let i = 0; i < 240; i++) {
+      await new Promise((ok) => setTimeout(ok, 500));
+      const c = (document.getElementById("ultimo-codigo").textContent || "").trim();
+      if (c && c !== "—" && c !== "…") break;
+    }
+    r.codigoMenu = (document.getElementById("ultimo-codigo").textContent || "").trim();
+    r.salidaMenu = (document.getElementById("consola-pestana").textContent || "").slice(-800);
+    r.estadoPestana = (document.getElementById("estado-pestana").textContent || "").slice(-300);
+    await new Promise((ok) => setTimeout(ok, 1500));
+    // Pantalla → Emulador
+    document.querySelector('.pestana-vista[data-vista="vista"]').click();
+    document.getElementById("vista-modo-emulador").click();
+    await new Promise((ok) => setTimeout(ok, 900));
+    const canvasVista = document.getElementById("vista-previa");
+    r.canvasToastAntes = canvasVista ? [canvasVista.width, canvasVista.height] : null;
+    r.menuItems = await abrirMenuYEsperar("vista-menu-opciones", "vista-menu-lista");
+    const listaMenu = document.getElementById("vista-menu-lista");
+    if (listaMenu && listaMenu.children.length) {
+      listaMenu.children[0].click();
+      await new Promise((ok) => setTimeout(ok, 700));
+    }
+    const toast = document.getElementById("vista-toast");
+    r.toast = {
+      texto: toast ? toast.textContent : "",
+      oculto: toast ? toast.hidden : null,
+      rol: toast ? toast.getAttribute("role") : "",
+      vivo: toast ? toast.getAttribute("aria-live") : "",
+      posicion: toast ? getComputedStyle(toast).position : "",
+      puntero: toast ? getComputedStyle(toast).pointerEvents : "",
+      consola: (document.getElementById("vista-consola-lista").textContent || "").slice(-200),
+      estado: (document.getElementById("vista-previa-estado").textContent || "").slice(0, 200),
+    };
+    r.canvasToastDespues = canvasVista ? [canvasVista.width, canvasVista.height] : null;
+    // el emulador del panel dividido
+    document.querySelector('.pestana-vista[data-vista="pestana"]').click();
+    document.getElementById("previa-modo-render").click();
+    await new Promise((ok) => setTimeout(ok, 700));
+    const canvasPanel = document.getElementById("previa-lateral-canvas");
+    r.canvasPanelAntes = canvasPanel ? [canvasPanel.width, canvasPanel.height] : null;
+    r.menuItemsPanel = await abrirMenuYEsperar("previa-menu-opciones", "previa-menu-lista");
+    const listaPanel = document.getElementById("previa-menu-lista");
+    if (listaPanel && listaPanel.children.length) {
+      listaPanel.children[0].click();
+      await new Promise((ok) => setTimeout(ok, 700));
+    }
+    const toastPanel = document.getElementById("previa-toast");
+    r.toastPanel = {
+      texto: toastPanel ? toastPanel.textContent : "",
+      oculto: toastPanel ? toastPanel.hidden : null,
+    };
+    r.canvasPanelDespues = canvasPanel ? [canvasPanel.width, canvasPanel.height] : null;
+    // efímero: pasados unos segundos, las dos capas se retiran solas sin repintar el canvas
+    await new Promise((ok) => setTimeout(ok, 3200));
+    r.toastTarde = {
+      pantalla: (document.getElementById("vista-toast") || {}).hidden,
+      panel: (document.getElementById("previa-toast") || {}).hidden,
+    };
+    // y un repintado del MISMO modelo no lo resucita: cambiar de modo y volver no lo enseña otra vez
+    document.getElementById("previa-modo-vivo").click();
+    document.getElementById("previa-modo-render").click();
+    await new Promise((ok) => setTimeout(ok, 500));
+    r.toastTardeRepintado = {
+      pantalla: (document.getElementById("vista-toast") || {}).hidden,
+      panel: (document.getElementById("previa-toast") || {}).hidden,
+    };
+  }
   r.sinUndefined = !/undefined/.test(document.body.innerText);
 
   // el rastreo local, que es lo único que la página guarda
@@ -482,6 +635,11 @@ function comprueba(cond, msg) { if (!cond) { fallos++; console.log("  FALLO:", m
       /[Cc]ompila/.test(String(v.menu.estado)),
       "el menú de opciones del emulador no está montado o no pide compilar sin ejecución: " +
       JSON.stringify(v.menu));
+    comprueba(v.toastCapa && v.toastCapa.panel && v.toastCapa.vista &&
+      v.toastCapa.oculto === true && v.toastCapa.texto === "" &&
+      v.toastCapa.rol === "status" && v.toastCapa.vivo === "polite",
+      "la capa del Toast no está montada y oculta en las dos superficies: " +
+      JSON.stringify(v.toastCapa));
     // soltar un apk: las tres superficies lo aceptan, el de Pantalla llega a abrirApkSoltada y el
     // fichero roto se rechaza con nombre y motivo sin tocar OPFS
     const sl = v.soltar || {};
@@ -543,6 +701,38 @@ function comprueba(cond, msg) { if (!cond) { fallos++; console.log("  FALLO:", m
       (WASM ? creo : !/OPFS/.test(String(v.avisoCrear))),
       "sin cabeceras, el SW no recuperó el aislamiento ni pudo crear: " +
         JSON.stringify({ aislada: v.aislada, recarga: v.recarga, aviso: v.avisoCrear }));
+    // la plantilla Menú y su Toast sobre el teléfono, con el binario presente
+    if (WASM) {
+      comprueba(v.codigoMenu === "0",
+        "la plantilla Menú no compiló: " + JSON.stringify({ codigo: v.codigoMenu,
+          salida: String(v.salidaMenu).slice(-300) }));
+      comprueba(v.menuItems && v.menuItems.join(",") === "Opciones",
+        "la plantilla Menú no publicó «Opciones»: " + JSON.stringify(v.menuItems));
+      comprueba(v.toast && v.toast.texto === "Menu pulsado" && v.toast.oculto === false &&
+        v.toast.rol === "status" && v.toast.vivo === "polite" &&
+        v.toast.posicion === "absolute" && v.toast.puntero === "none",
+        "el Toast no se ve sobre el emulador de Pantalla o no es una capa: " + JSON.stringify(v.toast));
+      comprueba(/Menu pulsado/.test(String(v.toast && v.toast.consola)),
+        "la consola perdió el historial del Toast: " + JSON.stringify(v.toast));
+      comprueba(v.toastPanel && v.toastPanel.texto === "Menu pulsado" &&
+        v.toastPanel.oculto === false,
+        "el Toast no se ve sobre el emulador del panel: " + JSON.stringify(v.toastPanel));
+      comprueba(JSON.stringify(v.canvasToastAntes) === JSON.stringify(v.canvasToastDespues),
+        "el Toast cambió el tamaño del canvas de Pantalla: " +
+        JSON.stringify({ antes: v.canvasToastAntes, despues: v.canvasToastDespues }));
+      comprueba(JSON.stringify(v.canvasPanelAntes) === JSON.stringify(v.canvasPanelDespues),
+        "el Toast cambió el tamaño del canvas del panel: " +
+        JSON.stringify({ antes: v.canvasPanelAntes, despues: v.canvasPanelDespues }));
+      comprueba(v.toastTarde && v.toastTarde.pantalla === true && v.toastTarde.panel === true,
+        "el Toast no desaparece solo pasados unos segundos: " + JSON.stringify(v.toastTarde));
+      comprueba(v.toastTardeRepintado && v.toastTardeRepintado.pantalla === true &&
+        v.toastTardeRepintado.panel === true,
+        "un repintado del mismo modelo resucitó el Toast caducado: " +
+        JSON.stringify(v.toastTardeRepintado));
+      console.log("  toast:", JSON.stringify({ pantalla: v.toast, panel: v.toastPanel }).slice(0, 500));
+    } else {
+      console.log("  toast: sin APKC_WASM, se omite la compilación de la plantilla Menú");
+    }
     comprueba(v.sinUndefined, "quedó un 'undefined' visible en la página");
     comprueba(v.localStorage === "funciona", "localStorage en http: " + v.localStorage);
     comprueba(v.diagnosticoVisible && /herramienta-no-arranca/.test(String(v.diagnostico)),

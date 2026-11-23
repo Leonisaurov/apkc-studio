@@ -258,6 +258,9 @@ export function resumenEjecucion(modelo) {
     .filter((o) => o && typeof o === "object")
     .map((o) => ({ id: comoTexto(o.id), idRef: comoTexto(o.idRef) }))
     .filter((o) => o.id || o.idRef);
+  // el Toast es efímero: el intérprete publica el último en `toast` y deja todas sus líneas en
+  // `consola`. El panel lo enseña sobre el teléfono unos segundos; la consola conserva el historial.
+  const toast = comoTexto(ejecucion.toast);
   // el menú de opciones es un dato aparte del árbol: el intérprete publica lo que la app añadió con
   // `menu.add`, con su id `menu/N` y su título. `abierto` dice si el último `--menu` lo dejó
   // desplegado y `seleccionado`, qué ítem se pulsó. Sin `ejecucion.menu` no hay nada que enseñar.
@@ -284,6 +287,7 @@ export function resumenEjecucion(modelo) {
     pulsaciones,
     oyentes,
     menu,
+    toast,
     avisos,
     error: comoTexto(ejecucion.error),
   };
@@ -463,6 +467,7 @@ const SUPERFICIES = [
     pulsos: { caja: "previa-oyentes", cuenta: "previa-pulsos-cuenta", nota: "previa-pulsos-nota" },
     controles: "previa-emulador-controles",
     menu: { control: "previa-menu-opciones", lista: "previa-menu-lista" },
+    toast: "previa-toast",
   },
   {
     id: "vista",
@@ -476,6 +481,7 @@ const SUPERFICIES = [
     pulsos: { caja: "vista-oyentes", cuenta: "vista-pulsos-cuenta", nota: "vista-pulsos-nota" },
     controles: "vista-emulador-controles",
     menu: { control: "vista-menu-opciones", lista: "vista-menu-lista" },
+    toast: "vista-toast",
   },
 ];
 
@@ -597,6 +603,15 @@ export function crearPreviaPanel({ hospedador, proyecto, estadoPestana, editor, 
   // lo que ya está pintado en el desplegable, para no reconstruirlo en cada repintado y no robar el
   // foco al botón que se acaba de pulsar
   let claveMenu = "";
+  // El último Toast que se enseña sobre el teléfono: su firma (para no reabrirlo en cada repintado)
+  // y el temporizador que lo retira. El historial completo sigue en la consola de la app.
+  let toastFirma = "";
+  let toastTemporizador = 0;
+  // Identidad de la ejecución que produjo el Toast: un WeakMap da un número a cada objeto
+  // `ejecucion`. Un repintado o un cambio de tamaño conservan la misma referencia (el modelo
+  // escalado comparte `ejecucion`), y un build nuevo trae otra, así que su Toast vuelve a salir.
+  const ejecucionesDeToast = new WeakMap();
+  let ejecucionToast = 0;
   // el modelo que produjo el último clic, por identidad. Un repintado del MISMO modelo —entrar en
   // Pantalla, cambiar el tamaño, mover la consola— llega con `pulsando` ya en false y antes se
   // confundía con un build nuevo: borraba `pulsos` y el primer toque volvía a «Pulsos: 1».
@@ -1501,6 +1516,77 @@ export function crearPreviaPanel({ hospedador, proyecto, estadoPestana, editor, 
     }
   }
 
+  // El Toast del aparato, como capa sobre el marco: `Toast.makeText(...).show()` no deja una vista
+  // en el layout, así que el intérprete lo publica en `ejecucion.toast` y aquí se pinta unos
+  // segundos sobre el teléfono. No cambia el tamaño del canvas ni intercepta clics.
+  function montarToasts() {
+    for (const superficie of SUPERFICIES) {
+      const canvas = el(superficie.canvasRender);
+      if (!canvas || el(superficie.toast)) continue;
+      const capa = document.createElement("div");
+      capa.id = superficie.toast;
+      capa.className = "previa-toast";
+      capa.setAttribute("role", "status");
+      capa.setAttribute("aria-live", "polite");
+      capa.setAttribute("aria-atomic", "true");
+      capa.hidden = true;
+      (canvas.parentElement || canvas).appendChild(capa);
+    }
+  }
+
+  // La firma distingue una ejecución nueva de un repintado del mismo modelo: si el usuario redimensiona
+  // o entra en Pantalla, el Toast ya visible no vuelve a empezar su cuenta atrás; si vuelve a pulsar el
+  // ítem o recompila, la identidad de `ejecucion` cambia y el aviso se muestra otra vez.
+  function firmaDeToast(modelo, resumen) {
+    if (!resumen || !resumen.toast) return "";
+    const ejecucion = modelo && typeof modelo === "object" ? modelo.ejecucion : null;
+    let id = 0;
+    if (ejecucion && typeof ejecucion === "object") {
+      id = ejecucionesDeToast.get(ejecucion) || 0;
+      if (!id) {
+        id = ++ejecucionToast;
+        ejecucionesDeToast.set(ejecucion, id);
+      }
+    }
+    return JSON.stringify([id, resumen.toast, resumen.pulsaciones, resumen.interacciones,
+      resumen.consola.length, resumen.error]);
+  }
+
+  function pintarToast(modelo) {
+    const resumen = apagado ? null : resumenEjecucion(modelo);
+    const firma = firmaDeToast(modelo, resumen);
+    if (!firma) {
+      // sin Toast en el modelo: se oculta y se olvida la firma, para que una ejecución posterior con
+      // el mismo texto pueda volver a enseñarlo
+      toastFirma = "";
+      ocultarToast();
+      return;
+    }
+    if (firma === toastFirma) return;
+    toastFirma = firma;
+    for (const superficie of SUPERFICIES) {
+      const capa = el(superficie.toast);
+      if (!capa) continue;
+      capa.textContent = resumen.toast;
+      capa.hidden = false;
+    }
+    clearTimeout(toastTemporizador);
+    toastTemporizador = setTimeout(() => { ocultarToast(); }, 3000);
+  }
+
+  function ocultarToast() {
+    if (toastTemporizador) clearTimeout(toastTemporizador);
+    toastTemporizador = 0;
+    // `toastFirma` NO se borra aquí: un repintado del mismo modelo después de caducar no puede
+    // resucitar el aviso; solo una ejecución con otra firma (u otro modelo sin Toast) lo cambia.
+    for (const superficie of SUPERFICIES) {
+      const capa = el(superficie.toast);
+      if (!capa) continue;
+      capa.hidden = true;
+      capa.textContent = "";
+    }
+  }
+
   // Pinta el desplegable con lo que el modelo publicó. Solo se reconstruye cuando cambian el estado
   // o los ítems: un repintado del mismo modelo no puede robar el foco al botón recién pulsado.
   function pintarMenu(modelo) {
@@ -2378,6 +2464,9 @@ export function crearPreviaPanel({ hospedador, proyecto, estadoPestana, editor, 
     // el menú de opciones sale del modelo, no del árbol: sin ejecución se cierra en vez de quedarse
     // con los ítems de una pantalla anterior
     pintarMenu(modelo);
+    // el Toast es una capa efímera: se enseña sobre el teléfono y se retira solo; la consola conserva
+    // todas sus líneas
+    pintarToast(modelo);
     return primero;
   }
 
@@ -4119,6 +4208,7 @@ export function crearPreviaPanel({ hospedador, proyecto, estadoPestana, editor, 
     conectarEditable();
     conectarControles();
     montarMenuDeOpciones();
+    montarToasts();
     // el desplegable del menú se cierra al tocar fuera o con Escape, como cualquier popup; no toca
     // OPFS ni el documento: es estado de la interfaz
     document.addEventListener("pointerdown", (e) => {

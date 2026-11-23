@@ -1510,6 +1510,28 @@ body.arrastrando-paleta { cursor: grabbing; }
 }
 .previa-menu-item:hover { background: var(--boton-hover); border-color: var(--acento); }
 .previa-menu-item:focus-visible { outline: 2px solid var(--acento); outline-offset: -1px; }
+/* El Toast del aparato: una capa efímera sobre el marco del teléfono. No cambia el tamaño del
+   canvas, no intercepta clics y no escribe nada; su texto sale de `ejecucion.toast`. */
+.previa-toast {
+  position: absolute;
+  left: 50%;
+  bottom: 12%;
+  z-index: 7;
+  max-width: 82%;
+  padding: 6px 14px;
+  transform: translateX(-50%);
+  border-radius: 999px;
+  background: rgba(24, 24, 24, 0.88);
+  color: #fff;
+  font: var(--ed-fuente);
+  font-size: 12px;
+  line-height: 1.35;
+  text-align: center;
+  overflow-wrap: anywhere;
+  box-shadow: 0 4px 14px rgba(0, 0, 0, 0.35);
+  pointer-events: none;
+}
+.previa-toast[hidden] { display: none; }
 .previa-consola-linea {
   display: flex;
   gap: 6px;
