@@ -225,6 +225,1337 @@ class MainActivity : Activity() {
   gitignore: "build/\n",
 };
 
+// ---------------------------------------------------------------- apps de ejemplo
+// Los cinco proyectos de banco/apps-ejemplo/*, copiados aquí para que se puedan crear desde el
+// selector. No son variantes de la plantilla base: cada uno es una app completa, con su actividad,
+// sus layouts (principal.xml e item.xml) y sus textos. El código generado tiene que ser ASCII puro
+// (lo exige prueba.js), así que los comentarios van sin tilde, los separadores de las cadenas usan
+// un guion y los acentos de res/values van en referencia numérica. Lo que la vista previa no
+// modela (Bluetooth, SharedPreferences, Handler) se genera igual: es una app real, no un dibujo.
+const APPS_EJEMPLO = {
+  lienzo: {
+    java: {
+      "MainActivity.java": `package {{pkgname}};
+
+import android.app.Activity;
+import android.content.Context;
+import android.os.Bundle;
+import android.view.View;
+
+// La pantalla monta la vista propia en codigo, sin XML. Tocar la superficie avanza el fotograma:
+// es la sonda de fidelidad del emulador (Canvas, Paint, invalidate y el ciclo de dibujo).
+public class MainActivity extends Activity implements View.OnClickListener {
+    private Lienzo lienzo;
+    private int toques;
+
+    @Override
+    public void onCreate(Bundle estado) {
+        super.onCreate(estado);
+        Context contexto = this;
+        lienzo = new Lienzo(contexto);
+        lienzo.setOnClickListener(this);
+        setContentView(lienzo);
+    }
+
+    @Override
+    public void onClick(View vista) {
+        toques = toques + 1;
+        lienzo.setToques(toques);
+        lienzo.avanzar();
+    }
+}
+`,
+      "Lienzo.java": `package {{pkgname}};
+
+import android.content.Context;
+import android.graphics.Canvas;
+import android.graphics.Color;
+import android.graphics.Paint;
+import android.view.View;
+
+// Vista propia: todo el dibujo pasa por Canvas y Paint dentro de onDraw, sin recursos de imagen.
+// Es la sonda de fidelidad del emulador: circulos, lineas y texto en coordenadas flotantes.
+// Cada figura va en su propio metodo: el emisor reparte registros por metodo y una onDraw con
+// demasiados locales a la vez se queda sin sitio para la forma corta de las instrucciones.
+public class Lienzo extends View {
+    private Paint pincel;
+    private int fotograma;
+    private int toques;
+    private float campoX;
+    private float campoY;
+    private float pulso;
+
+    public Lienzo(Context contexto) {
+        super(contexto);
+        pincel = new Paint();
+        pincel.setAntiAlias(true);
+        fotograma = 0;
+        toques = 0;
+    }
+
+    public void setToques(int cuantos) {
+        toques = cuantos;
+    }
+
+    public void avanzar() {
+        fotograma = fotograma + 1;
+        invalidate();
+    }
+
+    private void circulos(Canvas lienzo, float centroX, float centroY, float pulso) {
+        pincel.setStyle(Paint.Style.STROKE);
+        pincel.setStrokeWidth(4.0f);
+        pincel.setColor(Color.rgb(70, 190, 255));
+        for (int i = 0; i < 7; i++) {
+            float radio = i * 22.0f;
+            radio = radio + 30.0f;
+            radio = radio + pulso;
+            lienzo.drawCircle(centroX, centroY, radio, pincel);
+        }
+    }
+
+    // Una linea por metodo: cada expresion deja su registro reservado para todo el metodo y seis
+    // lineas en uno solo pasan de los quince que caben en la forma corta de aload/fload.
+    private void rayo1(Canvas l, float cx, float cy) {
+        l.drawLine(cx - 108.0f, cy - 180.0f, cx - 180.0f, cy + 180.0f, pincel);
+    }
+
+    private void rayo2(Canvas l, float cx, float cy) {
+        l.drawLine(cx - 72.0f, cy - 180.0f, cx - 108.0f, cy + 180.0f, pincel);
+    }
+
+    private void rayo3(Canvas l, float cx, float cy) {
+        l.drawLine(cx - 36.0f, cy - 180.0f, cx - 36.0f, cy + 180.0f, pincel);
+    }
+
+    private void rayo4(Canvas l, float cx, float cy) {
+        l.drawLine(cx, cy - 180.0f, cx, cy + 180.0f, pincel);
+    }
+
+    private void rayo5(Canvas l, float cx, float cy) {
+        l.drawLine(cx + 36.0f, cy - 180.0f, cx + 36.0f, cy + 180.0f, pincel);
+    }
+
+    private void rayo6(Canvas l, float cx, float cy) {
+        l.drawLine(cx + 72.0f, cy - 180.0f, cx + 108.0f, cy + 180.0f, pincel);
+    }
+
+    private void rayos(Canvas l, float cx, float cy) {
+        pincel.setColor(Color.rgb(255, 180, 60));
+        pincel.setStrokeWidth(2.0f);
+        rayo1(l, cx, cy);
+        rayo2(l, cx, cy);
+        rayo3(l, cx, cy);
+        rayo4(l, cx, cy);
+        rayo5(l, cx, cy);
+        rayo6(l, cx, cy);
+    }
+
+    private void textos(Canvas lienzo) {
+        pincel.setStyle(Paint.Style.FILL);
+        pincel.setColor(Color.rgb(240, 240, 240));
+        pincel.setTextSize(28.0f);
+        lienzo.drawText("fotograma " + fotograma, 24.0f, 48.0f, pincel);
+        lienzo.drawText("toques " + toques, 24.0f, 84.0f, pincel);
+    }
+
+    private void actualizarGeometria() {
+        int ancho = getWidth();
+        int alto = getHeight();
+        campoX = ancho / 2.0f;
+        campoY = alto / 2.0f;
+        int resto = fotograma % 8;
+        pulso = resto * 3.0f;
+    }
+
+    private void pintar(Canvas lienzo) {
+        lienzo.drawColor(Color.rgb(18, 22, 30));
+        circulos(lienzo, campoX, campoY, pulso);
+        rayos(lienzo, campoX, campoY);
+        pincel.setStyle(Paint.Style.FILL);
+        pincel.setColor(Color.rgb(120, 240, 150));
+        lienzo.drawCircle(campoX, campoY, 26.0f, pincel);
+        textos(lienzo);
+    }
+
+    @Override
+    protected void onDraw(Canvas lienzo) {
+        super.onDraw(lienzo);
+        actualizarGeometria();
+        pintar(lienzo);
+    }
+}
+`,
+    },
+    layouts: {},
+    strings: `<resources>
+    <string name="app_name">{{appname}}</string>
+    <string name="siguiente">Siguiente fotograma</string>
+    <string name="toques">Toques: </string>
+</resources>
+`,
+  },
+  notas: {
+    java: {
+      "MainActivity.java": `package {{pkgname}};
+
+import android.app.Activity;
+import android.content.SharedPreferences;
+import android.os.Bundle;
+import android.view.View;
+import android.widget.ArrayAdapter;
+import android.widget.ListView;
+import android.widget.TextView;
+
+// Bloc de notas: crear, editar y borrar con SharedPreferences. Las notas viven en un arreglo fijo y
+// un contador, y se guardan en una clave por nota (nota0, nota1...) mas cuantas; al borrar se
+// reescriben todas las claves para que no queden huecos.
+// El adaptador se vuelve a construir con una copia del arreglo en cada cambio: es la forma que
+// apkc preview pinta (el ArrayAdapter del framework solo ensena los elementos que recibe en su
+// constructor) y en el aparato es lo mismo que hace notifyDataSetChanged, sin cache que invalidar.
+// La seleccion se mueve con dos botones y no con clics en la lista, para que la secuencia de la
+// sonda sea la misma en el emulador y en el aparato.
+public class MainActivity extends Activity implements View.OnClickListener {
+    private static final int MAXIMO = 64;
+
+    private TextView editor;
+    private TextView seleccion;
+    private ListView lista;
+    private ArrayAdapter adaptador;
+    private SharedPreferences prefs;
+    private String[] notas;
+    private int cuantas;
+    private int elegida;
+
+    @Override
+    public void onCreate(Bundle guardado) {
+        super.onCreate(guardado);
+        setContentView(R.layout.principal);
+        editor = (TextView) findViewById(R.id.editor);
+        seleccion = (TextView) findViewById(R.id.seleccion);
+        lista = (ListView) findViewById(R.id.lista);
+        prefs = getSharedPreferences("notas", 0);
+        notas = new String[MAXIMO];
+        cuantas = 0;
+        elegida = -1;
+        cargar();
+        redibujar();
+        findViewById(R.id.anterior).setOnClickListener(this);
+        findViewById(R.id.siguiente).setOnClickListener(this);
+        findViewById(R.id.nueva).setOnClickListener(this);
+        findViewById(R.id.guardar).setOnClickListener(this);
+        findViewById(R.id.borrar).setOnClickListener(this);
+        pintarSeleccion();
+    }
+
+    private void cargar() {
+        int guardadas = prefs.getInt("cuantas", 0);
+        for (int i = 0; i < guardadas; i++) {
+            if (cuantas >= MAXIMO) {
+                return;
+            }
+            String clave = "nota" + i;
+            String nota = prefs.getString(clave, "");
+            notas[cuantas] = nota;
+            cuantas = cuantas + 1;
+        }
+    }
+
+    private void redibujar() {
+        String[] copia = new String[cuantas];
+        for (int i = 0; i < cuantas; i++) {
+            copia[i] = notas[i];
+        }
+        adaptador = new ArrayAdapter(this, R.layout.item, copia);
+        lista.setAdapter(adaptador);
+    }
+
+    private void persistir() {
+        for (int i = 0; i < cuantas; i++) {
+            String clave = "nota" + i;
+            prefs.edit().putString(clave, notas[i]).apply();
+        }
+        prefs.edit().putInt("cuantas", cuantas).apply();
+    }
+
+    private void pintarSeleccion() {
+        if (elegida < 0) {
+            seleccion.setText("Nota nueva - hay " + cuantas);
+            return;
+        }
+        String texto = "Nota " + (elegida + 1) + " de " + cuantas;
+        seleccion.setText(texto);
+    }
+
+    private void mostrarElegida() {
+        if (elegida < 0) {
+            editor.setText("");
+            return;
+        }
+        editor.setText(notas[elegida]);
+    }
+
+    private void mover(int paso) {
+        if (cuantas == 0) {
+            return;
+        }
+        int destino = elegida + paso;
+        if (destino < 0) {
+            destino = cuantas - 1;
+        }
+        if (destino >= cuantas) {
+            destino = -1;
+        }
+        elegida = destino;
+        mostrarElegida();
+        pintarSeleccion();
+    }
+
+    private void nueva() {
+        elegida = -1;
+        editor.setText("");
+        pintarSeleccion();
+    }
+
+    // getEditableText() y no getText(): el segundo tiene dos sobrecargas en EditText y el
+    // emisor no elige la mas especifica de este subconjunto (limitacion medida).
+    private void guardar() {
+        String texto = editor.getEditableText().toString();
+        if (texto.length() == 0) {
+            return;
+        }
+        if (elegida < 0) {
+            if (cuantas >= MAXIMO) {
+                return;
+            }
+            notas[cuantas] = texto;
+            cuantas = cuantas + 1;
+            elegida = cuantas - 1;
+        } else {
+            notas[elegida] = texto;
+        }
+        persistir();
+        redibujar();
+        pintarSeleccion();
+    }
+
+    private void borrar() {
+        if (cuantas == 0) {
+            return;
+        }
+        int cual = elegida;
+        if (cual < 0) {
+            cual = cuantas - 1;
+        }
+        for (int i = cual; i < cuantas - 1; i++) {
+            notas[i] = notas[i + 1];
+        }
+        cuantas = cuantas - 1;
+        notas[cuantas] = null;
+        persistir();
+        // la clave que quedo detras del contador se borra: no basta con no leerla, porque un
+        // cuantas restaurado desde otra sesion la resucitaria
+        String sobrante = "nota" + cuantas;
+        prefs.edit().remove(sobrante).apply();
+        redibujar();
+        elegida = cual;
+        if (elegida >= cuantas) {
+            elegida = cuantas - 1;
+        }
+        mostrarElegida();
+        pintarSeleccion();
+    }
+
+    @Override
+    public void onClick(View vista) {
+        int cual = vista.getId();
+        if (cual == R.id.anterior) {
+            mover(-1);
+        } else if (cual == R.id.siguiente) {
+            mover(1);
+        } else if (cual == R.id.nueva) {
+            nueva();
+        } else if (cual == R.id.guardar) {
+            guardar();
+        } else {
+            borrar();
+        }
+    }
+}
+`,
+    },
+    layouts: {
+      "principal.xml": `<?xml version="1.0" encoding="utf-8"?>
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:orientation="vertical">
+
+    <TextView
+        android:id="@+id/titulo"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:text="@string/titulo" />
+
+    <TextView
+        android:id="@+id/seleccion"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:text="@string/inicial" />
+
+    <EditText
+        android:id="@+id/editor"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:hint="@string/pista" />
+
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:orientation="horizontal">
+
+        <Button
+            android:id="@+id/anterior"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="@string/anterior" />
+
+        <Button
+            android:id="@+id/siguiente"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="@string/siguiente" />
+
+        <Button
+            android:id="@+id/nueva"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="@string/nueva" />
+
+        <Button
+            android:id="@+id/guardar"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="@string/guardar" />
+
+        <Button
+            android:id="@+id/borrar"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="@string/borrar" />
+    </LinearLayout>
+
+    <ListView
+        android:id="@+id/lista"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content" />
+</LinearLayout>
+`,
+      "item.xml": `<?xml version="1.0" encoding="utf-8"?>
+<TextView xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent"
+    android:layout_height="wrap_content" />
+`,
+    },
+    strings: `<resources>
+    <string name="app_name">{{appname}}</string>
+    <string name="titulo">Bloc de notas</string>
+    <string name="pista">Escribe una nota</string>
+    <string name="nueva">Nueva</string>
+    <string name="inicial">Nota nueva</string>
+    <string name="anterior">Anterior</string>
+    <string name="siguiente">Siguiente</string>
+    <string name="guardar">Guardar</string>
+    <string name="borrar">Borrar</string>
+</resources>
+`,
+  },
+  chatbt: {
+    java: {
+      "MainActivity.java": `package {{pkgname}};
+
+import android.app.Activity;
+import android.bluetooth.BluetoothAdapter;
+import android.bluetooth.BluetoothDevice;
+import android.content.pm.PackageManager;
+import android.os.Bundle;
+import android.view.View;
+import android.widget.ArrayAdapter;
+import android.widget.ListView;
+import android.widget.TextView;
+
+import java.util.Iterator;
+import java.util.Set;
+
+// Chat Bluetooth: la lista de mensajes, el envio local y el estado del adaptador. La conexion real
+// por BluetoothSocket queda como frontera: aqui no se abre ningun socket ni se toca la red; el
+// mensaje entra en la lista y un eco local confirma el recorrido del texto.
+// En Android 12+ el listado y el descubrimiento necesitan BLUETOOTH_CONNECT/SCAN en tiempo de
+// ejecucion, asi que la app los pide al arrancar y, si no estan, lo dice en vez de caerse.
+// El adaptador de la lista se reconstruye con una copia del arreglo en cada cambio: es la forma que
+// apkc preview pinta y en el aparato equivale a notifyDataSetChanged sin cache que invalidar.
+public class MainActivity extends Activity implements View.OnClickListener {
+    private static final int MAXIMO = 128;
+    private static final int SIN_ADAPTADOR = 0;
+    private static final int APAGADO = 1;
+    private static final int LISTO = 2;
+
+    private TextView estado;
+    private TextView entrada;
+    private ListView lista;
+    private ArrayAdapter adaptador;
+    private BluetoothAdapter adaptadorBt;
+    private String[] mensajes;
+    private int cuantos;
+    private int marcha;
+    private int vinculos;
+
+    @Override
+    public void onCreate(Bundle guardado) {
+        super.onCreate(guardado);
+        setContentView(R.layout.principal);
+        estado = (TextView) findViewById(R.id.estado);
+        entrada = (TextView) findViewById(R.id.entrada);
+        lista = (ListView) findViewById(R.id.mensajes);
+        mensajes = new String[MAXIMO];
+        cuantos = 0;
+        marcha = SIN_ADAPTADOR;
+        vinculos = 0;
+        redibujar();
+        findViewById(R.id.enviar).setOnClickListener(this);
+        findViewById(R.id.buscar).setOnClickListener(this);
+        findViewById(R.id.limpiar).setOnClickListener(this);
+        pedirPermisos();
+    }
+
+    private void redibujar() {
+        String[] copia = new String[cuantos];
+        for (int i = 0; i < cuantos; i++) {
+            copia[i] = mensajes[i];
+        }
+        adaptador = new ArrayAdapter(this, R.layout.item, copia);
+        lista.setAdapter(adaptador);
+        pintarEstado();
+    }
+
+    // El estado del adaptador es texto y no solo un color: es lo que comparan los oraculos del
+    // emulador y del aparato, que no ven nada mas de una conexion que no se abre.
+    private void pintarEstado() {
+        String texto = "Bluetooth listo";
+        if (marcha == SIN_ADAPTADOR) {
+            texto = "Este aparato no tiene Bluetooth";
+        } else if (marcha == APAGADO) {
+            texto = "Bluetooth apagado";
+        }
+        estado.setText(texto + " - " + vinculos + " vinculos - " + cuantos + " mensajes");
+    }
+
+    private void pedirPermisos() {
+        int permiso = checkSelfPermission("android.permission.BLUETOOTH_CONNECT");
+        if (permiso == PackageManager.PERMISSION_GRANTED) {
+            preparar();
+            return;
+        }
+        String[] cuales = new String[] { "android.permission.BLUETOOTH_CONNECT", "android.permission.BLUETOOTH_SCAN" };
+        requestPermissions(cuales, 7);
+    }
+
+    @Override
+    public void onRequestPermissionsResult(int codigo, String[] permisos, int[] resultados) {
+        super.onRequestPermissionsResult(codigo, permisos, resultados);
+        if (resultados.length > 0) {
+            if (resultados[0] == PackageManager.PERMISSION_GRANTED) {
+                preparar();
+                return;
+            }
+        }
+        pintarEstado();
+    }
+
+    private void preparar() {
+        adaptadorBt = BluetoothAdapter.getDefaultAdapter();
+        if (adaptadorBt == null) {
+            marcha = SIN_ADAPTADOR;
+            pintarEstado();
+            return;
+        }
+        boolean encendido = adaptadorBt.isEnabled();
+        if (encendido == false) {
+            marcha = APAGADO;
+            pintarEstado();
+            return;
+        }
+        marcha = LISTO;
+        vinculos = 0;
+        Set enlazados = adaptadorBt.getBondedDevices();
+        if (enlazados != null) {
+            vinculos = enlazados.size();
+        }
+        pintarEstado();
+    }
+
+    // Un vinculo por linea, con nombre y direccion; el nombre puede faltar y entonces se dice.
+    private void listarVinculos() {
+        if (marcha != LISTO) {
+            preparar();
+            return;
+        }
+        Set enlazados = adaptadorBt.getBondedDevices();
+        if (enlazados == null) {
+            pintarEstado();
+            return;
+        }
+        Iterator it = enlazados.iterator();
+        boolean hay = it.hasNext();
+        while (hay == true) {
+            BluetoothDevice equipo = (BluetoothDevice) it.next();
+            String nombre = equipo.getName();
+            String linea = nombre + " " + equipo.getAddress();
+            anotar(linea);
+            hay = it.hasNext();
+        }
+        pintarEstado();
+    }
+
+    // El descubrimiento se lanza, pero sus resultados no se recogen: registrar un
+    // BroadcastReceiver exigiria una clase anonima que extiende una clase (no medida) o asignar una
+    // subclase a un campo del supertipo (el emisor lo rechaza por nombre). Frontera documentada.
+    private void descubrir() {
+        if (marcha != LISTO) {
+            return;
+        }
+        adaptadorBt.startDiscovery();
+        estado.setText(R.string.buscando);
+    }
+
+    private void anotar(String linea) {
+        if (cuantos >= MAXIMO) {
+            return;
+        }
+        mensajes[cuantos] = linea;
+        cuantos = cuantos + 1;
+    }
+
+    // La concatenacion se hace en un local y no en el argumento: el emisor no estima el tipo de una
+    // expresion usada como argumento sin emitirla antes (limitacion medida con Evento.getX()).
+    private void anotarDe(String prefijo, String texto) {
+        String linea = prefijo + texto;
+        anotar(linea);
+    }
+
+    // Envio local: el texto entra como yo y el eco prueba que el mensaje paso por la lista. No hay
+    // socket, asi que el eco lo escribe la propia app y se dice en la linea.
+    private void enviar() {
+        String texto = entrada.getEditableText().toString();
+        if (texto.length() == 0) {
+            return;
+        }
+        anotarDe("yo: ", texto);
+        String eco = texto + " (sin socket)";
+        anotarDe("eco: ", eco);
+        entrada.setText("");
+        redibujar();
+    }
+
+    private void limpiar() {
+        cuantos = 0;
+        redibujar();
+    }
+
+    @Override
+    public void onClick(View vista) {
+        int cual = vista.getId();
+        if (cual == R.id.enviar) {
+            enviar();
+        } else if (cual == R.id.limpiar) {
+            limpiar();
+        } else {
+            listarVinculos();
+            descubrir();
+        }
+    }
+}
+`,
+    },
+    layouts: {
+      "principal.xml": `<?xml version="1.0" encoding="utf-8"?>
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:orientation="vertical">
+
+    <TextView
+        android:id="@+id/estado"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content" />
+
+    <EditText
+        android:id="@+id/entrada"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:hint="@string/pista" />
+
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:orientation="horizontal">
+
+        <Button
+            android:id="@+id/enviar"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="@string/enviar" />
+
+        <Button
+            android:id="@+id/buscar"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="@string/buscar" />
+
+        <Button
+            android:id="@+id/limpiar"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="@string/limpiar" />
+    </LinearLayout>
+
+    <ListView
+        android:id="@+id/mensajes"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content" />
+</LinearLayout>
+`,
+      "item.xml": `<?xml version="1.0" encoding="utf-8"?>
+<TextView xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent"
+    android:layout_height="wrap_content" />
+`,
+    },
+    strings: `<resources>
+    <string name="app_name">{{appname}}</string>
+    <string name="pista">Mensaje para el equipo</string>
+    <string name="enviar">Enviar</string>
+    <string name="buscar">Buscar equipos</string>
+    <string name="limpiar">Limpiar</string>
+    <string name="sin_bt">Este aparato no tiene Bluetooth &#183; 0 mensajes</string>
+    <string name="apagado">Bluetooth apagado &#183; 0 mensajes</string>
+    <string name="listo">Bluetooth listo &#183; 0 v&#237;nculos &#183; 0 mensajes</string>
+    <string name="buscando">Buscando equipos &#183; 0 mensajes</string>
+    <string name="sin_permiso">Falta el permiso de Bluetooth &#183; 0 mensajes</string>
+</resources>
+`,
+    permisos: `    <uses-permission android:name="android.permission.BLUETOOTH" android:maxSdkVersion="30" />
+    <uses-permission android:name="android.permission.BLUETOOTH_ADMIN" android:maxSdkVersion="30" />
+    <uses-permission android:name="android.permission.BLUETOOTH_CONNECT" />
+    <uses-permission android:name="android.permission.BLUETOOTH_SCAN" />
+    <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION" />
+`,
+  },
+  tareas: {
+    java: {
+      "MainActivity.java": `package {{pkgname}};
+
+import android.app.Activity;
+import android.content.SharedPreferences;
+import android.os.Bundle;
+import android.view.View;
+import android.widget.ArrayAdapter;
+import android.widget.ListView;
+import android.widget.TextView;
+
+// Lista de tareas con categoria, estado y filtro. Tres arreglos paralelos (texto, categoria y hecha)
+// mas un contador, persistidos en SharedPreferences con una clave por campo y tarea.
+// El adaptador se reconstruye con la copia ya filtrada cada vez que algo cambia: es la forma que
+// apkc preview pinta (el ArrayAdapter del framework ensena los elementos que recibe en el
+// constructor) y en el aparato equivale a notifyDataSetChanged sin cache que invalidar.
+public class MainActivity extends Activity implements View.OnClickListener {
+    private static final int MAXIMO = 64;
+
+    private TextView nueva;
+    private TextView etiqueta;
+    private ListView lista;
+    private ArrayAdapter adaptador;
+    private SharedPreferences prefs;
+    private String[] textos;
+    private String[] categorias;
+    private String[] hechas;
+    private int cuantas;
+    private int filtro;
+
+    @Override
+    public void onCreate(Bundle guardado) {
+        super.onCreate(guardado);
+        setContentView(R.layout.principal);
+        nueva = (TextView) findViewById(R.id.nueva);
+        etiqueta = (TextView) findViewById(R.id.categoria);
+        lista = (ListView) findViewById(R.id.lista);
+        prefs = getSharedPreferences("tareas", 0);
+        textos = new String[MAXIMO];
+        categorias = new String[MAXIMO];
+        hechas = new String[MAXIMO];
+        cuantas = 0;
+        filtro = 0;
+        cargar();
+        findViewById(R.id.casa).setOnClickListener(this);
+        findViewById(R.id.trabajo).setOnClickListener(this);
+        findViewById(R.id.estudio).setOnClickListener(this);
+        findViewById(R.id.agregar).setOnClickListener(this);
+        findViewById(R.id.completar).setOnClickListener(this);
+        findViewById(R.id.filtrar).setOnClickListener(this);
+        redibujar();
+    }
+
+    private void cargar() {
+        int guardadas = prefs.getInt("cuantas", 0);
+        for (int i = 0; i < guardadas; i++) {
+            if (cuantas >= MAXIMO) {
+                return;
+            }
+            String clave = "texto" + i;
+            textos[cuantas] = prefs.getString(clave, "");
+            clave = "categoria" + i;
+            categorias[cuantas] = prefs.getString(clave, "Casa");
+            clave = "hecha" + i;
+            hechas[cuantas] = prefs.getString(clave, "no");
+            cuantas = cuantas + 1;
+        }
+    }
+
+    private void guardar(int indice) {
+        String clave = "texto" + indice;
+        prefs.edit().putString(clave, textos[indice]).apply();
+        clave = "categoria" + indice;
+        prefs.edit().putString(clave, categorias[indice]).apply();
+        clave = "hecha" + indice;
+        prefs.edit().putString(clave, hechas[indice]).apply();
+        prefs.edit().putInt("cuantas", cuantas).apply();
+    }
+
+    private String nombreFiltro() {
+        if (filtro == 1) {
+            return "Casa";
+        }
+        if (filtro == 2) {
+            return "Trabajo";
+        }
+        if (filtro == 3) {
+            return "Estudio";
+        }
+        return "Todas";
+    }
+
+    private boolean visible(int i) {
+        if (filtro == 0) {
+            return true;
+        }
+        return categorias[i].equals(nombreFiltro());
+    }
+
+    private String componer(int i) {
+        String marca = "[ ] ";
+        boolean lista = hechas[i].equals("si");
+        if (lista == true) {
+            marca = "[x] ";
+        }
+        return marca + textos[i] + " (" + categorias[i] + ")";
+    }
+
+    private int contarVisibles() {
+        int total = 0;
+        for (int i = 0; i < cuantas; i++) {
+            boolean dentro = visible(i);
+            if (dentro == true) {
+                total = total + 1;
+            }
+        }
+        return total;
+    }
+
+    private int contarPendientes() {
+        int total = 0;
+        for (int i = 0; i < cuantas; i++) {
+            boolean dentro = visible(i);
+            if (dentro == true) {
+                boolean pendiente = hechas[i].equals("no");
+                if (pendiente == true) {
+                    total = total + 1;
+                }
+            }
+        }
+        return total;
+    }
+
+    private String[] copiaVisible() {
+        int n = contarVisibles();
+        String[] copia = new String[n];
+        int siguiente = 0;
+        for (int i = 0; i < cuantas; i++) {
+            boolean dentro = visible(i);
+            if (dentro == true) {
+                copia[siguiente] = componer(i);
+                siguiente = siguiente + 1;
+            }
+        }
+        return copia;
+    }
+
+    private void pintarLista() {
+        String[] copia = copiaVisible();
+        adaptador = new ArrayAdapter(this, R.layout.item, copia);
+        lista.setAdapter(adaptador);
+    }
+
+    private void redibujar() {
+        pintarLista();
+        int visibles = contarVisibles();
+        int pendientes = contarPendientes();
+        String texto = "Filtro: " + nombreFiltro() + " - " + visibles + " - pendientes " + pendientes;
+        etiqueta.setText(texto);
+    }
+
+    // El texto de la tarea nueva y su categoria salen de dos campos: el de al lado del teclado y el
+    // que se elige con los tres botones. Al agregar se queda seleccionada la misma categoria.
+    private void agregar() {
+        String texto = nueva.getEditableText().toString();
+        if (texto.length() == 0) {
+            return;
+        }
+        if (cuantas >= MAXIMO) {
+            return;
+        }
+        textos[cuantas] = texto;
+        categorias[cuantas] = nombreFiltro();
+        boolean sinFiltro = categorias[cuantas].equals("Todas");
+        if (sinFiltro == true) {
+            categorias[cuantas] = "Casa";
+        }
+        hechas[cuantas] = "no";
+        guardar(cuantas);
+        cuantas = cuantas + 1;
+        prefs.edit().putInt("cuantas", cuantas).apply();
+        nueva.setText("");
+        redibujar();
+    }
+
+    // Marca la primera pendiente que el filtro deja ver, y no la primera de la lista completa: con
+    // el filtro en Trabajo, completar la primera de Casa seria un efecto invisible.
+    private void completar() {
+        for (int i = 0; i < cuantas; i++) {
+            boolean dentro = visible(i);
+            if (dentro == true) {
+                boolean pendiente = hechas[i].equals("no");
+                if (pendiente == true) {
+                    hechas[i] = "si";
+                    guardar(i);
+                    redibujar();
+                    return;
+                }
+            }
+        }
+    }
+
+    private void elegirCategoria(int cual) {
+        filtro = cual;
+        redibujar();
+    }
+
+    @Override
+    public void onClick(View vista) {
+        int cual = vista.getId();
+        if (cual == R.id.casa) {
+            elegirCategoria(1);
+        } else if (cual == R.id.trabajo) {
+            elegirCategoria(2);
+        } else if (cual == R.id.estudio) {
+            elegirCategoria(3);
+        } else if (cual == R.id.agregar) {
+            agregar();
+        } else if (cual == R.id.completar) {
+            completar();
+        } else {
+            int siguiente = filtro + 1;
+            if (siguiente > 3) {
+                siguiente = 0;
+            }
+            elegirCategoria(siguiente);
+        }
+    }
+}
+`,
+    },
+    layouts: {
+      "principal.xml": `<?xml version="1.0" encoding="utf-8"?>
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:orientation="vertical">
+
+    <TextView
+        android:id="@+id/titulo"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:text="@string/titulo" />
+
+    <TextView
+        android:id="@+id/categoria"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:text="@string/categoria" />
+
+    <EditText
+        android:id="@+id/nueva"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:hint="@string/pista" />
+
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:orientation="horizontal">
+
+        <Button
+            android:id="@+id/casa"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="@string/casa" />
+
+        <Button
+            android:id="@+id/trabajo"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="@string/trabajo" />
+
+        <Button
+            android:id="@+id/estudio"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="@string/estudio" />
+    </LinearLayout>
+
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:orientation="horizontal">
+
+        <Button
+            android:id="@+id/agregar"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="@string/agregar" />
+
+        <Button
+            android:id="@+id/completar"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="@string/completar" />
+
+        <Button
+            android:id="@+id/filtrar"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="@string/filtrar" />
+    </LinearLayout>
+
+    <ListView
+        android:id="@+id/lista"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content" />
+</LinearLayout>
+`,
+      "item.xml": `<?xml version="1.0" encoding="utf-8"?>
+<TextView xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent"
+    android:layout_height="wrap_content" />
+`,
+    },
+    strings: `<resources>
+    <string name="app_name">{{appname}}</string>
+    <string name="titulo">Lista de tareas</string>
+    <string name="pista">Nueva tarea</string>
+    <string name="casa">Casa</string>
+    <string name="trabajo">Trabajo</string>
+    <string name="estudio">Estudio</string>
+    <string name="agregar">Agregar</string>
+    <string name="completar">Completar la primera</string>
+    <string name="filtrar">Filtrar</string>
+    <string name="categoria">Categor&#237;a: </string>
+</resources>
+`,
+  },
+  cronometro: {
+    java: {
+      "MainActivity.java": `package {{pkgname}};
+
+import android.app.Activity;
+import android.os.Bundle;
+import android.os.Handler;
+import android.os.SystemClock;
+import android.view.View;
+import android.widget.ArrayAdapter;
+import android.widget.ListView;
+import android.widget.TextView;
+
+// Cronometro con Handler.postDelayed: la propia actividad es el Runnable que se reprograma cada
+// 50 ms mientras corre. El tiempo sale de SystemClock.elapsedRealtime() (monotonico, no de pared),
+// asi que pausar y reanudar suma sin deriva; el tick solo repinta.
+// Ademas del tiempo se cuentan los pulsos: es lo unico que apkc preview puede ver del reloj, que
+// no finge (no hay SystemClock en sus stubs), y en el aparato sirve para comparar el tick real con
+// el logico de la sonda.
+// Las cuentas de tiempo van partidas en metodos pequenos porque cada expresion deja su registro
+// reservado para todo el metodo en el emisor Go.
+public class MainActivity extends Activity implements View.OnClickListener, Runnable {
+    private static final int MAXIMO = 64;
+
+    private TextView tiempo;
+    private TextView estado;
+    private ListView lista;
+    private ArrayAdapter adaptador;
+    private Handler manejador;
+    private String[] marcas;
+    private int cuantas;
+    private long inicio;
+    private long acumulado;
+    private int corriendo;
+    private int pulsos;
+
+    @Override
+    public void onCreate(Bundle guardado) {
+        super.onCreate(guardado);
+        setContentView(R.layout.principal);
+        tiempo = (TextView) findViewById(R.id.tiempo);
+        estado = (TextView) findViewById(R.id.estado);
+        lista = (ListView) findViewById(R.id.vueltas);
+        manejador = new Handler();
+        marcas = new String[MAXIMO];
+        cuantas = 0;
+        inicio = 0L;
+        acumulado = 0L;
+        corriendo = 0;
+        pulsos = 0;
+        findViewById(R.id.iniciar).setOnClickListener(this);
+        findViewById(R.id.pausar).setOnClickListener(this);
+        findViewById(R.id.vuelta).setOnClickListener(this);
+        findViewById(R.id.reiniciar).setOnClickListener(this);
+        pintar();
+    }
+
+    private long actual() {
+        if (corriendo == 0) {
+            return acumulado;
+        }
+        long ahora = SystemClock.elapsedRealtime();
+        long transcurrido = ahora - inicio;
+        return acumulado + transcurrido;
+    }
+
+    private String dosDigitos(long valor) {
+        // (int) y concatenacion, no Long.toString(long): ese stub no existe en el interprete de
+        // apkc preview (devolvia null y la pantalla ensenaba 0null) y la concatenacion con un
+        // long directo la rechaza el emisor (88: solo append de entero, cadena y referencia).
+        int cifras = (int) valor;
+        if (cifras < 10) {
+            return "0" + cifras;
+        }
+        return "" + cifras;
+    }
+
+    private String minutos(long total) {
+        long valor = total / 60000L;
+        return dosDigitos(valor);
+    }
+
+    private String segundos(long total) {
+        long valor = total % 60000L;
+        valor = valor / 1000L;
+        return dosDigitos(valor);
+    }
+
+    private String centesimas(long total) {
+        long valor = total % 60000L;
+        valor = valor % 1000L;
+        valor = valor / 10L;
+        return dosDigitos(valor);
+    }
+
+    private String formato(long total) {
+        String parteMinutos = minutos(total);
+        String parteSegundos = segundos(total);
+        String parteCentesimas = centesimas(total);
+        return parteMinutos + ":" + parteSegundos + "." + parteCentesimas;
+    }
+
+    private void pintar() {
+        long total = actual();
+        tiempo.setText(formato(total));
+        String marcha = "parado";
+        if (corriendo == 1) {
+            marcha = "corriendo";
+        }
+        estado.setText(marcha + " - pulsos " + pulsos);
+    }
+
+    private void iniciar() {
+        if (corriendo == 1) {
+            return;
+        }
+        inicio = SystemClock.elapsedRealtime();
+        corriendo = 1;
+        manejador.postDelayed(this, 0L);
+        pintar();
+    }
+
+    private void pausar() {
+        if (corriendo == 0) {
+            return;
+        }
+        acumulado = actual();
+        corriendo = 0;
+        manejador.removeCallbacks(this);
+        pintar();
+    }
+
+    private void redibujar() {
+        String[] copia = new String[cuantas];
+        for (int i = 0; i < cuantas; i++) {
+            copia[i] = marcas[i];
+        }
+        adaptador = new ArrayAdapter(this, R.layout.item, copia);
+        lista.setAdapter(adaptador);
+    }
+
+    // La marca se toma aunque el reloj logico del emulador valga cero (no finge la hora): mientras
+    // el tick haya corrido, el pulso es una marca valida y comparable entre los dos lados.
+    private void marcarVuelta() {
+        long total = actual();
+        if (total == 0L) {
+            if (pulsos == 0) {
+                return;
+            }
+        }
+        if (cuantas >= MAXIMO) {
+            return;
+        }
+        marcas[cuantas] = formato(total) + " - pulso " + pulsos;
+        cuantas = cuantas + 1;
+        redibujar();
+    }
+
+    private void reiniciar() {
+        manejador.removeCallbacks(this);
+        corriendo = 0;
+        acumulado = 0L;
+        inicio = SystemClock.elapsedRealtime();
+        pulsos = 0;
+        cuantas = 0;
+        redibujar();
+        pintar();
+    }
+
+    @Override
+    public void run() {
+        if (corriendo == 1) {
+            pulsos = pulsos + 1;
+            pintar();
+            manejador.postDelayed(this, 50L);
+        }
+    }
+
+    @Override
+    public void onClick(View vista) {
+        int cual = vista.getId();
+        if (cual == R.id.iniciar) {
+            iniciar();
+        } else if (cual == R.id.pausar) {
+            pausar();
+        } else if (cual == R.id.vuelta) {
+            marcarVuelta();
+        } else {
+            reiniciar();
+        }
+    }
+
+    @Override
+    protected void onDestroy() {
+        super.onDestroy();
+        manejador.removeCallbacks(this);
+    }
+}
+`,
+    },
+    layouts: {
+      "principal.xml": `<?xml version="1.0" encoding="utf-8"?>
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:orientation="vertical">
+
+    <TextView
+        android:id="@+id/tiempo"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:text="@string/cero" />
+
+    <TextView
+        android:id="@+id/estado"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:text="@string/parado" />
+
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:orientation="horizontal">
+
+        <Button
+            android:id="@+id/iniciar"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="@string/iniciar" />
+
+        <Button
+            android:id="@+id/pausar"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="@string/pausar" />
+
+        <Button
+            android:id="@+id/vuelta"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="@string/vuelta" />
+
+        <Button
+            android:id="@+id/reiniciar"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="@string/reiniciar" />
+    </LinearLayout>
+
+    <ListView
+        android:id="@+id/vueltas"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content" />
+</LinearLayout>
+`,
+      "item.xml": `<?xml version="1.0" encoding="utf-8"?>
+<TextView xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent"
+    android:layout_height="wrap_content" />
+`,
+    },
+    strings: `<resources>
+    <string name="app_name">{{appname}}</string>
+    <string name="cero">00:00.00</string>
+    <string name="parado">parado &#183; pulsos 0</string>
+    <string name="iniciar">Iniciar</string>
+    <string name="pausar">Pausar</string>
+    <string name="vuelta">Vuelta</string>
+    <string name="reiniciar">Reiniciar</string>
+</resources>
+`,
+  },
+};
+
 // ---------------------------------------------------------------- el proyecto
 function buildProject(state) {
   const pkg = state.package;
@@ -305,6 +1636,28 @@ function buildProject(state) {
     files["res/values-es/strings.xml"] = TEMPLATES.stringsEs.replace(/\{\{appname\}\}/g, nombre);
     files["AndroidManifest.xml"] = files["AndroidManifest.xml"]
       .replace(/android:label="[^"]*"/g, 'android:label="@string/app_name"');
+  }
+  // Las cinco apps de ejemplo del banco se generan enteras: sustituyen la actividad, los layouts y
+  // los textos, y el manifiesto pasa a etiquetar desde @string/app_name como las originales. El
+  // layout main.xml de la plantilla base se retira porque estas apps usan principal.xml o ninguno.
+  const app = !state.kotlin ? APPS_EJEMPLO[state.template] : null;
+  if (app) {
+    delete files["res/layout/main.xml"];
+    const rutaFuentes = "src/" + pkg.split(".").join("/");
+    for (const [nombre, contenido] of Object.entries(app.java)) {
+      files[rutaFuentes + "/" + nombre] = contenido.replace(/\{\{pkgname\}\}/g, pkg);
+    }
+    for (const [nombre, contenido] of Object.entries(app.layouts)) {
+      files["res/layout/" + nombre] = contenido;
+    }
+    files["res/values/strings.xml"] = app.strings.replace(/\{\{appname\}\}/g, texto(state.name, "Mi app"));
+    files["AndroidManifest.xml"] = files["AndroidManifest.xml"]
+      .replace(/android:label="[^"]*"/g, 'android:label="@string/app_name"');
+    if (app.permisos) {
+      // el bloque <uses-sdk .../> de la plantilla base es autocerrado: los permisos entran detrás
+      files["AndroidManifest.xml"] = files["AndroidManifest.xml"]
+        .replace(/(<uses-sdk[^>]*\/>)/, (bloque) => bloque + "\n" + app.permisos);
+    }
   }
   // un LEEME dentro de jar/, assets/ o lib/<abi>/ no es inocente: apkc mete lo que hay en
   // assets/ y en lib/ en el apk, y un .txt en lib/arm64-v8a/ viaja como si fuera una .so. La

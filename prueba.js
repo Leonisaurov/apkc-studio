@@ -123,6 +123,62 @@ for (const [nombre, esperado] of Object.entries(plantillasNuevas)) {
   }
 }
 
+// 2d. las cinco apps de banco/apps-ejemplo son plantillas de verdad: su opcion esta en el selector
+//     de la pagina y buildProject escribe sus fuentes completas, no el esqueleto de Hola mundo.
+//     e2e.sh no las compila todavia; la compilacion se midio en el banco y esta prueba vigila que
+//     el generador no pierda un fichero por el camino.
+const htmlPlantillas = fs.readFileSync(path.join(__dirname, "index.html"), "utf8");
+const vistasPlantillas = fs.readFileSync(path.join(__dirname, "vistas.js"), "utf8");
+const appsEjemplo = {
+  lienzo: { java: ["Lienzo.java", "MainActivity.java"], layouts: [] },
+  notas: { java: ["MainActivity.java"], layouts: ["principal.xml", "item.xml"] },
+  chatbt: { java: ["MainActivity.java"], layouts: ["principal.xml", "item.xml"] },
+  tareas: { java: ["MainActivity.java"], layouts: ["principal.xml", "item.xml"] },
+  cronometro: { java: ["MainActivity.java"], layouts: ["principal.xml", "item.xml"] },
+};
+const fuentesApp = "src/" + estado.package.split(".").join("/");
+for (const [nombre, esperado] of Object.entries(appsEjemplo)) {
+  if (!new RegExp('value="' + nombre + '"').test(htmlPlantillas)) {
+    mal(`el selector de plantillas no ofrece la app ${nombre}`);
+  }
+  // vistas.js filtra la plantilla elegida: si no la nombra, crear el proyecto cae en hola sin avisar
+  if (!new RegExp('"' + nombre + '"').test(vistasPlantillas)) {
+    mal(`vistas.js no reconoce la plantilla ${nombre} y la cambiaria por hola`);
+  }
+  const app = a.buildProject({ ...estado, template: nombre, kotlin: false, libs: false,
+    native: false, assets: false, device: false });
+  if (app.files["res/layout/main.xml"] !== undefined) {
+    mal(`la plantilla ${nombre} conserva el layout main.xml de Hola mundo`);
+  }
+  for (const fichero of esperado.java) {
+    if (typeof app.files[fuentesApp + "/" + fichero] !== "string") {
+      mal(`la plantilla ${nombre} no escribe ${fuentesApp}/${fichero}`);
+    }
+  }
+  for (const fichero of esperado.layouts) {
+    if (typeof app.files["res/layout/" + fichero] !== "string") {
+      mal(`la plantilla ${nombre} no escribe res/layout/${fichero}`);
+    }
+  }
+  if (!(app.files["res/values/strings.xml"] || "").includes('name="app_name"')) {
+    mal(`la plantilla ${nombre} no escribe app_name en res/values/strings.xml`);
+  }
+  if (!/android:label="@string\/app_name"/.test(app.files["AndroidManifest.xml"])) {
+    mal(`la plantilla ${nombre} no etiqueta la app desde @string/app_name`);
+  }
+  for (const [ruta, contenido] of Object.entries(app.files)) {
+    if (!/\.(xml|java)$/.test(ruta)) continue;
+    const raros = [...new Set([...contenido].filter((c) => c.charCodeAt(0) > 127))];
+    if (raros.length) mal(`plantilla ${nombre}: ${ruta} lleva ${raros.join(" ")}`);
+    for (const mala of contenido.match(/\{\{\w+\}\}/g) || []) mal(`plantilla ${nombre}: ${ruta} conserva ${mala}`);
+  }
+}
+const chatbt = a.buildProject({ ...estado, template: "chatbt", kotlin: false, libs: false,
+  native: false, assets: false, device: false });
+if (!/BLUETOOTH_CONNECT/.test(chatbt.files["AndroidManifest.xml"])) {
+  mal("la plantilla chatbt no declara los permisos de Bluetooth en el manifiesto");
+}
+
 // 3. el EOCD y los modos: un lector estricto (zipcheck.py) es el que ve lo que zipfile tolera
 const eocd = buf.readUInt16LE(buf.lastIndexOf(Buffer.from("PK\x05\x06", "latin1")) + 8);
 if (eocd !== entradas.length) mal(`el EOCD anuncia ${eocd} entradas y hay ${entradas.length}`);
