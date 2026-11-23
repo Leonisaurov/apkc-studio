@@ -74,10 +74,6 @@ const ESPERA_TECLEO = 350;
 const ESPERA_DOCUMENTO = 160;
 const ESPERA_ARBOL = 400;
 const ESPERA_PREVIA = 120;
-const CAPTURAS_MAXIMAS = 64;
-const AVISOS_MAXIMOS = 24;
-const CONSOLA_MAXIMAS = 128;
-const OYENTES_MAXIMOS = 32;
 
 const MENSAJE_SIN_EJECUCION = "El modelo no trae ejecución: el apk se leyó con --sin-ejecutar o no " +
   "tiene classes.dex. Sin capturas ni avisos.";
@@ -206,28 +202,25 @@ export function resumenEjecucion(modelo) {
     const n = Number(v);
     return Number.isFinite(n) && n > 0 ? Math.floor(n) : 0;
   };
+  // Sin recortes: el emulador conserva toda la ejecución, como un dispositivo. Lo que se muestra
+  // es lo que ocurrió, desde el primer clic hasta el último.
   const capturas = (Array.isArray(ejecucion.capturas) ? ejecucion.capturas : [])
-    .slice(0, CAPTURAS_MAXIMAS)
     .filter((c) => c && typeof c === "object")
     .map((c) => ({ origen: comoTexto(c.origen), id: comoTexto(c.id), texto: comoTexto(c.texto) }))
     .filter((c) => c.origen || c.texto !== "");
   const avisos = (Array.isArray(ejecucion.avisos) ? ejecucion.avisos : [])
-    .slice(0, AVISOS_MAXIMOS)
     .map(comoTexto)
     .filter((a) => a.trim() !== "");
   // la consola de la app es un canal aparte del registro: cada línea lleva su origen y el orden en
   // que se emitió, porque el reloj no existe en el intérprete y no se finge
   const consola = (Array.isArray(ejecucion.consola) ? ejecucion.consola : [])
-    .slice(0, CONSOLA_MAXIMAS)
     .filter((l) => l && typeof l === "object")
     .map((l) => ({ origen: comoTexto(l.origen), texto: comoTexto(l.texto), secuencia: comoCuenta(l.secuencia) }))
     .filter((l) => l.origen || l.texto !== "");
   const pulsaciones = (Array.isArray(ejecucion.pulsaciones) ? ejecucion.pulsaciones : [])
-    .slice(0, OYENTES_MAXIMOS)
     .map(comoTexto)
     .filter((p) => p.trim() !== "");
   const oyentes = (Array.isArray(ejecucion.oyentes) ? ejecucion.oyentes : [])
-    .slice(0, OYENTES_MAXIMOS)
     .filter((o) => o && typeof o === "object")
     .map((o) => ({ id: comoTexto(o.id), idRef: comoTexto(o.idRef) }))
     .filter((o) => o.id || o.idRef);
