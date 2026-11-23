@@ -30,7 +30,46 @@ import {
 } from "./recursos-proyecto.js";
 import { contextoXml, sugerenciasXml } from "./xml-editor.js";
 
+// Un `.class` del android.jar ocupa unos cientos de KiB: 8 MiB dejan sitio de sobra a una clase
+// grande y cortan una entrada que declare poco y expanda mucho. La cota se cuenta sobre los bytes
+// que el flujo produce de verdad, no sobre el `descomprimido` del directorio central, que es una
+// promesa del fichero: la auditoría de seguridad infló 1024 B declarados a 200 MiB.
+const MAX_CLASE = 8 * 1024 * 1024;
+
+// `deflate-raw` es del navegador, no una dependencia: el jar guarda las clases comprimidas y el
+// completado de métodos necesita los bytes del `.class` tal cual. La lectura se corta —y se
+// cancela— en cuanto lo producido pasa de `tope`; `nombre` es la ruta de la clase y va en el
+// mensaje de rechazo, que es lo que enseña el popup. Vive fuera del IIFE para poder probarla sin
+// DOM.
+export async function inflarConTope(bytes, tope, nombre) {
+  if (typeof DecompressionStream !== "function") return null;
+  const lector = new Blob([bytes]).stream()
+    .pipeThrough(new DecompressionStream("deflate-raw"))
+    .getReader();
+  const trozos = [];
+  let producido = 0;
+  for (;;) {
+    const { done, value } = await lector.read();
+    if (done) break;
+    producido += value.length;
+    if (producido > tope) {
+      // cancelar cierra el flujo: lo que quedaba comprimido no se descomprime ni se guarda
+      await lector.cancel();
+      throw new Error("la clase " + nombre + " se expande por encima de " + (tope / (1024 * 1024)) +
+        " MiB: no es un .class del android.jar y no se infla");
+    }
+    trozos.push(value);
+  }
+  const salida = new Uint8Array(producido);
+  let at = 0;
+  for (const trozo of trozos) { salida.set(trozo, at); at += trozo.length; }
+  return salida;
+}
+
 (() => {
+  // sin DOM no hay editor que completar: el módulo se puede importar en node para probar sus
+  // funciones puras (`inflarConTope`) sin arrastrar la página
+  if (typeof document === "undefined") return;
   const area = document.getElementById("codigo");
   const caja = document.getElementById("autocompletado");
   const lista = document.getElementById("autocompletado-lista");
@@ -110,14 +149,6 @@ import { contextoXml, sugerenciasXml } from "./xml-editor.js";
     }
   }
 
-  // `deflate-raw` es del navegador, no una dependencia: el jar guarda las clases comprimidas y el
-  // completado de métodos necesita los bytes del `.class` tal cual.
-  async function inflar(bytes) {
-    if (typeof DecompressionStream !== "function") return null;
-    const flujo = new Blob([bytes]).stream().pipeThrough(new DecompressionStream("deflate-raw"));
-    return new Uint8Array(await new Response(flujo).arrayBuffer());
-  }
-
   async function metodosDe(entrada) {
     if (!entrada || !Number.isFinite(entrada.local)) return [];
     // una clase se lee una vez aunque se teclee `View.`, `View.ge` y `View.getW`: la caché no
@@ -128,7 +159,9 @@ import { contextoXml, sugerenciasXml } from "./xml-editor.js";
     const desde = offsetDeDatosLocales(cabecera.bytes);
     if (desde < 0) return [];
     const datos = await hospedador.rango(RUTA_JAR, entrada.local + desde, entrada.comprimido);
-    const bytes = entrada.metodo === 8 ? await inflar(datos.bytes) : datos.bytes;
+    const bytes = entrada.metodo === 8
+      ? await inflarConTope(datos.bytes, MAX_CLASE, entrada.ruta || "sin ruta")
+      : datos.bytes;
     const metodos = bytes ? metodosDeClase(bytes) : [];
     metodosVistos.set(entrada.local, metodos);
     return metodos;

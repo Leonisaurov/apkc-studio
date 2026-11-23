@@ -1777,6 +1777,35 @@ if (fusionar(baseFusion, "uno\nDOS\ntres\n", baseFusion).estado !== "nuestro") m
 
 // 9. el paquete oficial de la plataforma es un zip con android-34/android.jar: el editor tiene
 // que sacarlo sin depender de un unzip externo. Se prueba con el mismo makeZip de la página.
+//
+// `zipBomba` fabrica el zip que miente: el directorio central declara `declarado` bytes para una
+// entrada cuyo flujo deflate expande `megas` MiB. Se comprime en streaming para no materializar el
+// origen aquí. Vive en el módulo porque lo usan el lote de los zips y el del autocompletado.
+async function zipBomba(megas, ruta, declarado) {
+  const cero = new Uint8Array(1 << 20);
+  const origen = new ReadableStream({
+    start(c) { for (let i = 0; i < megas; i++) c.enqueue(cero); c.close(); },
+  });
+  const comprimido = new Uint8Array(await new Response(
+    origen.pipeThrough(new CompressionStream("deflate-raw"))).arrayBuffer());
+  const nombre = Buffer.from(ruta);
+  const local = Buffer.alloc(30);
+  local.writeUInt32LE(0x04034b50, 0); local.writeUInt16LE(20, 4); local.writeUInt16LE(0x0800, 6);
+  local.writeUInt16LE(8, 8); local.writeUInt32LE(a.crc32(cero), 14);
+  local.writeUInt32LE(comprimido.length, 18); local.writeUInt32LE(declarado, 22);
+  local.writeUInt16LE(nombre.length, 26);
+  const central = Buffer.alloc(46);
+  central.writeUInt32LE(0x02014b50, 0); central.writeUInt16LE(20, 4); central.writeUInt16LE(20, 6);
+  central.writeUInt16LE(0x0800, 8); central.writeUInt16LE(8, 10);
+  central.writeUInt32LE(a.crc32(cero), 16); central.writeUInt32LE(comprimido.length, 20);
+  central.writeUInt32LE(declarado, 24); central.writeUInt16LE(nombre.length, 28);
+  central.writeUInt32LE(0, 42);
+  const fin = Buffer.alloc(22);
+  fin.writeUInt32LE(0x06054b50, 0); fin.writeUInt16LE(1, 8); fin.writeUInt16LE(1, 10);
+  fin.writeUInt32LE(46 + nombre.length, 12); fin.writeUInt32LE(30 + nombre.length + comprimido.length, 16);
+  return new Uint8Array(Buffer.concat([local, nombre, comprimido, central, nombre, fin]));
+}
+
 (async () => {
   const interior = "PK" + "x".repeat(2048);
   const zip = a.makeZip([["android-34/android.jar", interior]]);
@@ -1878,31 +1907,6 @@ if (fusionar(baseFusion, "uno\nDOS\ntres\n", baseFusion).estado !== "nuestro") m
   // declarados a 200 MiB; aquí el zip se fabrica con un central directory que dice poco y un flujo
   // deflate que expande mucho. Sin el tope por bytes producidos, la entrada termina en «no cuadra»
   // después de materializar los 200 MiB.
-  const zipBomba = async (megas, ruta, declarado) => {
-    const cero = new Uint8Array(1 << 20);
-    const origen = new ReadableStream({
-      start(c) { for (let i = 0; i < megas; i++) c.enqueue(cero); c.close(); },
-    });
-    const comprimido = new Uint8Array(await new Response(
-      origen.pipeThrough(new CompressionStream("deflate-raw"))).arrayBuffer());
-    const nombre = Buffer.from(ruta);
-    const local = Buffer.alloc(30);
-    local.writeUInt32LE(0x04034b50, 0); local.writeUInt16LE(20, 4); local.writeUInt16LE(0x0800, 6);
-    local.writeUInt16LE(8, 8); local.writeUInt32LE(a.crc32(cero), 14);
-    local.writeUInt32LE(comprimido.length, 18); local.writeUInt32LE(declarado, 22);
-    local.writeUInt16LE(nombre.length, 26);
-    const central = Buffer.alloc(46);
-    central.writeUInt32LE(0x02014b50, 0); central.writeUInt16LE(20, 4); central.writeUInt16LE(20, 6);
-    central.writeUInt16LE(0x0800, 8); central.writeUInt16LE(8, 10);
-    central.writeUInt32LE(a.crc32(cero), 16); central.writeUInt32LE(comprimido.length, 20);
-    central.writeUInt32LE(declarado, 24); central.writeUInt16LE(nombre.length, 28);
-    central.writeUInt32LE(0, 42);
-    const fin = Buffer.alloc(22);
-    fin.writeUInt32LE(0x06054b50, 0); fin.writeUInt16LE(1, 8); fin.writeUInt16LE(1, 10);
-    fin.writeUInt32LE(46 + nombre.length, 12); fin.writeUInt32LE(30 + nombre.length + comprimido.length, 16);
-    return new Uint8Array(Buffer.concat([local, nombre, comprimido, central, nombre, fin]));
-  };
-
   const antesBomba = process.memoryUsage().rss;
   let rechazoBomba = "";
   try { await leerZip(await zipBomba(200, "res/bomba.bin", 1024)); }
@@ -2568,6 +2572,45 @@ public final class R {
       hospedador.arbol = arbolReal;
       hospedador.bytes = bytesReal;
       delete globalThis.document;
+    }
+  }
+
+  // 11d-ter. el autocompletado infla el `.class` que va a completar, y ese camino tenía el mismo
+  // agujero: el directorio central declara poco y el flujo expande mucho. Se importa el módulo aquí,
+  // con `document` ya borrado (el IIFE se retira sin DOM) y después de 11d, que necesita importar
+  // `recursos-proyecto.js` con su `document` de mentira para ver el registro del oyente.
+  {
+    const { inflarConTope } = await import("./autocompletado.js");
+    const zipClase = await zipBomba(64, "com/x/Bomba.class", 1024);
+    const finClase = autocompletado.buscarFinDirectorio(zipClase);
+    const entradasClase = finClase && !finClase.zip64
+      ? autocompletado.leerEntradasDirectorio(
+        zipClase.subarray(finClase.inicioDirectorio, finClase.inicioDirectorio + finClase.tamanoDirectorio))
+      : [];
+    const entradaClase = entradasClase[0];
+    if (!entradaClase || entradaClase.descomprimido !== 1024) {
+      mal("el zip de la clase bomba no se parte: no se pudo probar el tope del autocompletado");
+    } else {
+      // se recorre la vía real: el zip se parte con el lector de autocompletado-datos y solo la
+      // entrada comprimida llega al inflador, como en `metodosDe`
+      const inicioClase = autocompletado.offsetDeDatosLocales(
+        zipClase.subarray(entradaClase.local, entradaClase.local + 30));
+      const crudoClase = zipClase.subarray(entradaClase.local + inicioClase,
+        entradaClase.local + inicioClase + entradaClase.comprimido);
+      const antesClase = process.memoryUsage().rss;
+      let rechazoClase = "";
+      try { await inflarConTope(crudoClase, 8 * 1024 * 1024, "com.x.Bomba"); }
+      catch (e) { rechazoClase = String(e && e.message ? e.message : e); }
+      const rssClase = (process.memoryUsage().rss - antesClase) / (1024 * 1024);
+      if (!/com\.x\.Bomba/.test(rechazoClase) || !/8 MiB/.test(rechazoClase)) {
+        mal("el autocompletado no corta el .class por los bytes producidos: " +
+          (rechazoClase || "la clase pasó entera"));
+      }
+      // 64 MiB declarados como 1024 B: sin tope se materializan y el proceso engorda; con el tope
+      // de 8 MiB la lectura se corta sin llegar a esos números
+      if (rssClase > 100) {
+        mal("inflarConTope del autocompletado se pasó de memoria: " + Math.round(rssClase) + " MB de RSS");
+      }
     }
   }
 
