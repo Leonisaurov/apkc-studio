@@ -105,6 +105,25 @@ const servidor = http.createServer((req, res) => {
     return void res.end("URL mal formada\n");
   }
   let fichero = null, cuerpo = null;
+  // Desarrollo: el service worker de producción guarda el wasm con cache-first y una versión fija,
+  // así que una reconstrucción local nunca llega a la pestaña (medido: la página pedía el hash
+  // nuevo y el worker servía el de la primera build). Aquí se sirve un worker sin fetch: elimina
+  // las cachés antiguas al activarse y deja que todo vaya a la red. Define SW_REAL=1 para probar
+  // el service worker verdadero.
+  if (ruta === "/sw.js" && !process.env.SW_REAL) {
+    const est = fs.statSync(WASM);
+    const version = `apkc-studio-dev-${est.size}-${Math.floor(est.mtimeMs)}`;
+    const script = [
+      `const VERSION = "${version}";`,
+      'self.addEventListener("install", (e) => e.waitUntil(self.skipWaiting()));',
+      'self.addEventListener("activate", (e) => e.waitUntil(',
+      '  caches.keys().then((claves) => Promise.all(claves.filter((c) => c.indexOf("apkc-studio-") === 0)',
+      '    .map((c) => caches.delete(c)))).then(() => self.clients.claim())));',
+      "",
+    ].join("\n");
+    res.writeHead(200, { "Content-Type": "text/javascript; charset=utf-8" });
+    return void res.end(req.method === "HEAD" ? undefined : script);
+  }
   if (ruta === "/apkc.wasm") {
     fichero = WASM;
   } else if (ruta === "/wasm_exec.js") {
