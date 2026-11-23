@@ -101,7 +101,7 @@ function nombreDeFichero(fichero) {
 
 // Importa el artefacto pedido: lee el índice, lo busca, descarga el fichero del propio origen,
 // comprueba tamaño y SHA-256 contra el índice y solo entonces escribe en OPFS bajo `/deps/`.
-export async function resolverDependencia({ coord, hospedador, fetchImpl, rutaIndice } = {}) {
+export async function resolverDependencia({ coord, hospedador, fetchImpl, rutaIndice, conBloqueo } = {}) {
   if (!hospedador || typeof hospedador.escribir !== "function") {
     throw new Error("no hay OPFS donde guardar el artefacto");
   }
@@ -127,17 +127,26 @@ export async function resolverDependencia({ coord, hospedador, fetchImpl, rutaIn
   }
   const nombre = nombreDeFichero(entrada.fichero);
   const ruta = "/deps/" + entrada.grupo + "/" + entrada.artefacto + "/" + entrada.version + "/" + nombre;
-  const escrito = await hospedador.escribir(ruta, bytes);
-  if (!escrito || escrito.tipo === "error") {
-    throw new Error("no se pudo guardar en OPFS: " + ((escrito && escrito.error) || "sin detalle"));
-  }
   const descriptor = {
     coordenada: entrada.coordenada, fichero: entrada.fichero, bytes: bytes.length,
     sha256: hash, tipo, indice: indice.generado || "sin fecha en el índice",
     fecha: new Date().toISOString(),
   };
-  await hospedador.escribir("/deps/" + entrada.grupo + "/" + entrada.artefacto + "/" +
-    entrada.version + "/deps.json", new TextEncoder().encode(JSON.stringify(descriptor, null, 2)));
+  // El artefacto y su descriptor entran en OPFS con el mismo bloqueo que usan las ventanas del
+  // editor: dos pestañas que resuelvan a la vez no pueden dejar un deps.json con los bytes de
+  // otro artefacto, y la escritura no se cruza con un guardado del editor. Sin `conBloqueo`
+  // (la prueba de node) se ejecuta igual, como en el resto del módulo.
+  const bloquear = typeof conBloqueo === "function" ? conBloqueo : (tarea) => tarea();
+  const escrito = await bloquear(async () => {
+    const r = await hospedador.escribir(ruta, bytes);
+    if (!r || r.tipo === "error") return r;
+    await hospedador.escribir("/deps/" + entrada.grupo + "/" + entrada.artefacto + "/" +
+      entrada.version + "/deps.json", new TextEncoder().encode(JSON.stringify(descriptor, null, 2)));
+    return r;
+  });
+  if (!escrito || escrito.tipo === "error") {
+    throw new Error("no se pudo guardar en OPFS: " + ((escrito && escrito.error) || "sin detalle"));
+  }
   return {
     coordenada: entrada.coordenada, nombre, bytes: bytes.length, textoBytes: textoDeBytes(bytes.length),
     hash, ruta, fichero: entrada.fichero, indice: indice.generado || "", descriptor,
@@ -146,7 +155,7 @@ export async function resolverDependencia({ coord, hospedador, fetchImpl, rutaIn
 
 // Engancha el panel. No pide nada al cargar: solo el clic en `#deps-resolver` (o Enter en el
 // campo) llama a `resolverDependencia`. `ocupado` evita que un doble clic haga dos importaciones.
-export function crearPanelDeps({ hospedador } = {}) {
+export function crearPanelDeps({ hospedador, conBloqueo } = {}) {
   if (typeof document === "undefined") return null;
   const entrada = document.getElementById("deps-coordenada");
   const boton = document.getElementById("deps-resolver");
@@ -181,7 +190,7 @@ export function crearPanelDeps({ hospedador } = {}) {
     caja.hidden = true;
     decir("buscando «" + entrada.value.trim() + "» en el índice…");
     try {
-      const r = await resolverDependencia({ coord: entrada.value, hospedador });
+      const r = await resolverDependencia({ coord: entrada.value, hospedador, conBloqueo });
       pintar(r);
       decir("listo: importado desde el propio origen a " + r.ruta, "bien");
     } catch (e) {

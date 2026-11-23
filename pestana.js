@@ -355,7 +355,7 @@ const EDITOR = {
 // documento activo, pero su lógica vive en previa-panel.js: este fichero no gana otra copia del
 // estado del editor ni del modelo de la vista previa.
 const PREVIA_PANEL = crearPreviaPanel({
-  hospedador, proyecto: PROYECTO, estadoPestana, editor: EDITOR,
+  hospedador, proyecto: PROYECTO, estadoPestana, editor: EDITOR, conBloqueo,
 });
 
 // Ln/Col del cursor, en la barra de estado. Se cuenta sobre el valor real, no sobre el HTML
@@ -1872,18 +1872,24 @@ async function guardar() {
   const ruta = doc.ruta;
   const guardado = EDITOR.texto();
   const anterior = doc.revision;
-  const revisionGuardada = revisionActual(ruta);
-  if (anterior && revisionGuardada && anterior !== revisionGuardada &&
-      !window.confirm("Otra ventana guardó " + relativa(ruta) + ". ¿Sobrescribir?")) {
-    return false;
-  }
   const revision = nuevaRevision();
   if (rutaDeManifiesto(ruta) && !pareceManifiesto(guardado)) {
     avisarManifiestoInvalido(ruta);
     return false;
   }
+  // La revisión se lee y se confirma dentro del mismo bloqueo que la escritura: si se mirara
+  // antes, otra ventana podía guardar entre la confirmación y el `escribir` y su cambio se
+  // perdía sin avisar (TOCTOU). El diálogo corre con el bloqueo tomado, así que mientras está
+  // abierto ninguna otra ventana puede escribir este proyecto; cancelar solo suelta el bloqueo.
+  let sobrescribir = true;
   try {
     await conBloqueo(async () => {
+      const revisionGuardada = revisionActual(ruta);
+      if (anterior && revisionGuardada && anterior !== revisionGuardada &&
+          !window.confirm("Otra ventana guardó " + relativa(ruta) + ". ¿Sobrescribir?")) {
+        sobrescribir = false;
+        return;
+      }
       const escrito = await hospedador.escribir(ruta, new TextEncoder().encode(guardado));
       if (escrito && escrito.tipo === "error") throw new Error(escrito.error);
       try { localStorage.setItem(claveRevision(ruta), revision); } catch (e) { /* sin revisión */ }
@@ -1892,6 +1898,7 @@ async function guardar() {
     nota("no se pudo guardar " + ruta + ": " + (e && e.message ? e.message : e));
     return false;
   }
+  if (!sobrescribir) return false;
   doc.revision = revision;
   doc.base = guardado;
   // si se siguió escribiendo o se cambió de pestaña mientras el worker guardaba, el documento
@@ -2686,7 +2693,7 @@ async function ponerJarDeUrl(url) {
       throw new Error("lo que devolvió " + url + " no es un jar (cabecera " +
         Array.from(datos.slice(0, 2)).join(",") + ")");
     }
-    await hospedador.escribir(RUTA_JAR, datos);
+    await conBloqueo(() => hospedador.escribir(RUTA_JAR, datos));
     await decirEstadoJar();
     return datos.length;
   });
@@ -2745,7 +2752,7 @@ async function usarJarElegido() {
   return conCarga("Leyendo " + archivo.name + "…", async () => {
     const datos = new Uint8Array(await archivo.arrayBuffer());
     const jar = await jarDeSeleccion(datos);
-    await hospedador.escribir(RUTA_JAR, jar);
+    await conBloqueo(() => hospedador.escribir(RUTA_JAR, jar));
     await decirEstadoJar();
     nota("android.jar guardado en esta pestaña (" + jar.length + " bytes); no sube a ningún sitio");
     return true;
@@ -3199,7 +3206,7 @@ if (typeof document !== "undefined") {
     // La sección de dependencias solo engancha su botón: nada se pide al cargar. Si el índice no
     // está publicado (hoy, hasta que corra el workflow), el primer clic lo dice en #deps-estado.
     try {
-      crearPanelDeps({ hospedador });
+      crearPanelDeps({ hospedador, conBloqueo });
     } catch (err) {
       mostrarFallo(err);
     }

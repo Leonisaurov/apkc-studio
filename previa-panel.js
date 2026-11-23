@@ -454,8 +454,11 @@ const SECCION_POR_DEFECTO = "pulsos";
 
 // La pieza de interfaz. Se construye sin tocar el DOM y solo se engancha en `iniciar()`, para que
 // importar este módulo desde la prueba de node no necesite navegador.
-export function crearPreviaPanel({ hospedador, proyecto, estadoPestana, editor } = {}) {
+export function crearPreviaPanel({ hospedador, proyecto, estadoPestana, editor, conBloqueo } = {}) {
   const carpeta = typeof proyecto === "string" && proyecto ? proyecto : "/proyecto";
+  // El bloqueo entre ventanas lo pone `pestana.js`; sin él (la prueba de node) la tarea corre
+  // igual, como el resto del módulo.
+  const bloquear = typeof conBloqueo === "function" ? conBloqueo : (tarea) => tarea();
   // la caja efectiva y la que se guarda: la efectiva se recorta contra la fila, la guardada no
   const caja = { ancho: ANCHO_POR_DEFECTO, alto: null, arriba: 0 };
   const querida = { ancho: ANCHO_POR_DEFECTO, alto: null, arriba: 0 };
@@ -2938,8 +2941,13 @@ export function crearPreviaPanel({ hospedador, proyecto, estadoPestana, editor }
     }
     if (!bytes.length) { avisarEdicion("La imagen está vacía."); return false; }
     const extension = extensionDeImagen(archivo.name, archivo.type);
-    const libre = await nombreDrawableLibre(nombreDeDrawable(archivo.name), extension);
-    const escrito = await hospedador.escribir(libre.ruta, bytes);
+    // Elegir un nombre libre y escribir la imagen van bajo el mismo bloqueo: dos ventanas que
+    // importen a la vez no pueden escoger el mismo `res/drawable/<nombre>` y pisarse el PNG.
+    const { libre, escrito } = await bloquear(async () => {
+      const elegido = await nombreDrawableLibre(nombreDeDrawable(archivo.name), extension);
+      const r = await hospedador.escribir(elegido.ruta, bytes);
+      return { libre: elegido, escrito: r };
+    });
     if (escrito && escrito.tipo === "error") {
       avisarEdicion("No se pudo guardar la imagen: " + escrito.error);
       return false;

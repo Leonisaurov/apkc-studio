@@ -2064,8 +2064,18 @@ public final class R {
       return { ok: false, status: 404, headers: { get: () => null }, text: async () => "no" };
     };
     const escritos = new Map();
+    // el bloqueo entre ventanas se espía: el artefacto y su descriptor tienen que entrar dentro
+    const ordenBloqueo = [];
+    const conBloqueoMentira = async (tarea) => {
+      ordenBloqueo.push("toma");
+      try { return await tarea(); } finally { ordenBloqueo.push("suelta"); }
+    };
     const hospedadorMentira = {
-      escribir: async (ruta, datos) => { escritos.set(ruta, datos); return { tipo: "montado", ruta, bytes: datos.length }; },
+      escribir: async (ruta, datos) => {
+        ordenBloqueo.push("escribe:" + ruta);
+        escritos.set(ruta, datos);
+        return { tipo: "montado", ruta, bytes: datos.length };
+      },
     };
     const leido = await depsMod.leerIndice({ fetchImpl: fetchMentira });
     if (leido.artefactos.length !== 1 || leido.generado !== "2026-11-22T00:00:00Z") mal("leerIndice no devuelve el índice válido");
@@ -2075,6 +2085,7 @@ public final class R {
     const baseLlamadas = llamadas.length;
     const importado = await depsMod.resolverDependencia({
       coord: "com.example:prueba:1.0", hospedador: hospedadorMentira, fetchImpl: fetchMentira,
+      conBloqueo: conBloqueoMentira,
     });
     const llamadasImport = llamadas.slice(baseLlamadas);
     const rutaEsperada = "/deps/com.example/prueba/1.0/prueba-1.0.jar";
@@ -2084,6 +2095,13 @@ public final class R {
     }
     if (!escritos.has(rutaEsperada) || escritos.get(rutaEsperada).length !== bytesFalsos.length) {
       mal("resolverDependencia no escribe el artefacto en OPFS bajo /deps/");
+    }
+    if (JSON.stringify(ordenBloqueo) !== JSON.stringify([
+      "toma", "escribe:" + rutaEsperada,
+      "escribe:/deps/com.example/prueba/1.0/deps.json", "suelta",
+    ])) {
+      mal("resolverDependencia no escribe el artefacto y su descriptor dentro de conBloqueo: " +
+        JSON.stringify(ordenBloqueo));
     }
     const descriptor = JSON.parse(new TextDecoder().decode(escritos.get("/deps/com.example/prueba/1.0/deps.json") || new Uint8Array([123, 125])));
     if (descriptor.sha256 !== hashFalso || descriptor.bytes !== bytesFalsos.length || descriptor.coordenada !== "com.example:prueba:1.0") {
@@ -2305,6 +2323,47 @@ public final class R {
     }
     if (!/reemplazarProyecto\(/.test(importarFn) || !/resultado\.ok/.test(importarFn)) {
       mal("F4: importarProyecto no comprueba el resultado del reemplazo");
+    }
+  }
+
+  // 15. F3: la revisión y las escrituras compartidas van bajo `conBloqueo` (Web Locks). Es un
+  //     contrato del fuente que la prueba de node no puede conducir sin DOM; la carrera real de
+  //     dos pestañas se conduce en `prueba-pestana.js`, que necesita chromium.
+  {
+    const entreFuente = (fuente, inicio, fin) => {
+      const i = fuente.indexOf(inicio);
+      const j = i < 0 ? -1 : fuente.indexOf(fin, i + inicio.length);
+      return i < 0 || j < 0 ? "" : fuente.slice(i, j);
+    };
+
+    // TOCTOU: en `guardar()` la revisión se lee y se confirma dentro del mismo bloqueo que escribe
+    const guardarFn = entreFuente(pestana, "async function guardar()", "async function guardarParaCompilar()");
+    const bloqueoGuardar = guardarFn.indexOf("await conBloqueo(async () => {");
+    const lecturaRev = guardarFn.indexOf("revisionActual(ruta)");
+    const confirmarRev = guardarFn.indexOf('window.confirm("Otra ventana guardó');
+    if (bloqueoGuardar < 0 || lecturaRev < bloqueoGuardar || confirmarRev < bloqueoGuardar) {
+      mal("guardar() lee o confirma la revisión fuera de conBloqueo: sigue el TOCTOU entre ventanas");
+    }
+
+    // el jar entra en OPFS por el mismo bloqueo en los dos caminos que lo escriben
+    const jarUrl = entreFuente(pestana, "async function ponerJarDeUrl(", "async function traerJarDelSdk(");
+    const jarElegido = entreFuente(pestana, "async function usarJarElegido(", "function actualizarEstadoSdk(");
+    for (const [que, cuerpo] of [["ponerJarDeUrl", jarUrl], ["usarJarElegido", jarElegido]]) {
+      if (!/conBloqueo\(\(\) => hospedador\.escribir\(RUTA_JAR/.test(cuerpo)) {
+        mal(que + " escribe RUTA_JAR sin conBloqueo: dos ventanas pueden pisarse el jar");
+      }
+    }
+
+    // la imagen del drawable: elegir nombre libre y escribir van bajo el mismo bloqueo
+    if (!/export function crearPreviaPanel\(\{[^}]*conBloqueo/.test(fuentePrevia)) {
+      mal("crearPreviaPanel no recibe conBloqueo: la importación de imágenes no coordina ventanas");
+    }
+    const importarFn = entreFuente(fuentePrevia, "async function importarImagen(", "function abrirSelectorImagen(");
+    const bloqueoImagen = importarFn.indexOf("await bloquear(async () => {");
+    if (bloqueoImagen < 0 ||
+        importarFn.indexOf("nombreDrawableLibre(") < bloqueoImagen ||
+        importarFn.indexOf("hospedador.escribir(") < bloqueoImagen) {
+      mal("importarImagen elige el nombre o escribe el PNG fuera del bloqueo: dos ventanas escogen el mismo drawable");
     }
   }
 
