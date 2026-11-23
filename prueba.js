@@ -533,8 +533,11 @@ else {
     mal("el segundo Button no recibe un id libre: " + otro.id);
   }
   const contenedor = layoutEditor.insertarElemento(layoutBase, { tipo: "FrameLayout" });
-  if (!contenedor.ok || !/<FrameLayout\b/.test(contenedor.xml) || !/<TextView\b/.test(contenedor.xml)) {
-    mal("el FrameLayout añadido no lleva dentro un hijo con el que poder probar el arrastre");
+  // el contenedor entra SOLO: sin el TextView «Texto» que se veía primero y parecía el insertado
+  if (!contenedor.ok || !/<FrameLayout\b/.test(contenedor.xml) ||
+      (contenedor.xml.match(/<TextView\b/g) || []).length !== 1) {
+    mal("el FrameLayout añadido no entra solo, sin un TextView dentro: " +
+      (contenedor.error || contenedor.xml));
   }
 }
 const conMarco = `<?xml version="1.0" encoding="utf-8"?>
@@ -592,6 +595,43 @@ const enVacia = layoutEditor.insertarElemento(raizVacia, { tipo: "TextView" });
 if (!enVacia.ok || !vistaXml.modeloDeLayout(enVacia.xml).ok || !/<TextView\b/.test(enVacia.xml)) {
   mal("añadir sobre una raíz autocerrada no abre la etiqueta: " + (enVacia.error || enVacia.xml));
 }
+
+// 6b-quater. Todos los tipos de la paleta entran COMO EL TIPO PEDIDO y solos. El caso que confundió
+// al usuario: un LinearLayout metía un TextView «Texto» dentro y se veía primero. Además, el tamaño
+// con el que entra cada tipo es el mismo que pinta el indicador de destino (`tamanoDeTipo`).
+const tablaTipos = [];
+for (const tipo of layoutEditor.tiposDisponibles()) {
+  const r = layoutEditor.insertarElemento(layoutBase, { tipo });
+  const modelo = r.ok ? vistaXml.modeloDeLayout(r.xml) : { ok: false };
+  const nodo = modelo.ok ? (() => {
+    let n = modelo.modelo.raiz;
+    for (const i of r.ruta || []) n = n && (n.hijos || [])[i];
+    return n || null;
+  })() : null;
+  const tamano = layoutEditor.tamanoDeTipo(tipo);
+  tablaTipos.push({ tipo, ruta: r.ruta, nodo: nodo ? nodo.tipo : null,
+    hijos: nodo ? (nodo.hijos || []).length : -1,
+    ancho: nodo && nodo.rect ? nodo.rect.ancho : null,
+    alto: nodo && nodo.rect ? nodo.rect.alto : null });
+  if (!r.ok || !modelo.ok || !nodo) {
+    mal("el tipo " + tipo + " no entra en el layout: " + (r.error || "sin nodo"));
+    continue;
+  }
+  if (nodo.tipo !== tipo) {
+    mal("la paleta inserta " + nodo.tipo + " cuando se pide " + tipo);
+  }
+  if (tamano && (Math.abs(nodo.rect.ancho - tamano.ancho) > 0.5 ||
+      Math.abs(nodo.rect.alto - tamano.alto) > 0.5)) {
+    mal("el tamaño del indicador de " + tipo + " no es el del nodo: " +
+      JSON.stringify({ indicador: tamano, nodo: { ancho: nodo.rect.ancho, alto: nodo.rect.alto } }));
+  }
+  if (layoutEditor.infoTipo(tipo).contenedor && (nodo.hijos || []).length) {
+    mal("el contenedor " + tipo + " entra con hijos: " +
+      nodo.hijos.map((h) => h.tipo).join(","));
+  }
+}
+console.log("tipos de la paleta: " + tablaTipos.map((f) => f.tipo + "→" + f.nodo +
+  " " + f.ancho + "×" + f.alto + (f.hijos ? " (" + f.hijos + " hijos)" : "")).join(", "));
 
 // 6b-quinquies. soltar un tipo de la paleta en el dibujo: entra en el contenedor de la ruta, en la
 // posición pedida y, si es un marco, con los márgenes del punto. Es el gesto que conduce

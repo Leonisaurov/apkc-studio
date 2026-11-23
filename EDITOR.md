@@ -276,18 +276,19 @@ panel lo apaga, y el modo no se persiste: al recargar se vuelve a la vista de so
   `SeekBar`, `View`, `Space`, `LinearLayout`, `FrameLayout`, `RelativeLayout`, `ScrollView`,
   `TableLayout` y `GridLayout`.
   Un **clic** añade el elemento como último hijo de la raíz. **Arrastrarlo** (puntero con umbral de
-  5 px; hay un fantasma que sigue al puntero, el botón se atenúa y el canvas se marca con un borde
-  discontinuo) lo suelta donde se quiere: en un **marco** con `android:layout_marginLeft` y
-  `android:layout_marginTop` del punto, y en un **`LinearLayout`** en la posición que marca el punto
-  entre sus hermanos. El destino es el contenedor más profundo bajo el puntero; si se suelta sobre
-  una vista, entra en su padre. Al soltar, el nodo nuevo queda seleccionado y su ficha abierta.
+  5 px; hay un fantasma que sigue al puntero y un hueco delimitado con el tamaño del tipo) lo suelta
+  donde se quiere: en un **marco** con `android:layout_marginLeft` y `android:layout_marginTop` del
+  punto, y en un **`LinearLayout`** en la posición que marca el punto entre sus hermanos. El destino
+  es el contenedor más profundo bajo el puntero; si se suelta sobre una vista, entra en su padre. Al
+  soltar, el nodo nuevo queda seleccionado y su ficha abierta; la **jerarquía** marca esa misma fila.
   El XML que se escribe lleva `android:layout_width="wrap_content"`,
   `android:layout_height="wrap_content"`, `android:text` en las vistas de texto y un
   `android:id="@+id/…"` libre (`boton`, `boton2`…): así el elemento se puede tocar en el canvas
-  enseguida. Un contenedor entra con un `TextView` dentro (un `TableLayout`, con un `TableRow`) para
-  que haya algo que arrastrar; los espaciadores `View`/`Space` entran con 48dp × 24dp. Los tipos
-  marcados con `*` se dibujan como bloque porque el render no reproduce su forma: la paleta no los
-  pinta como si funcionaran.
+  enseguida. **Un contenedor entra vacío** con una caja de 160dp × 96dp (sin el `TextView` «Texto»
+  que se veía primero y hacía creer que se había insertado un TextView) y los espaciadores
+  `View`/`Space` con 48dp × 24dp; `tamanoDeTipo()` es la única tabla de tamaños y el indicador de
+  destino usa la misma. Los tipos marcados con `*` se dibujan como bloque porque el render no
+  reproduce su forma: la paleta no los pinta como si funcionaran.
 - **Arrastrar.** `pointerdown` sobre el canvas hace *hit-test* con los `rect` del modelo en vivo
   (gana el nodo más profundo; la raíz no se selecciona) y arranca un arrastre que se sigue en el
   documento. Mientras se mueve se dibuja el contorno desplazado; al soltar se aplica:
@@ -352,9 +353,12 @@ panel lo apaga, y el modo no se persiste: al recargar se vuelve a la vista de so
   modelo y el canvas se repintan y `#ultimo-codigo` no cambia.
 - **Indicador de destino.** Mientras se arrastra un tipo desde la paleta, `pintarDestino` calcula el
   destino con la misma `destinoDeSoltar` que usa el soltar y pinta una **línea** en el hueco de un
-  lineal (`#previa-destino-linea`) o un **hueco discontinuo** con el tamaño aproximado del tipo en un
-  marco (`#previa-destino-hueco`). Se recalcula en cada `pointermove`, se apaga al soltar, al
-  cancelar y al salir del modo editar. No toca el documento.
+  lineal (`#previa-destino-linea`) o un **hueco** en un marco (`#previa-destino-hueco`). El hueco
+  mide exactamente lo que entrará (`tamanoDeTipo`, la misma tabla que `elementoDe`: 160×96 para
+  contenedores, el intrínseco de la vista para el resto), tiene borde continuo y relleno translúcido,
+  y se **recorta al canvas** para que se vea dónde termina; la línea de un lineal mide el **hermano
+  de referencia**, no todo el contenedor. No se marca el canvas entero. Se recalcula en cada
+  `pointermove`, se apaga al soltar, al cancelar y al salir del modo editar. No toca el documento.
 - **Jerarquía.** `#previa-jerarquia-alternar` abre una capa flotante (abajo a la derecha) con el
   árbol de nodos del layout, indentado y con `tipo · id` (o `(sin id)`); cada fila es un botón que
   selecciona ese nodo, y las ramas con hijos se pliegan con la flecha. Se reconstruye cuando cambia
@@ -1057,10 +1061,10 @@ En `@media (max-width: 760px)`:
 
 | Comando | Que cubre |
 | --- | --- |
-| `node studio/prueba.js` | genera el zip, comprueba EOCD, plantillas, reglas, ids de `index.html` (de `diagnostico.js`, `temas.js`, `historial.js`, `vista-previa.js`, `previa-panel.js`, `autocompletado.js`, `diagnostico-vivo.js`), ids viejos prohibidos, sin `<pre>` en el panel, el resaltador puro, el modelo del layout dibujado en vivo, los datos del autocompletado (recursos, `R.java`, contexto y lector de zip/.class), el XML del editor (contexto, catálogo, linter con columna en runes), las funciones puras de los tiradores y las del editor de layout (`leerPropiedades`/`escribirPropiedad`, colores, paleta y `cambiarTipoRaiz`) |
+| `node studio/prueba.js` | genera el zip, comprueba EOCD, plantillas, reglas, ids de `index.html` (de `diagnostico.js`, `temas.js`, `historial.js`, `vista-previa.js`, `previa-panel.js`, `autocompletado.js`, `diagnostico-vivo.js`), ids viejos prohibidos, sin `<pre>` en el panel, el resaltador puro, el modelo del layout dibujado en vivo, los datos del autocompletado (recursos, `R.java`, contexto y lector de zip/.class), el XML del editor (contexto, catálogo, linter con columna en runes), las funciones puras de los tiradores y las del editor de layout (`leerPropiedades`/`escribirPropiedad`, colores, paleta y `cambiarTipoRaiz`), y el bucle de los **18 tipos** de la paleta: cada uno entra como el tipo pedido, solo (los contenedores sin hijos) y con el tamaño de `tamanoDeTipo` |
 | `node studio/prueba-navegador.js` | `http` sin COOP/COEP: DOM, tres vistas, tres botones de actividad, reflejo del nombre/package, aviso de que no hay OPFS, localStorage, el diagnóstico, los temas y la paleta ANSI, y el contrato de la vista dividida (separador con teclado, alternancia Vista previa/Emulador, los dos modos y la consola de Pantalla, que no haya `<pre>` con el XML y consola vacía con su motivo) |
 | `APKC_WASM=... node studio/prueba-crear.js` | por http con OPFS: crear, escribir el proyecto, abrir el manifiesto, comprobar `data-ruta` del arbol, API 34, el árbol cerrado, subir/mover ficheros, exportar/importar el `.zip`, ajustes, pestañas, undo tree, dos ventanas y fusión/conflicto |
-| `APKC_WASM=... APK_EJEMPLO=... KS_EJEMPLO=... ANDROID_JAR=... node studio/prueba-pestana.js` | la pestaña completa: editar, guardar, recargar, jar del SDK, compilar debug/release, firmar, verificar, recargar sin red, cero peticiones fuera del origen, autocompletado y linter XML separados del Java, vista dividida con ocho tiradores por marco, compilar→pintar sin mover el cursor, layout dibujado en vivo, Vista previa/Emulador en las dos superficies, consola con `<script>` escapado y nodo sin rótulo de tipo/id; el **modo editar** (paleta flotante con scroll, arrastre con indicador de destino, undo del diseñador, basura, jerarquía con «↑ Padre», ficha de propiedades, imágenes y `contentDescription`) sin cambiar `clientWidth/clientHeight` del canvas; y que **recompilar recarga el Emulador** (SHA del apk distinto, modelo nuevo, evento publicado otra vez) y **compilar guarda antes lo sucio** (el layout tecleado sin `Ctrl+S` llega al apk y al modelo) |
+| `APKC_WASM=... APK_EJEMPLO=... KS_EJEMPLO=... ANDROID_JAR=... node studio/prueba-pestana.js` | la pestaña completa: editar, guardar, recargar, jar del SDK, compilar debug/release, firmar, verificar, recargar sin red, cero peticiones fuera del origen, autocompletado y linter XML separados del Java, vista dividida con ocho tiradores por marco, compilar→pintar sin mover el cursor, layout dibujado en vivo, Vista previa/Emulador en las dos superficies, consola con `<script>` escapado y nodo sin rótulo de tipo/id; el **modo editar** (paleta flotante con scroll, arrastre con una sombra del tamaño del nodo que se inserta y recortada al canvas, 7 tipos que entran como el tipo pedido —contenedores vacíos—, undo del diseñador, basura, jerarquía con «↑ Padre», ficha de propiedades, imágenes y `contentDescription`) sin cambiar `clientWidth/clientHeight` del canvas; y que **recompilar recarga el Emulador** (SHA del apk distinto, modelo nuevo, evento publicado otra vez) y **compilar guarda antes lo sucio** (el layout tecleado sin `Ctrl+S` llega al apk y al modelo) |
 | `APKC=... APKC_WASM=... sh studio/e2e.sh` | todo lo anterior más los apk/aab nativos y la plantilla Contador; el número exacto de comprobaciones se mide en cada gate |
 
 El gate completo de la pagina es `e2e.sh`; `prueba-pestana.js` solo no basta para decir que la

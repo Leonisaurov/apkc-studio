@@ -2934,7 +2934,10 @@ async function conductor() {
       };
       document.dispatchEvent(new PointerEvent("pointermove", { bubbles: true, pointerId: 41,
         clientX: destino.x, clientY: destino.y }));
-      realimentacion.canvas = canvas.classList.contains("previa-canvas-recibiendo");
+      // la realimentación ya no marca todo el canvas (parecía un marco sin final): es el hueco o
+      // la línea de destino, además del fantasma
+      realimentacion.destino = !document.getElementById("previa-destino-linea").hidden ||
+        !document.getElementById("previa-destino-hueco").hidden;
       document.dispatchEvent(new PointerEvent("pointerup", { bubbles: true, pointerId: 41,
         clientX: destino.x, clientY: destino.y }));
       await nav(900);
@@ -3069,7 +3072,7 @@ async function conductor() {
     comprueba("arrastrar un Button de la paleta al dibujo lo añade donde se suelta y lo selecciona",
       editorFlotante.realimentacion.fantasma === true &&
       editorFlotante.realimentacion.boton === true &&
-      editorFlotante.realimentacion.canvas === true &&
+      editorFlotante.realimentacion.destino === true &&
       editorFlotante.soltado.xml === true && editorFlotante.soltado.cambio === true &&
       editorFlotante.soltado.botones === editorFlotante.soltado.botonesAntes + 1 &&
       JSON.stringify(editorFlotante.soltado.seleccion) !== "null" &&
@@ -3738,6 +3741,290 @@ async function conductor() {
         medidasImagen: editorCapas.medidasImagen, descripcion: editorCapas.descripcion,
         icono: editorCapas.icono, iconoDeshecho: editorCapas.iconoDeshecho,
         restaurado: editorCapas.restaurado }).slice(0, 1400));
+
+
+    // 12a-septies-nonies. Cada tipo de la paleta entra COMO EL TIPO PEDIDO. El caso que confundió
+    // al usuario: un LinearLayout metía un TextView «Texto» dentro y se veía primero. Ahora el
+    // contenedor entra vacío, la ficha y la jerarquía lo señalan a él, y los 18 tipos del catálogo
+    // están cubiertos por el bucle puro de `prueba.js`; aquí se conduce el gesto real de 7.
+    const editorTipos = await evaluar(`(async () => {
+      const vp = await import("/vista-previa.js");
+      const nav = (ms) => new Promise((ok) => setTimeout(ok, ms));
+      marcarSucio(false);
+      await abrir("/proyecto/res/layout/main.xml");
+      if (!PREVIA_PANEL.estado().visible) document.getElementById("previa-alternar").click();
+      document.getElementById("previa-modo-vivo").click();
+      await nav(900);
+      const area = document.getElementById("codigo");
+      const original = area.value;
+      const canvas = document.getElementById("previa-vivo-canvas");
+      const editar = document.getElementById("previa-modo-editar");
+      const paleta = document.getElementById("previa-paleta");
+      if (paleta) paleta.dataset.plegada = "0";
+      const base = '<?xml version="1.0" encoding="utf-8"?>\\n' +
+        '<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"\\n' +
+        '    android:orientation="vertical"\\n' +
+        '    android:layout_width="match_parent"\\n' +
+        '    android:layout_height="match_parent">\\n\\n' +
+        '    <TextView\\n' +
+        '        android:id="@+id/uno"\\n' +
+        '        android:layout_width="wrap_content"\\n' +
+        '        android:layout_height="wrap_content"\\n' +
+        '        android:text="Uno"/>\\n\\n' +
+        '    <TextView\\n' +
+        '        android:id="@+id/dos"\\n' +
+        '        android:layout_width="wrap_content"\\n' +
+        '        android:layout_height="wrap_content"\\n' +
+        '        android:text="Dos"/>\\n' +
+        '</LinearLayout>\\n';
+      EDITOR.cambiar(0, area.value.length, base, [0, 0]);
+      await nav(900);
+      if (!PREVIA_PANEL.estado().editando) { editar.click(); await nav(400); }
+      if (document.getElementById("previa-jerarquia").hidden) {
+        document.getElementById("previa-jerarquia-alternar").click();
+        await nav(300);
+      }
+      const contarTexto = () => {
+        let n = 0;
+        const buscar = (nodo) => {
+          if (nodo.tipo === "TextView") n++;
+          for (const h of nodo.hijos || []) buscar(h);
+        };
+        const m = PREVIA_PANEL.modeloVivo();
+        if (m) buscar(m.raiz);
+        return n;
+      };
+      const enRuta = (raiz, ruta) => {
+        let n = raiz;
+        for (const i of ruta || []) n = n && (n.hijos || [])[i];
+        return n || null;
+      };
+      const cajaCanvas = canvas.getBoundingClientRect();
+      const tipos = ["LinearLayout", "TextView", "Button", "FrameLayout", "ImageView", "EditText", "ScrollView"];
+      const filas = [];
+      let puntero = 81;
+      for (const tipo of tipos) {
+        const modelo = PREVIA_PANEL.modeloVivo();
+        const caja = vp.escalaPara(modelo, canvas.clientWidth, canvas.clientHeight);
+        const factor = cajaCanvas.width > 0 && canvas.clientWidth
+          ? canvas.clientWidth / cajaCanvas.width : 1;
+        const destino = {
+          x: cajaCanvas.left + (caja.x + 180 * caja.escala) / factor,
+          y: cajaCanvas.top + (caja.y + 600 * caja.escala) / factor,
+        };
+        const boton = document.getElementById("previa-anadir-" + tipo.toLowerCase());
+        const cajaBoton = boton.getBoundingClientRect();
+        const textosAntes = contarTexto();
+        boton.dispatchEvent(new PointerEvent("pointerdown", { bubbles: true, button: 0,
+          pointerId: puntero, clientX: cajaBoton.left + 8, clientY: cajaBoton.top + 8 }));
+        document.dispatchEvent(new PointerEvent("pointermove", { bubbles: true, pointerId: puntero,
+          clientX: (cajaBoton.left + destino.x) / 2, clientY: (cajaBoton.top + destino.y) / 2 }));
+        document.dispatchEvent(new PointerEvent("pointermove", { bubbles: true, pointerId: puntero,
+          clientX: destino.x, clientY: destino.y }));
+        document.dispatchEvent(new PointerEvent("pointerup", { bubbles: true, pointerId: puntero,
+          clientX: destino.x, clientY: destino.y }));
+        puntero++;
+        await nav(900);
+        const modeloTras = PREVIA_PANEL.modeloVivo();
+        const seleccion = PREVIA_PANEL.estado().seleccion;
+        const nodo = modeloTras && seleccion ? enRuta(modeloTras.raiz, seleccion) : null;
+        const activa = document.querySelector("#previa-jerarquia-lista button.activa");
+        filas.push({
+          tipo,
+          seleccion,
+          nodoTipo: nodo ? nodo.tipo : null,
+          hijos: nodo ? (nodo.hijos || []).length : -1,
+          titulo: document.getElementById("previa-propiedades-titulo").textContent,
+          activa: activa ? activa.textContent : "",
+          textosAntes,
+          textosDespues: contarTexto(),
+        });
+      }
+      if (PREVIA_PANEL.estado().editando) { editar.click(); await nav(200); }
+      marcarSucio(false);
+      EDITOR.cambiar(0, area.value.length, original, [0, 0]);
+      await nav(900);
+      marcarSucio(false);
+      const jerarquia = document.getElementById("previa-jerarquia");
+      if (jerarquia && !jerarquia.hidden) document.getElementById("previa-jerarquia-cerrar").click();
+      return { filas, restaurado: area.value === original };
+    })()`);
+    comprueba("los tipos de la paleta entran como el tipo pedido, sin hijo automático, y ficha y jerarquía lo señalan",
+      editorTipos.filas.length === 7 &&
+      editorTipos.filas.every((f) => f.nodoTipo === f.tipo &&
+        JSON.stringify(f.seleccion) !== "null" &&
+        f.titulo.indexOf("(" + f.tipo + ")") > 0 &&
+        f.activa.indexOf(f.tipo + " ·") === 0) &&
+      editorTipos.filas.filter((f) => ["LinearLayout", "FrameLayout", "ScrollView"].includes(f.tipo))
+        .every((f) => f.hijos === 0 && f.textosDespues === f.textosAntes) &&
+      editorTipos.filas.find((f) => f.tipo === "LinearLayout").textosDespues ===
+        editorTipos.filas.find((f) => f.tipo === "LinearLayout").textosAntes &&
+      editorTipos.restaurado === true,
+      JSON.stringify(editorTipos.filas).slice(0, 800));
+
+    // 12a-septies-décies. El indicador es una sombra DELIMITADA: el hueco mide lo que el nodo que
+    // se inserta (mismo `tamanoDeTipo` que `elementoDe`), está dentro del canvas y no lo cruza; la
+    // línea de un lineal mide el hermano de referencia, no todo el contenedor. Se compara con el
+    // rect del nodo ya insertado (`rectsEscalados`).
+    const editorSombra = await evaluar(`(async () => {
+      const vp = await import("/vista-previa.js");
+      const nav = (ms) => new Promise((ok) => setTimeout(ok, ms));
+      marcarSucio(false);
+      await abrir("/proyecto/res/layout/main.xml");
+      if (!PREVIA_PANEL.estado().visible) document.getElementById("previa-alternar").click();
+      document.getElementById("previa-modo-vivo").click();
+      await nav(900);
+      const area = document.getElementById("codigo");
+      const original = area.value;
+      const canvas = document.getElementById("previa-vivo-canvas");
+      const editar = document.getElementById("previa-modo-editar");
+      const paleta = document.getElementById("previa-paleta");
+      if (paleta) paleta.dataset.plegada = "0";
+      const linea = document.getElementById("previa-destino-linea");
+      const hueco = document.getElementById("previa-destino-hueco");
+      const cajaCanvas = canvas.getBoundingClientRect();
+      const medirCaja = (el) => {
+        const r = el.getBoundingClientRect();
+        return { left: Math.round((r.left - cajaCanvas.left) * 10) / 10,
+          top: Math.round((r.top - cajaCanvas.top) * 10) / 10,
+          width: Math.round(r.width * 10) / 10, height: Math.round(r.height * 10) / 10 };
+      };
+      const punto = (mx, my) => {
+        const caja = vp.escalaPara(PREVIA_PANEL.modeloVivo(), canvas.clientWidth, canvas.clientHeight);
+        const factor = cajaCanvas.width > 0 && canvas.clientWidth
+          ? canvas.clientWidth / cajaCanvas.width : 1;
+        return { x: cajaCanvas.left + (caja.x + mx * caja.escala) / factor,
+          y: cajaCanvas.top + (caja.y + my * caja.escala) / factor };
+      };
+      const arrastrar = (tipo, destino, id) => {
+        const boton = document.getElementById("previa-anadir-" + tipo.toLowerCase());
+        const b = boton.getBoundingClientRect();
+        boton.dispatchEvent(new PointerEvent("pointerdown", { bubbles: true, button: 0,
+          pointerId: id, clientX: b.left + 8, clientY: b.top + 8 }));
+        document.dispatchEvent(new PointerEvent("pointermove", { bubbles: true, pointerId: id,
+          clientX: (b.left + destino.x) / 2, clientY: (b.top + destino.y) / 2 }));
+        document.dispatchEvent(new PointerEvent("pointermove", { bubbles: true, pointerId: id,
+          clientX: destino.x, clientY: destino.y }));
+      };
+      const soltar = (destino, id) => document.dispatchEvent(new PointerEvent("pointerup",
+        { bubbles: true, pointerId: id, clientX: destino.x, clientY: destino.y }));
+      const enRuta = (raiz, ruta) => {
+        let n = raiz;
+        for (const i of ruta || []) n = n && (n.hijos || [])[i];
+        return n || null;
+      };
+      const rectDelNodo = (idRef) => {
+        const modelo = PREVIA_PANEL.modeloVivo();
+        const rects = modelo ? vp.rectsEscalados(modelo, canvas.clientWidth, canvas.clientHeight) : [];
+        const r = rects.find((x) => x.id === idRef);
+        return r ? { x: Math.round(r.x * 10) / 10, y: Math.round(r.y * 10) / 10,
+          ancho: Math.round(r.ancho * 10) / 10, alto: Math.round(r.alto * 10) / 10 } : null;
+      };
+      const baseMarco = '<?xml version="1.0" encoding="utf-8"?>\\n' +
+        '<FrameLayout xmlns:android="http://schemas.android.com/apk/res/android"\\n' +
+        '    android:layout_width="match_parent"\\n' +
+        '    android:layout_height="match_parent">\\n\\n' +
+        '    <TextView\\n' +
+        '        android:id="@+id/uno"\\n' +
+        '        android:layout_width="wrap_content"\\n' +
+        '        android:layout_height="wrap_content"\\n' +
+        '        android:text="Uno"/>\\n' +
+        '</FrameLayout>\\n';
+      EDITOR.cambiar(0, area.value.length, baseMarco, [0, 0]);
+      await nav(900);
+      if (!PREVIA_PANEL.estado().editando) { editar.click(); await nav(400); }
+      // Button: la sombra mide lo que el Button que se inserta
+      const p1 = punto(60, 60);
+      arrastrar("Button", p1, 91);
+      const huecoButton = { visible: !hueco.hidden, lineaOculta: linea.hidden, caja: medirCaja(hueco) };
+      soltar(p1, 91);
+      await nav(900);
+      const selButton = PREVIA_PANEL.estado().seleccion;
+      const nodoButton = PREVIA_PANEL.modeloVivo() && selButton
+        ? enRuta(PREVIA_PANEL.modeloVivo().raiz, selButton) : null;
+      const rectButton = nodoButton ? rectDelNodo(nodoButton.id) : null;
+      // se deshace para medir el FrameLayout sobre el mismo layout
+      canvas.focus();
+      canvas.dispatchEvent(new KeyboardEvent("keydown", { key: "z", ctrlKey: true,
+        bubbles: true, cancelable: true }));
+      await nav(700);
+      await PREVIA_PANEL.refrescarVivo();
+      const p2 = punto(80, 80);
+      arrastrar("FrameLayout", p2, 92);
+      const huecoMarco = { visible: !hueco.hidden, caja: medirCaja(hueco) };
+      soltar(p2, 92);
+      await nav(900);
+      const selMarco = PREVIA_PANEL.estado().seleccion;
+      const nodoMarco = PREVIA_PANEL.modeloVivo() && selMarco
+        ? enRuta(PREVIA_PANEL.modeloVivo().raiz, selMarco) : null;
+      const rectMarco = nodoMarco ? rectDelNodo(nodoMarco.id) : null;
+      // lineal: la línea mide el hermano de referencia, no el contenedor entero
+      const baseLineal = '<?xml version="1.0" encoding="utf-8"?>\\n' +
+        '<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"\\n' +
+        '    android:orientation="vertical"\\n' +
+        '    android:layout_width="match_parent"\\n' +
+        '    android:layout_height="match_parent">\\n\\n' +
+        '    <TextView\\n' +
+        '        android:id="@+id/arriba"\\n' +
+        '        android:layout_width="wrap_content"\\n' +
+        '        android:layout_height="wrap_content"\\n' +
+        '        android:text="Arriba"/>\\n\\n' +
+        '    <TextView\\n' +
+        '        android:id="@+id/abajo"\\n' +
+        '        android:layout_width="wrap_content"\\n' +
+        '        android:layout_height="wrap_content"\\n' +
+        '        android:text="Abajo"/>\\n' +
+        '</LinearLayout>\\n';
+      EDITOR.cambiar(0, area.value.length, baseLineal, [0, 0]);
+      await nav(900);
+      const pLinea1 = punto(180, 10);
+      arrastrar("Button", pLinea1, 93);
+      const lineaUno = { visible: !linea.hidden, caja: medirCaja(linea),
+        hermano: rectDelNodo("id/arriba") };
+      const pLinea2 = punto(180, 40);
+      document.dispatchEvent(new PointerEvent("pointermove", { bubbles: true, pointerId: 93,
+        clientX: pLinea2.x, clientY: pLinea2.y }));
+      const lineaDos = { visible: !linea.hidden, caja: medirCaja(linea) };
+      // soltar fuera: no se inserta nada y el indicador se apaga
+      document.dispatchEvent(new PointerEvent("pointerup", { bubbles: true, pointerId: 93,
+        clientX: cajaCanvas.right + 40, clientY: cajaCanvas.top + 20 }));
+      await nav(400);
+      const trasSoltar = { xml: area.value === baseLineal,
+        indicadores: linea.hidden && hueco.hidden };
+      if (PREVIA_PANEL.estado().editando) { editar.click(); await nav(200); }
+      marcarSucio(false);
+      EDITOR.cambiar(0, area.value.length, original, [0, 0]);
+      await nav(900);
+      marcarSucio(false);
+      return { huecoButton, rectButton, nodoButton: nodoButton ? nodoButton.tipo : null,
+        huecoMarco, rectMarco, nodoMarco: nodoMarco ? nodoMarco.tipo : null,
+        hijosMarco: nodoMarco ? (nodoMarco.hijos || []).length : -1,
+        lineaUno, lineaDos, trasSoltar, canvas: { ancho: canvas.clientWidth, alto: canvas.clientHeight },
+        restaurado: area.value === original };
+    })()`);
+    const cerca = (a, b, margen) => Math.abs(a - b) <= (margen || 4);
+    comprueba("la sombra de destino tiene el tamaño del nodo, está dentro del canvas y se apaga al soltar",
+      editorSombra.huecoButton.visible === true && editorSombra.huecoButton.lineaOculta === true &&
+      editorSombra.nodoButton === "Button" && !!editorSombra.rectButton &&
+      cerca(editorSombra.huecoButton.caja.width, editorSombra.rectButton.ancho) &&
+      cerca(editorSombra.huecoButton.caja.height, editorSombra.rectButton.alto) &&
+      editorSombra.huecoButton.caja.width < editorSombra.canvas.ancho &&
+      editorSombra.huecoButton.caja.height < editorSombra.canvas.alto &&
+      editorSombra.huecoButton.caja.left >= -1 &&
+      editorSombra.huecoButton.caja.left + editorSombra.huecoButton.caja.width <=
+        editorSombra.canvas.ancho + 1 &&
+      editorSombra.huecoMarco.visible === true && editorSombra.nodoMarco === "FrameLayout" &&
+      editorSombra.hijosMarco === 0 && !!editorSombra.rectMarco &&
+      cerca(editorSombra.huecoMarco.caja.width, editorSombra.rectMarco.ancho) &&
+      cerca(editorSombra.huecoMarco.caja.height, editorSombra.rectMarco.alto) &&
+      editorSombra.lineaUno.visible === true && !!editorSombra.lineaUno.hermano &&
+      cerca(editorSombra.lineaUno.caja.width, editorSombra.lineaUno.hermano.ancho) &&
+      editorSombra.lineaUno.caja.width < editorSombra.canvas.ancho - 20 &&
+      editorSombra.lineaDos.visible === true &&
+      editorSombra.lineaUno.caja.top !== editorSombra.lineaDos.caja.top &&
+      editorSombra.trasSoltar.xml === true && editorSombra.trasSoltar.indicadores === true &&
+      editorSombra.restaurado === true,
+      JSON.stringify(editorSombra).slice(0, 1000));
 
 
     // 12a-octies. el separador: se arrastra con puntero, se mueve con el teclado y guarda el ancho

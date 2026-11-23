@@ -41,7 +41,7 @@ import { modeloDeLayout, decodificarEntidades, paddingDe, esLineal, atributoLoca
 import {
   insertarElemento, moverEnMarco, reordenarHijo, borrarElemento,
   leerPropiedades, escribirPropiedad, tiposRaizDisponibles, cambiarTipoRaiz,
-  infoTipo, iconosSistema,
+  infoTipo, iconosSistema, tamanoDeTipo,
 } from "./layout-editor.js";
 
 // Persistencia de la vista dividida. Son preferencias de esta ventana, no del proyecto.
@@ -1643,16 +1643,9 @@ export function crearPreviaPanel({ hospedador, proyecto, estadoPestana, editor }
 
   // --- el indicador de destino mientras se arrastra ------------------------------------------
   // Es una capa DOM (no se pinta en el canvas): así no se mezcla con el modelo y se apaga sin
-  // repintar. Una línea en un lineal, o un hueco discontinuo con el tamaño aproximado del tipo en
-  // un marco; se recalcula en cada `pointermove` con `destinoDeSoltar`.
-  const TAMANO_DESTINO = {
-    TextView: [96, 40], Button: [96, 48], EditText: [140, 48], ImageButton: [64, 64],
-    ImageView: [80, 80], CheckBox: [120, 40], RadioButton: [120, 40], Switch: [120, 40],
-    ProgressBar: [120, 16], SeekBar: [140, 24], View: [48, 24], Space: [48, 24],
-    LinearLayout: [160, 96], FrameLayout: [160, 96], RelativeLayout: [160, 96],
-    ScrollView: [160, 96], TableLayout: [160, 96], GridLayout: [160, 96],
-  };
-
+  // repintar. En un marco, un hueco del tamaño exacto con el que entrará el tipo (`tamanoDeTipo`,
+  // el mismo que escribe `elementoDe`) recortado al canvas; en un lineal, una línea del ancho del
+  // hermano de referencia, no de todo el contenedor. Se recalcula en cada `pointermove`.
   function ocultarDestino() {
     const linea = document.getElementById("previa-destino-linea");
     const hueco = document.getElementById("previa-destino-hueco");
@@ -1677,34 +1670,41 @@ export function crearPreviaPanel({ hospedador, proyecto, estadoPestana, editor }
       x: ox + caja.x + mx * caja.escala,
       y: oy + caja.y + my * caja.escala,
     });
+    const tamano = tamanoDeTipo(tipo) || { ancho: 48, alto: 24 };
     if (destino.forma === "linea") {
       const padre = destino.padre;
       const pad = destino.padding;
       const hijos = hijosDelModelo(padre);
       const r = padre.rect;
+      // el hermano de referencia es el que se quedará detrás del nuevo; si no hay, el último. La
+      // línea mide lo que mide ese hermano, no el contenedor entero.
+      const ref = destino.indice < hijos.length ? hijos[destino.indice]
+        : (hijos.length ? hijos[hijos.length - 1] : null);
       if (destino.vertical) {
-        const yModelo = destino.indice < hijos.length && hijos[destino.indice].rect
-          ? hijos[destino.indice].rect.y
-          : (hijos.length && hijos[hijos.length - 1].rect
-            ? hijos[hijos.length - 1].rect.y + hijos[hijos.length - 1].rect.alto
-            : r.y + pad.arriba);
-        const desde = aPx(r.x + pad.izq, yModelo);
-        const hasta = aPx(r.x + r.ancho - pad.der, yModelo);
+        const yModelo = destino.indice < hijos.length && ref && ref.rect
+          ? ref.rect.y
+          : (ref && ref.rect ? ref.rect.y + ref.rect.alto : r.y + pad.arriba);
+        const xIni = ref && ref.rect ? ref.rect.x : r.x + pad.izq;
+        const ancho = ref && ref.rect ? ref.rect.ancho
+          : Math.min(tamano.ancho, Math.max(8, r.ancho - pad.izq - pad.der));
+        const desde = aPx(xIni, yModelo);
+        const hasta = aPx(xIni + ancho, yModelo);
         linea.style.left = Math.round(desde.x) + "px";
         linea.style.top = Math.round(desde.y - 1) + "px";
         linea.style.width = Math.max(2, Math.round(hasta.x - desde.x)) + "px";
-        linea.style.height = "2px";
+        linea.style.height = "3px";
       } else {
-        const xModelo = destino.indice < hijos.length && hijos[destino.indice].rect
-          ? hijos[destino.indice].rect.x
-          : (hijos.length && hijos[hijos.length - 1].rect
-            ? hijos[hijos.length - 1].rect.x + hijos[hijos.length - 1].rect.ancho
-            : r.x + pad.izq);
-        const desde = aPx(xModelo, r.y + pad.arriba);
-        const hasta = aPx(xModelo, r.y + r.alto - pad.abajo);
+        const xModelo = destino.indice < hijos.length && ref && ref.rect
+          ? ref.rect.x
+          : (ref && ref.rect ? ref.rect.x + ref.rect.ancho : r.x + pad.izq);
+        const yIni = ref && ref.rect ? ref.rect.y : r.y + pad.arriba;
+        const alto = ref && ref.rect ? ref.rect.alto
+          : Math.min(tamano.alto, Math.max(8, r.alto - pad.arriba - pad.abajo));
+        const desde = aPx(xModelo, yIni);
+        const hasta = aPx(xModelo, yIni + alto);
         linea.style.left = Math.round(desde.x - 1) + "px";
         linea.style.top = Math.round(desde.y) + "px";
-        linea.style.width = "2px";
+        linea.style.width = "3px";
         linea.style.height = Math.max(2, Math.round(hasta.y - desde.y)) + "px";
       }
       linea.hidden = false;
@@ -1713,14 +1713,19 @@ export function crearPreviaPanel({ hospedador, proyecto, estadoPestana, editor }
     }
     const padre = destino.padre;
     const pad = destino.padding;
-    const tamano = TAMANO_DESTINO[tipo] || [96, 48];
     const mx = padre.rect.x + pad.izq + destino.margen.izquierda;
     const my = padre.rect.y + pad.arriba + destino.margen.arriba;
     const p = aPx(mx, my);
+    // recortado al canvas: el hueco no se sale por la derecha ni por abajo, así se ve dónde
+    // termina el elemento y no parece un marco que llega hasta el final
+    const anchoMax = Math.max(8, ox + canvas.clientWidth - p.x);
+    const altoMax = Math.max(8, oy + canvas.clientHeight - p.y);
+    const ancho = Math.max(8, Math.min(Math.round(tamano.ancho * caja.escala), Math.round(anchoMax)));
+    const alto = Math.max(8, Math.min(Math.round(tamano.alto * caja.escala), Math.round(altoMax)));
     hueco.style.left = Math.round(p.x) + "px";
     hueco.style.top = Math.round(p.y) + "px";
-    hueco.style.width = Math.max(8, Math.round(tamano[0] * caja.escala)) + "px";
-    hueco.style.height = Math.max(8, Math.round(tamano[1] * caja.escala)) + "px";
+    hueco.style.width = ancho + "px";
+    hueco.style.height = alto + "px";
     hueco.hidden = false;
     linea.hidden = true;
     return destino;
@@ -1811,8 +1816,8 @@ export function crearPreviaPanel({ hospedador, proyecto, estadoPestana, editor }
       moverFantasma(arrastrePaleta.fantasma, e.clientX, e.clientY);
       const canvas = canvasVivo();
       const dentroCanvas = estaSobreCanvas(e.clientX, e.clientY);
-      if (canvas) canvas.classList.toggle("previa-canvas-recibiendo", dentroCanvas);
-      // el indicador usa las mismas coordenadas del modelo y la misma lógica que el soltar
+      // el indicador usa las mismas coordenadas del modelo y la misma lógica que el soltar; no se
+      // marca todo el canvas, que parecía un marco sin final: el hueco acotado es la señal
       if (dentroCanvas && canvas && modeloVivo) {
         const p = puntoModelo(canvas, modeloVivo, { clientX: e.clientX, clientY: e.clientY });
         if (p) pintarDestino(arrastrePaleta.tipo, p.x, p.y);

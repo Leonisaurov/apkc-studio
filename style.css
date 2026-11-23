@@ -829,18 +829,20 @@ body.separando-previa[data-eje="suroeste"] { cursor: nesw-resize; }
 .previa-jerarquia-nodo.activa { background: var(--acento); color: var(--blanco); }
 .previa-jerarquia-flecha:focus-visible,
 .previa-jerarquia-nodo:focus-visible { outline: 2px solid var(--foco); outline-offset: -2px; }
-/* el destino del arrastre: una línea en un lineal o un hueco discontinuo en un marco */
+/* el destino del arrastre: una línea del ancho del hermano o el hueco exacto del tipo en un marco.
+   El borde es continuo y el relleno translúcido: se ve dónde empieza y dónde termina. */
 .previa-destino { position: absolute; z-index: 3; pointer-events: none; }
 .previa-destino[hidden] { display: none; }
 .previa-destino-linea {
   background: var(--acento);
   border-radius: 2px;
-  box-shadow: 0 0 0 1px rgba(0, 0, 0, .35);
+  box-shadow: 0 0 0 1px rgba(0, 0, 0, .45);
 }
 .previa-destino-hueco {
-  border: 2px dashed var(--acento);
-  border-radius: 4px;
-  background: color-mix(in srgb, var(--acento) 14%, transparent);
+  border: 2px solid var(--acento);
+  border-radius: 6px;
+  background: color-mix(in srgb, var(--acento) 22%, transparent);
+  box-shadow: 0 0 0 1px rgba(0, 0, 0, .5), 0 6px 14px rgba(0, 0, 0, .28);
 }
 /* el campo de imagen: texto con `android:src`, botón de fichero y selector de iconos del sistema */
 .previa-imagen {
