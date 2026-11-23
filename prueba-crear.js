@@ -637,6 +637,37 @@ async function target() {
     /@\+id\/total/.test(contador.layout) && /@\+id\/pulsar/.test(contador.layout),
     JSON.stringify({ java: contador.java.slice(0, 60), layout: contador.layout.slice(0, 60), aviso: contador.aviso }));
 
+  // «Download ZIP» de GitHub: el zip trae todo bajo `ApkShare-main/` y el import tiene que dejarlo
+  // en /proyecto sin esa carpeta. Se construye en la propia página con zipDelArbol.
+  const github = await evaluar(`(async () => {
+    const proyecto = await import("/proyecto.js");
+    const zip = proyecto.zipDelArbol([
+      ["ApkShare-main/", new Uint8Array(0)],
+      ["ApkShare-main/AndroidManifest.xml", '<manifest xmlns:android="http://schemas.android.com/apk/res/android" package="com.apkshare"><application/></manifest>'],
+      ["ApkShare-main/res/values/strings.xml", '<resources><string name="app_name">ApkShare</string></resources>'],
+    ]);
+    const confirmar = window.confirm;
+    window.confirm = () => true;
+    try {
+      await importarProyecto(new File([zip], "ApkShare-main.zip", { type: "application/zip" }));
+    } finally {
+      window.confirm = confirmar;
+    }
+    const arbol = await hospedador.arbol();
+    const rutas = (arbol.nodos || []).map((n) => n.ruta);
+    return {
+      manifiesto: await hospedador.texto("/proyecto/AndroidManifest.xml"),
+      strings: await hospedador.texto("/proyecto/res/values/strings.xml"),
+      conPrefijo: rutas.filter((r) => /ApkShare-main/.test(r)).length,
+      aviso: document.getElementById("estado-pestana").textContent,
+    };
+  })()`);
+  comprueba("importar un zip de GitHub recorta su carpeta raíz",
+    /package="com\.apkshare"/.test(String(github.manifiesto)) &&
+    /ApkShare/.test(String(github.strings)) && github.conPrefijo === 0 &&
+    /proyecto importado: 2 ficheros/.test(String(github.aviso)),
+    JSON.stringify(github).slice(0, 260));
+
   ws.close();
   apagar();
   console.log(fallos ? "crear: " + fallos + " problemas" : "crear: todo en orden (" + hechos + " comprobaciones)");

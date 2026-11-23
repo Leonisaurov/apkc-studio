@@ -178,3 +178,33 @@ export async function leerZip(bytes) {
   }
   return salida;
 }
+
+// Los «Download ZIP» de GitHub meten el proyecto en una única carpeta raíz (`repo-rama/`) y el
+// manifiesto queda un nivel más abajo. Aquí se recorta ese prefijo, y solo cuando es único y
+// lleva el manifiesto dentro: con varias carpetas raíz o un fichero suelto fuera no se adivina
+// cuál es el proyecto, se dice. Esto va después de `leerZip`, así que `rutaSegura`, el CRC y las
+// cotas ya se aplicaron sobre las rutas originales; recortar un prefijo validado no las relaja.
+export function normalizarEntradas(entradas) {
+  if (!Array.isArray(entradas) || !entradas.length) throw new Error("el zip está vacío");
+  // exportado por esta página (o con el manifiesto en la raíz): no hay nada que recortar
+  if (entradas.some((e) => !e.dir && e.ruta === "AndroidManifest.xml")) return entradas;
+  const barra = entradas[0].ruta.indexOf("/");
+  const prefijo = barra > 0 ? entradas[0].ruta.slice(0, barra + 1) : "";
+  if (!prefijo) {
+    throw new Error("el zip no trae AndroidManifest.xml en la raíz: " +
+      "expórtalo con el manifiesto en la raíz del zip");
+  }
+  const fuera = entradas.filter((e) => !e.ruta.startsWith(prefijo));
+  if (fuera.length) {
+    throw new Error("el zip tiene varias carpetas raíz (o ficheros fuera de la única que hay): " +
+      "expórtalo con AndroidManifest.xml en la raíz del zip");
+  }
+  if (!entradas.some((e) => !e.dir && e.ruta === prefijo + "AndroidManifest.xml")) {
+    throw new Error("el zip no trae AndroidManifest.xml en la raíz ni dentro de su única carpeta raíz" +
+      " (" + prefijo + "): expórtalo con el manifiesto en la raíz del zip");
+  }
+  // la entrada del directorio raíz queda con ruta vacía: se descarta, no hace falta en el árbol
+  return entradas
+    .filter((e) => e.ruta !== prefijo)
+    .map((e) => ({ ruta: e.ruta.slice(prefijo.length), dir: e.dir, datos: e.datos }));
+}

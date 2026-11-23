@@ -6,7 +6,7 @@ import { crearBusqueda } from "./busqueda.js";
 import { crearAjustes } from "./ajustes.js";
 import { CONSOLA, pintarConsola, consolaHtml, textoHtml, enlazarSalidas,
   mostrarCarga, ocultarCarga, conCarga } from "./consola.js";
-import { leerZip, zipDelArbol, paqueteDelManifiesto, nombreDeZip,
+import { leerZip, normalizarEntradas, zipDelArbol, paqueteDelManifiesto, nombreDeZip,
   ajustesDelManifiesto, conAjustes } from "./proyecto.js";
 import { modeloDeSalida, pintarVistaPrevia, mensajeVistaPrevia } from "./vista-previa.js";
 import { crearPreviaPanel } from "./previa-panel.js";
@@ -497,7 +497,7 @@ async function importarProyecto(archivo) {
   if (!archivo) return;
   return conCarga("Leyendo " + archivo.name + "…", async () => {
     try {
-      const entradas = await leerZip(new Uint8Array(await archivo.arrayBuffer()));
+      const entradas = normalizarEntradas(await leerZip(new Uint8Array(await archivo.arrayBuffer())));
       const manifiesto = entradas.find((e) => !e.dir && e.ruta === "AndroidManifest.xml");
       if (!manifiesto) throw new Error("el zip no trae AndroidManifest.xml en la raíz");
       const ficheros = entradas.filter((e) => !e.dir);

@@ -7,7 +7,7 @@ import { buildProject, makeZip, analyze, RULES, crc32 } from "./app.js";
 import * as pestanaMod from "./pestana.js";
 import { Historial } from "./historial.js";
 import { fusionar } from "./fusion.js";
-import { leerZip, zipDelArbol, paqueteDelManifiesto, nombreDeZip, rutaSegura,
+import { leerZip, normalizarEntradas, zipDelArbol, paqueteDelManifiesto, nombreDeZip, rutaSegura,
   ajustesDelManifiesto, conAjustes } from "./proyecto.js";
 import * as vistaPrevia from "./vista-previa.js";
 import * as previaPanel from "./previa-panel.js";
@@ -1436,6 +1436,48 @@ if (fusionar(baseFusion, "uno\nDOS\ntres\n", baseFusion).estado !== "nuestro") m
     mal("leerZip no devuelve el PNG byte a byte");
   }
   if (!vuelta.some((e) => e.ruta === "res/drawable/" && e.dir)) mal("leerZip pierde las carpetas");
+
+  // «Download ZIP» de GitHub: todo dentro de una carpeta raíz. El import recorta ese prefijo, y
+  // solo si es único y lleva el manifiesto dentro; con dos raíces o un fichero suelto no adivina.
+  const zipGithub = zipDelArbol([
+    ["ApkShare-main/", new Uint8Array(0)],
+    ["ApkShare-main/AndroidManifest.xml", '<manifest package="com.apkshare"/>'],
+    ["ApkShare-main/res/values/strings.xml", "<resources/>"],
+    ["ApkShare-main/src/Main.java", "class Main {}\n"],
+  ]);
+  const github = normalizarEntradas(await leerZip(zipGithub));
+  const githubManifiesto = github.find((e) => e.ruta === "AndroidManifest.xml" && !e.dir);
+  const githubJava = github.find((e) => e.ruta === "src/Main.java");
+  if (!githubManifiesto || !githubJava || github.some((e) => e.ruta.startsWith("ApkShare-main"))) {
+    mal("normalizarEntradas no recorta la carpeta raíz del zip de GitHub");
+  }
+  if (github.some((e) => e.ruta === "")) mal("normalizarEntradas deja la entrada del directorio raíz");
+  if (githubManifiesto && new TextDecoder().decode(githubManifiesto.datos) !== '<manifest package="com.apkshare"/>') {
+    mal("normalizarEntradas altera los datos del manifiesto");
+  }
+  if (githubJava && githubJava.dir !== false) mal("normalizarEntradas cambia el tipo de una entrada");
+  if (normalizarEntradas(vuelta) !== vuelta) mal("normalizarEntradas toca un zip que ya está normalizado");
+  const dosRaices = [
+    { ruta: "A/AndroidManifest.xml", dir: false, datos: new Uint8Array([1]) },
+    { ruta: "B/AndroidManifest.xml", dir: false, datos: new Uint8Array([2]) },
+  ];
+  const suelto = [
+    { ruta: "A/AndroidManifest.xml", dir: false, datos: new Uint8Array([1]) },
+    { ruta: "LEEME.txt", dir: false, datos: new Uint8Array([2]) },
+  ];
+  for (const [nombreCaso, entradasCaso] of [["dos raíces", dosRaices], ["fichero suelto", suelto]]) {
+    let motivo = "";
+    try { normalizarEntradas(entradasCaso); } catch (e) { motivo = String(e && e.message ? e.message : e); }
+    if (!/AndroidManifest\.xml en la raíz/.test(motivo)) {
+      mal("normalizarEntradas no explica el rechazo con " + nombreCaso + ": " + motivo);
+    }
+  }
+  let raizSinManifiesto = "";
+  try { normalizarEntradas([{ ruta: "ApkShare-main/LEEME.txt", dir: false, datos: new Uint8Array([1]) }]); }
+  catch (e) { raizSinManifiesto = String(e && e.message ? e.message : e); }
+  if (!/no trae AndroidManifest\.xml/.test(raizSinManifiesto)) {
+    mal("normalizarEntradas acepta una carpeta raíz sin manifiesto: " + raizSinManifiesto);
+  }
 
   // un zip hecho con DEFLATE (lo normal fuera de esta página) también entra
   const texto = "package x;\nclass X {}\n";
