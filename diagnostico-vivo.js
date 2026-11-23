@@ -274,10 +274,29 @@ import { diagnosticarXml } from "./xml-editor.js";
       return;
     }
     const texto = area.value;
+    // la clave de una pasada limpia: el fuente, la ruta y el platform con el que se compiló. La API
+    // y el codename se pueden cambiar sin tocar el editor (pestana.js los sincroniza desde
+    // Ajustes), y cambian la compilación: el mismo texto con otra API no es el mismo resultado.
+    const api = document.getElementById("sdk-version");
+    const codename = document.getElementById("codename");
+    const clave = {
+      ruta, texto, jar: RUTA_JAR,
+      api: api ? api.value : "",
+      codename: codename ? codename.value : "",
+    };
     // el mismo fuente que ya salió limpio no se vuelve a compilar: ni un clic en el árbol, ni un
     // repintado de pestañas, ni cambiar solo espacios de sobra pueden cambiar el resultado.
-    if (ultimaLimpia && ultimaLimpia.ruta === ruta && mismaEstructura(ultimaLimpia.texto, texto)) {
+    const yaLimpia = ultimaLimpia && ultimaLimpia.ruta === clave.ruta &&
+      ultimaLimpia.api === clave.api && ultimaLimpia.codename === clave.codename &&
+      ultimaLimpia.jar === clave.jar &&
+      (ultimaLimpia.texto === texto || mismaEstructura(ultimaLimpia.texto, texto));
+    if (yaLimpia) {
       saltadas++;
+      // una pasada invalidada dejó «comprobando…»: saltar no puede dejarlo así, se repinta el
+      // resumen limpio que ya se tenía (sin errores, porque `ultimaLimpia` solo guarda limpias).
+      errores = [];
+      pintar();
+      estado.textContent = ultimaLimpia.estado;
       return;
     }
     const mio = ++serie;
@@ -296,8 +315,6 @@ import { diagnosticarXml } from "./xml-editor.js";
       // del temporal. La API va porque en la pestaña el jar está en `/sdk/android.jar` y su ruta no
       // dice la versión del platform; son los mismos valores ocultos que lee `apkc build`.
       const argv = ["check", "--android-jar", RUTA_JAR];
-      const api = document.getElementById("sdk-version");
-      const codename = document.getElementById("codename");
       if (api && api.value) {
         argv.push("--sdk-version", api.value);
         if (codename && codename.value) argv.push("--codename", codename.value);
@@ -325,11 +342,11 @@ import { diagnosticarXml } from "./xml-editor.js";
       const resumen = errores.length
         ? errores.length + (errores.length === 1 ? " error" : " errores")
         : "sin errores";
-      ultimaLimpia = errores.length ? null : { ruta, texto };
       const notas = [dato.aviso, dato.recursos && /^sin R/.test(dato.recursos) ? dato.recursos : ""]
         .filter(Boolean);
       estado.textContent = resumen + " · Java" + (notas.length ? " · " + notas.join(" · ") : "");
       pintar();
+      ultimaLimpia = errores.length ? null : { ...clave, estado: estado.textContent };
     } catch (e) {
       if (mio === serie) {
         errores = [];

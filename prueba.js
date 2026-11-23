@@ -2261,8 +2261,13 @@ public final class R {
     if (!/function mismaEstructura/.test(fuenteVivo)) {
       mal("el diagnóstico no tiene la regla que evita un check cuando solo cambian espacios");
     }
-    if (!/ultimaLimpia && ultimaLimpia\.ruta === ruta && mismaEstructura/.test(fuenteVivo)) {
-      mal("el diagnóstico no compara el texto con la última pasada limpia antes de compilar");
+    if (!/ultimaLimpia\.api === clave\.api/.test(fuenteVivo) ||
+        !/ultimaLimpia\.codename === clave\.codename/.test(fuenteVivo) ||
+        !/ultimaLimpia\.jar === clave\.jar/.test(fuenteVivo)) {
+      mal("la clave de la pasada limpia no incluye la API, el codename y el jar");
+    }
+    if (!/estado\.textContent = ultimaLimpia\.estado;/.test(fuenteVivo)) {
+      mal("saltar una pasada no restaura el resumen: el estado se quedaría en «comprobando…»");
     }
     if (!/apkc:proyecto-cambio", \(\) => \{ ultimaLimpia = null; \}/.test(fuenteVivo)) {
       mal("un cambio del proyecto no invalida la última pasada limpia: se saltaría el check que hace falta");
@@ -2331,6 +2336,106 @@ public final class R {
       hospedador.arbol = arbolReal;
       hospedador.bytes = bytesReal;
       delete globalThis.document;
+    }
+  }
+
+  // 11d-bis. conducción del diagnóstico en vivo con un DOM y un hospedador de mentira: una pasada
+  // que se invalida y otra que se salta no pueden dejar «comprobando…» en el indicador, y bajar la
+  // API tiene que invalidar la pasada limpia aunque el texto solo cambie en espacios. El módulo
+  // registra oyentes al importarse, así que va después de 11d (que importa recursos-proyecto).
+  {
+    const hospedador = pestanaMod.hospedador;
+    const reales = { escribir: hospedador.escribir, ejecutar: hospedador.ejecutar, limpiar: hospedador.limpiar };
+    const previos = { document: globalThis.document, window: globalThis.window,
+      getComputedStyle: globalThis.getComputedStyle };
+    const pausa = (ms) => new Promise((r) => setTimeout(r, ms));
+    const nodo = () => ({
+      className: "", textContent: "", dataset: {}, style: {}, children: [],
+      appendChild(hijo) { this.children.push(hijo); },
+      addEventListener(tipo, fn) { (this.oyentes ||= {})[tipo] = fn; },
+      setAttribute() {}, remove() {}, focus() {},
+    });
+    const area = nodo();
+    const marcas = nodo();
+    const lista = nodo();
+    const indicador = nodo();
+    const api = Object.assign(nodo(), { value: "34" });
+    const codename = Object.assign(nodo(), { value: "14" });
+    const porId = {
+      codigo: area, "diagnostico-marcas": marcas, "diagnostico-vivo-lista": lista,
+      "diagnostico-vivo-estado": indicador, "sdk-version": api, codename,
+    };
+    globalThis.document = {
+      getElementById: (id) => porId[id] || null,
+      createElement: () => nodo(),
+      addEventListener() {}, dispatchEvent() { return true; },
+    };
+    globalThis.window = { addEventListener() {} };
+    globalThis.getComputedStyle = () => ({ lineHeight: "20px" });
+    const cola = [];
+    hospedador.escribir = async () => ({ tipo: "montado" });
+    hospedador.limpiar = async () => ({ tipo: "limpiado" });
+    hospedador.ejecutar = (argv) => new Promise((resolver) => cola.push({ argv, resolver }));
+    const responder = () => {
+      const turno = cola.shift();
+      if (!turno) return false;
+      turno.resolver({ tipo: "terminado", codigo: 0,
+        consola: JSON.stringify({ tipo: "check", fichero: "MainActivity.java", lineas: 2,
+          emisor: true, recursos: "R.java del proyecto", errores: [] }) });
+      return true;
+    };
+    try {
+      pestanaMod.estadoPestana.ruta = "/proyecto/src/com/myapp/MainActivity.java";
+      area.value = "public class MainActivity {}\n";
+      await import("./diagnostico-vivo.js");
+      await pausa(500);
+      if (!responder()) mal("el diagnóstico no lanzó el primer check al importarse");
+      await pausa(80);
+      if (indicador.textContent !== "sin errores · Java") {
+        mal(`el primer check no dejó el resumen limpio: «${indicador.textContent}»`);
+      }
+
+      // una pasada con otro texto queda en vuelo; el texto vuelve al limpio y la invalida. La
+      // pasada vieja termina sin pintar y la nueva se salta: el indicador no puede quedarse mudo.
+      area.value = "public class MainActivity { int x; }\n";
+      area.oyentes.input();
+      await pausa(450);
+      if (!cola.length) mal("la pasada con otro texto no llegó a lanzarse");
+      area.value = "public class MainActivity {}   \n";
+      area.oyentes.input();
+      await pausa(450); // la pasada nueva invalida la vieja (enCurso) antes de que esta termine
+      if (!responder()) mal("la pasada invalidada no tenía comando que resolver");
+      await pausa(700); // el finally programa otra, que se salta
+      if (indicador.textContent !== "sin errores · Java") {
+        mal(`el estado se quedó en «${indicador.textContent}» tras una pasada invalidada y una saltada`);
+      }
+
+      // bajar la API cambia el classpath: el mismo texto con espacios de sobra tiene que relanzar
+      api.value = "21";
+      area.value = "public class MainActivity {}    \n";
+      area.oyentes.input();
+      await pausa(450);
+      if (!cola.length) {
+        mal("bajar la API no relanzó el check: se saltó con la clave vieja");
+      } else if (!responder()) {
+        mal("el check tras bajar la API no tenía comando que resolver");
+      }
+      await pausa(80);
+      if (indicador.textContent !== "sin errores · Java") {
+        mal(`el check tras bajar la API no dejó el resumen limpio: «${indicador.textContent}»`);
+      }
+    } catch (e) {
+      mal("no se pudo conducir el diagnóstico en vivo: " + ((e && e.message) || e));
+    } finally {
+      hospedador.escribir = reales.escribir;
+      hospedador.ejecutar = reales.ejecutar;
+      hospedador.limpiar = reales.limpiar;
+      pestanaMod.estadoPestana.ruta = null;
+      for (const [clave, valor] of Object.entries({ document: previos.document,
+        window: previos.window, getComputedStyle: previos.getComputedStyle })) {
+        if (valor === undefined) delete globalThis[clave];
+        else globalThis[clave] = valor;
+      }
     }
   }
 
