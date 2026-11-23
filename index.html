@@ -620,7 +620,27 @@
                 </div>
                 <div id="previa-inspector" class="previa-inspector">
                   <div class="previa-inspector-cab">
+                    <button id="previa-inspector-asidero" class="icono-boton previa-inspector-asidero" type="button"
+                            title="Arrastra para mover el registro y la consola"
+                            aria-label="Mover el registro y la consola">
+                      <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M9 6h.01M9 12h.01M9 18h.01M15 6h.01M15 12h.01M15 18h.01"/></svg>
+                    </button>
                     <span class="previa-inspector-titulo">Registro y consola</span>
+                    <button id="previa-inspector-minimizar" class="icono-boton" type="button"
+                            title="Minimizar el registro y la consola" aria-label="Minimizar el registro y la consola"
+                            aria-pressed="false">
+                      <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 12h14"/></svg>
+                    </button>
+                    <button id="previa-inspector-acoplar-izquierda" class="icono-boton" type="button"
+                            title="Acoplar el registro y la consola al borde izquierdo"
+                            aria-label="Acoplar al borde izquierdo" aria-pressed="false">
+                      <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 4h16v16H4z"/><path d="M9 4v16"/></svg>
+                    </button>
+                    <button id="previa-inspector-acoplar-derecha" class="icono-boton" type="button"
+                            title="Acoplar el registro y la consola al borde derecho"
+                            aria-label="Acoplar al borde derecho" aria-pressed="false">
+                      <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 4h16v16H4z"/><path d="M15 4v16"/></svg>
+                    </button>
                     <button id="previa-inspector-cerrar" class="icono-boton" type="button"
                             title="Cerrar el registro y la consola" aria-label="Cerrar el registro y la consola">
                       <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18"/></svg>
@@ -991,7 +1011,12 @@
                    aria-controls="vista-lado"></div>
 
               <div id="vista-lado" class="vista-lado">
-                <div class="previa-inspector-cab" title="Arrastra para mover la consola; con la pastilla, pulsa para restaurarla">
+                <div class="previa-inspector-cab" title="Arrastra por el asa para mover la consola; con la pastilla, pulsa para restaurarla">
+                  <button id="vista-lado-asidero" class="icono-boton previa-inspector-asidero" type="button"
+                          title="Arrastra para mover el registro y la consola"
+                          aria-label="Mover el registro y la consola">
+                    <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M9 6h.01M9 12h.01M9 18h.01M15 6h.01M15 12h.01M15 18h.01"/></svg>
+                  </button>
                   <span class="previa-inspector-titulo">Registro y consola</span>
                   <button id="vista-lado-minimizar" class="icono-boton" type="button"
                           title="Minimizar el registro y la consola" aria-label="Minimizar el registro y la consola"

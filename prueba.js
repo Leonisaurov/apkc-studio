@@ -336,6 +336,54 @@ for (const clave of ["apkc-studio/previa-lado-modo", "apkc-studio/previa-lado-bo
     mal(`previa-panel.js no persiste la consola flotante (${clave})`);
   }
 }
+// La cabecera de las dos capas no intercepta el clic: solo el asa y los botones lo reciben, así el
+// puntero llega al canvas que hay debajo (el botón del contador cae en esa franja).
+const cabecerasCss = [...fuenteEstilo.matchAll(/\.previa-inspector-cab\s*\{([^}]*)\}/g)].map((m) => m[1]);
+if (!cabecerasCss.some((c) => /pointer-events:\s*none/.test(c))) {
+  mal("style.css no deja pasar el clic por la cabecera de la consola (pointer-events: none)");
+}
+if (!/\.previa-inspector-cab\s+button[^{]*\{[^}]*pointer-events:\s*auto/.test(fuenteEstilo)) {
+  mal("style.css no reactiva el puntero en los botones de la cabecera de la consola");
+}
+if (!/\.previa-inspector-asidero[^{]*\{[^}]*pointer-events:\s*auto/.test(fuenteEstilo) ||
+    !/\.previa-inspector-asidero\s*\{[^}]*cursor:\s*move/.test(fuenteEstilo)) {
+  mal("style.css no da un asa de arrastre pequeña a la consola (pointer-events: auto, cursor: move)");
+}
+// El registro del panel es la misma capa desprendida que la consola de Pantalla: los tres modos son
+// `fixed`, así que ninguno reparte ni un píxel del canvas.
+if (!/\.previa-inspector\[data-modo="libre"\][\s\S]{0,400}?position:\s*fixed/.test(fuenteEstilo)) {
+  mal("style.css no desprende el registro del panel (data-modo=libre con position: fixed)");
+}
+// Pantalla completa: la clase tiene que fijar las dos superficies con el id en el selector, porque
+// `#previa-render { position: relative }` (1,0,0) gana a una clase suelta y el botón no hacía nada.
+for (const id of ["#previa-render", "#vista-cuerpo"]) {
+  if (!new RegExp(id + "\\.pantalla-completa[\\s\\S]{0,240}?position:\\s*fixed").test(fuenteEstilo)) {
+    mal(`style.css no lleva a pantalla completa ${id} (position: fixed con el id en el selector)`);
+  }
+}
+if (!/superficie === "panel" \? el\("previa-render"\) : el\("vista-cuerpo"\)/.test(fuentePreviaEstado)) {
+  mal("previa-panel.js no aplica la pantalla completa al contenedor de cada superficie");
+}
+// Las dos superficies comparten el motor de capa desprendida, y el arrastre empieza en el asa: la
+// cabecera entera ya no mueve nada.
+for (const superficie of ["panel", "vista"]) {
+  if (!fuentePreviaEstado.includes(`conectarFlotante("${superficie}")`)) {
+    mal(`previa-panel.js no conecta la capa desprendida de ${superficie}`);
+  }
+}
+if (!/asa\.addEventListener\("pointerdown"/.test(fuentePreviaEstado)) {
+  mal("previa-panel.js no arrastra la capa desde su asa");
+}
+if (/cabecera\.addEventListener\("pointerdown"/.test(fuentePreviaEstado)) {
+  mal("previa-panel.js vuelve a arrastrar la capa desde la cabecera entera");
+}
+for (const clave of ["apkc-studio/previa-inspector-modo", "apkc-studio/previa-inspector-borde",
+  "apkc-studio/previa-inspector-x", "apkc-studio/previa-inspector-y",
+  "apkc-studio/previa-inspector-ancho", "apkc-studio/previa-inspector-alto"]) {
+  if (!fuentePreviaEstado.includes(clave)) {
+    mal(`previa-panel.js no persiste el registro desprendido del panel (${clave})`);
+  }
+}
 
 // 6c. el texto de un nodo pintado es el dinámico si existe: el rect que va al canvas no puede
 //     quedarse con el texto del layout cuando la app ya escribió otro.
@@ -1191,6 +1239,10 @@ for (const [id, donde] of [
   ["previa-pantalla-completa", "el botón de pantalla completa del emulador"],
   ["previa-salir-completa", "el botón de salir de pantalla completa del emulador"],
   ["previa-inspector", "la capa flotante de registro y consola del panel"],
+  ["previa-inspector-asidero", "el asa de arrastre del registro y consola del panel"],
+  ["previa-inspector-minimizar", "el botón que minimiza y restaura el registro y consola del panel"],
+  ["previa-inspector-acoplar-izquierda", "el botón que acopla el panel al borde izquierdo"],
+  ["previa-inspector-acoplar-derecha", "el botón que acopla el panel al borde derecho"],
   ["previa-inspector-cerrar", "el botón que cierra el registro y la consola del panel"],
   ["previa-inspector-abrir", "el botón que abre el registro y la consola del panel"],
   ["previa-detalle-modelo", "el detalle del modelo en la capa flotante del panel"],
@@ -1208,6 +1260,7 @@ for (const [id, donde] of [
   ["vista-inspector-cerrar", "el botón que cierra el registro y la consola en Pantalla"],
   ["vista-inspector-abrir", "el botón que abre el registro y la consola en Pantalla"],
   ["vista-lado-detalle", "el detalle del modelo en la consola flotante de Pantalla"],
+  ["vista-lado-asidero", "el asa de arrastre de la consola flotante de Pantalla"],
   ["vista-lado-minimizar", "el botón que minimiza y restaura la consola de Pantalla"],
   ["vista-lado-acoplar-izquierda", "el botón que acopla la consola al borde izquierdo"],
   ["vista-lado-acoplar-derecha", "el botón que acopla la consola al borde derecho"],

@@ -67,6 +67,14 @@ const CLAVE_LADO_MODO = "apkc-studio/previa-lado-modo";
 const CLAVE_LADO_BORDE = "apkc-studio/previa-lado-borde";
 const CLAVE_LADO_X = "apkc-studio/previa-lado-x";
 const CLAVE_LADO_Y = "apkc-studio/previa-lado-y";
+// el registro y la consola del panel del editor son la otra capa desprendida: mismo modo, borde y
+// posición, más su propio tamaño libre (el de Pantalla ya vive en CLAVE_LADO/CLAVE_LADO_ALTO)
+const CLAVE_PANEL_MODO = "apkc-studio/previa-inspector-modo";
+const CLAVE_PANEL_BORDE = "apkc-studio/previa-inspector-borde";
+const CLAVE_PANEL_X = "apkc-studio/previa-inspector-x";
+const CLAVE_PANEL_Y = "apkc-studio/previa-inspector-y";
+const CLAVE_PANEL_ANCHO = "apkc-studio/previa-inspector-ancho";
+const CLAVE_PANEL_ALTO = "apkc-studio/previa-inspector-alto";
 const MODO_LIBRE = "libre";
 const MODO_ACOPLADO = "acoplado";
 const MODO_MINIMIZADO = "minimizado";
@@ -480,6 +488,48 @@ export function crearPreviaPanel({ hospedador, proyecto, estadoPestana, editor }
     y: null,
     anterior: MODO_LIBRE,
   };
+  // El registro y la consola del panel del editor: el mismo estado y su propio tamaño libre. Al no
+  // tener tiradores propios, ancho y alto se toman de su caja la primera vez que pasa a capa.
+  const inspector = {
+    modo: MODO_LIBRE,
+    borde: BORDE_POR_DEFECTO,
+    x: null,
+    y: null,
+    anterior: MODO_LIBRE,
+    ancho: null,
+    alto: null,
+  };
+  // Las dos capas desprendidas, con lo que cambia de una a otra: su contenedor, sus claves y sus
+  // botones. El resto del comportamiento es el mismo y vive en `aplicarModoFlotante`.
+  const FLOTANTES = {
+    panel: {
+      estado: inspector,
+      contenedor: () => el("previa-inspector"),
+      claves: { modo: CLAVE_PANEL_MODO, borde: CLAVE_PANEL_BORDE, x: CLAVE_PANEL_X, y: CLAVE_PANEL_Y,
+        ancho: CLAVE_PANEL_ANCHO, alto: CLAVE_PANEL_ALTO },
+      ids: { asidero: "previa-inspector-asidero", minimizar: "previa-inspector-minimizar",
+        izquierda: "previa-inspector-acoplar-izquierda", derecha: "previa-inspector-acoplar-derecha" },
+      ancho: () => (Number.isFinite(inspector.ancho) ? inspector.ancho : ANCHO_POR_DEFECTO),
+      alto: () => inspector.alto,
+      anchoPropio: true,
+      altoPropio: true,
+      // oculta en el modo Vista previa: su caja mide cero hasta que se enseña el emulador
+      esperarCaja: true,
+    },
+    vista: {
+      estado: lado,
+      contenedor: () => marcoLado(),
+      claves: { modo: CLAVE_LADO_MODO, borde: CLAVE_LADO_BORDE, x: CLAVE_LADO_X, y: CLAVE_LADO_Y,
+        ancho: null, alto: null },
+      ids: { asidero: "vista-lado-asidero", minimizar: "vista-lado-minimizar",
+        izquierda: "vista-lado-acoplar-izquierda", derecha: "vista-lado-acoplar-derecha" },
+      ancho: () => cajaLado.ancho,
+      alto: () => cajaLado.alto,
+      anchoPropio: false,
+      altoPropio: false,
+      esperarCaja: false,
+    },
+  };
   const completa = { panel: false, vista: false };
   let ultimaMeta = null;
   // el apk que respalda el modelo en pantalla: el del build o la copia estable. Los clics repiten
@@ -650,38 +700,62 @@ export function crearPreviaPanel({ hospedador, proyecto, estadoPestana, editor }
     actualizarAria();
   }
 
-  // --- la consola de la vista Pantalla: libre, acoplada o minimizada ------------------------
-  // Es una capa `fixed`: no ocupa sitio en el reparto del emulador. El modo, el borde y la
-  // posición se guardan como preferencias de la ventana, igual que el tamaño.
-  function leerLadoFlotante() {
-    const modo = leerClave(CLAVE_LADO_MODO, MODO_LIBRE);
-    lado.modo = modo === MODO_ACOPLADO || modo === MODO_MINIMIZADO ? modo : MODO_LIBRE;
-    lado.borde = leerClave(CLAVE_LADO_BORDE, BORDE_POR_DEFECTO) === "izquierda" ? "izquierda" : "derecha";
-    const x = numeroOpcional(leerClave(CLAVE_LADO_X, ""), 0, 100000);
-    const y = numeroOpcional(leerClave(CLAVE_LADO_Y, ""), 0, 100000);
-    lado.x = Number.isFinite(x) ? x : null;
-    lado.y = Number.isFinite(y) ? y : null;
-    lado.anterior = lado.modo === MODO_MINIMIZADO ? MODO_LIBRE : lado.modo;
+  // --- las dos capas desprendidas: libre, acoplada o minimizada -------------------------------
+  // La consola de la vista Pantalla y el registro del panel del editor son el mismo sistema. Las
+  // dos son `fixed`: no ocupan sitio en el reparto del emulador, se arrastran por toda la ventana
+  // desde su asa y se recortan a los bordes. Su modo, borde, posición y tamaño son preferencias de
+  // la ventana. Las medidas del canvas no dependen de ninguna de ellas.
+  function leerFlotante(nombre) {
+    const f = FLOTANTES[nombre];
+    const estado = f.estado;
+    const modo = leerClave(f.claves.modo, MODO_LIBRE);
+    estado.modo = modo === MODO_ACOPLADO || modo === MODO_MINIMIZADO ? modo : MODO_LIBRE;
+    estado.borde = leerClave(f.claves.borde, BORDE_POR_DEFECTO) === "izquierda" ? "izquierda" : "derecha";
+    const x = numeroOpcional(leerClave(f.claves.x, ""), 0, 100000);
+    const y = numeroOpcional(leerClave(f.claves.y, ""), 0, 100000);
+    estado.x = Number.isFinite(x) ? x : null;
+    estado.y = Number.isFinite(y) ? y : null;
+    if (f.claves.ancho) {
+      const ancho = numeroOpcional(leerClave(f.claves.ancho, ""), LADO_MINIMO, LADO_MAXIMO);
+      if (f.anchoPropio) estado.ancho = Number.isFinite(ancho) ? ancho : null;
+    }
+    if (f.claves.alto) {
+      const alto = numeroOpcional(leerClave(f.claves.alto, ""), LADO_ALTO_MINIMO, LADO_ALTO_MINIMO * 8);
+      if (f.altoPropio) estado.alto = Number.isFinite(alto) ? alto : null;
+    }
+    estado.anterior = estado.modo === MODO_MINIMIZADO ? MODO_LIBRE : estado.modo;
   }
 
-  function guardarLadoFlotante() {
-    guardarClave(CLAVE_LADO_MODO, lado.modo);
-    guardarClave(CLAVE_LADO_BORDE, lado.borde);
-    if (Number.isFinite(lado.x)) guardarClave(CLAVE_LADO_X, lado.x);
-    if (Number.isFinite(lado.y)) guardarClave(CLAVE_LADO_Y, lado.y);
+  function leerFlotantes() {
+    leerFlotante("panel");
+    leerFlotante("vista");
+  }
+
+  function guardarFlotante(nombre) {
+    const f = FLOTANTES[nombre];
+    const estado = f.estado;
+    guardarClave(f.claves.modo, estado.modo);
+    guardarClave(f.claves.borde, estado.borde);
+    if (Number.isFinite(estado.x)) guardarClave(f.claves.x, estado.x);
+    if (Number.isFinite(estado.y)) guardarClave(f.claves.y, estado.y);
+    if (f.claves.ancho && Number.isFinite(estado.ancho)) guardarClave(f.claves.ancho, estado.ancho);
+    if (f.claves.alto && Number.isFinite(estado.alto)) guardarClave(f.claves.alto, estado.alto);
   }
 
   // El alto de la capa libre: el que eligió el usuario o uno razonable para la ventana. En modo
   // acoplado manda la ventana (arriba y abajo a 8 px) y en la pastilla manda el contenido.
-  function altoLibreLado() {
-    if (Number.isFinite(cajaLado.alto)) return Math.round(cajaLado.alto);
+  function altoLibreFlotante(nombre) {
+    const alto = FLOTANTES[nombre].alto();
+    if (Number.isFinite(alto)) return Math.round(alto);
     return Math.max(LADO_ALTO_MINIMO, Math.min(560, ventana().alto - 96));
   }
 
-  function actualizarBotonesLado() {
-    const minimizar = el("vista-lado-minimizar");
+  function actualizarBotonesFlotante(nombre) {
+    const f = FLOTANTES[nombre];
+    const estado = f.estado;
+    const minimizar = el(f.ids.minimizar);
     if (minimizar) {
-      const plegado = lado.modo === MODO_MINIMIZADO;
+      const plegado = estado.modo === MODO_MINIMIZADO;
       minimizar.setAttribute("aria-pressed", String(plegado));
       const titulo = plegado
         ? "Restaurar el registro y la consola"
@@ -689,66 +763,89 @@ export function crearPreviaPanel({ hospedador, proyecto, estadoPestana, editor }
       minimizar.title = titulo;
       minimizar.setAttribute("aria-label", titulo);
     }
-    for (const [id, borde] of [
-      ["vista-lado-acoplar-izquierda", "izquierda"],
-      ["vista-lado-acoplar-derecha", "derecha"],
-    ]) {
+    for (const [id, borde] of [[f.ids.izquierda, "izquierda"], [f.ids.derecha, "derecha"]]) {
       const boton = el(id);
       if (boton) {
-        boton.setAttribute("aria-pressed", String(lado.modo === MODO_ACOPLADO && lado.borde === borde));
+        boton.setAttribute("aria-pressed", String(estado.modo === MODO_ACOPLADO && estado.borde === borde));
       }
     }
   }
 
   // Coloca la capa según su modo. Todo va en línea y con `position: fixed`: cambiar de modo no
   // toca el reparto del emulador, así que el canvas conserva sus medidas y su posición.
-  function aplicarModoLado(persistir) {
-    const marco = marcoLado();
-    if (!marco) return;
+  function aplicarModoFlotante(nombre, persistir) {
+    const f = FLOTANTES[nombre];
+    const estado = f.estado;
+    const contenedor = f.contenedor();
+    if (!contenedor) return;
     const medidas = ventana();
-    marco.dataset.modo = lado.modo;
-    marco.dataset.borde = lado.borde;
-    marco.classList.toggle("minimizado", lado.modo === MODO_MINIMIZADO);
-    marco.style.position = "fixed";
-    if (lado.modo === MODO_ACOPLADO) {
-      marco.style.width = Math.round(cajaLado.ancho) + "px";
-      marco.style.height = "auto";
-      marco.style.top = "8px";
-      marco.style.bottom = "8px";
-      marco.style.left = lado.borde === "izquierda" ? "8px" : "auto";
-      marco.style.right = lado.borde === "izquierda" ? "auto" : "8px";
-    } else if (lado.modo === MODO_MINIMIZADO) {
-      // la pastilla va abajo a la derecha: el título sigue a la vista y el emulador queda libre
-      marco.style.width = "auto";
-      marco.style.height = "auto";
-      marco.style.top = "auto";
-      marco.style.left = "auto";
-      marco.style.bottom = "8px";
-      marco.style.right = "8px";
-    } else {
-      const ancho = Math.round(cajaLado.ancho) || LADO_POR_DEFECTO;
-      const alto = altoLibreLado();
-      const x = acotar(Number.isFinite(lado.x) ? lado.x : medidas.ancho - ancho - 16, 0, medidas.ancho - ancho);
-      const y = acotar(Number.isFinite(lado.y) ? lado.y : 96, 0, medidas.alto - alto);
-      lado.x = Math.round(x);
-      lado.y = Math.round(y);
-      marco.style.width = ancho + "px";
-      marco.style.height = alto + "px";
-      marco.style.left = lado.x + "px";
-      marco.style.top = lado.y + "px";
-      marco.style.right = "auto";
-      marco.style.bottom = "auto";
+    const faltaPosicion = !Number.isFinite(estado.x) || !Number.isFinite(estado.y);
+    const faltaTamano = (f.anchoPropio && !Number.isFinite(estado.ancho)) ||
+      (f.altoPropio && !Number.isFinite(estado.alto));
+    if (estado.modo === MODO_LIBRE && (faltaPosicion || faltaTamano)) {
+      // sin posición guardada se toma la caja que ya tiene (así el panel del editor conserva su
+      // sitio y su tamaño al pasar a capa) o, si todavía mide cero porque está oculto, se espera
+      const caja = typeof contenedor.getBoundingClientRect === "function"
+        ? contenedor.getBoundingClientRect() : null;
+      if (caja && caja.width > 0 && caja.height > 0) {
+        if (f.anchoPropio && !Number.isFinite(estado.ancho)) estado.ancho = Math.round(caja.width);
+        if (f.altoPropio && !Number.isFinite(estado.alto)) estado.alto = Math.round(caja.height);
+        if (faltaPosicion) {
+          estado.x = Math.round(caja.left);
+          estado.y = Math.round(caja.top);
+        }
+      } else if (f.esperarCaja && faltaPosicion) {
+        return;
+      }
     }
-    actualizarBotonesLado();
-    if (persistir) guardarLadoFlotante();
+    contenedor.dataset.modo = estado.modo;
+    contenedor.dataset.borde = estado.borde;
+    contenedor.classList.toggle("minimizado", estado.modo === MODO_MINIMIZADO);
+    contenedor.style.position = "fixed";
+    if (estado.modo === MODO_ACOPLADO) {
+      contenedor.style.width = Math.round(f.ancho()) + "px";
+      contenedor.style.height = "auto";
+      contenedor.style.top = "8px";
+      contenedor.style.bottom = "8px";
+      contenedor.style.left = estado.borde === "izquierda" ? "8px" : "auto";
+      contenedor.style.right = estado.borde === "izquierda" ? "auto" : "8px";
+    } else if (estado.modo === MODO_MINIMIZADO) {
+      // la pastilla va abajo a la derecha: el título sigue a la vista y el emulador queda libre
+      contenedor.style.width = "auto";
+      contenedor.style.height = "auto";
+      contenedor.style.top = "auto";
+      contenedor.style.left = "auto";
+      contenedor.style.bottom = "8px";
+      contenedor.style.right = "8px";
+    } else {
+      const ancho = Math.round(f.ancho()) || LADO_POR_DEFECTO;
+      const alto = altoLibreFlotante(nombre);
+      const x = acotar(Number.isFinite(estado.x) ? estado.x : medidas.ancho - ancho - 16, 0,
+        Math.max(0, medidas.ancho - ancho));
+      const y = acotar(Number.isFinite(estado.y) ? estado.y : 96, 0, Math.max(0, medidas.alto - alto));
+      estado.x = Math.round(x);
+      estado.y = Math.round(y);
+      contenedor.style.width = ancho + "px";
+      contenedor.style.height = alto + "px";
+      contenedor.style.left = estado.x + "px";
+      contenedor.style.top = estado.y + "px";
+      contenedor.style.right = "auto";
+      contenedor.style.bottom = "auto";
+    }
+    actualizarBotonesFlotante(nombre);
+    if (persistir) guardarFlotante(nombre);
   }
 
-  function aplicarModoLadoPorModo(modo, borde) {
-    if (borde) lado.borde = borde;
-    if (modo !== MODO_MINIMIZADO && lado.modo !== MODO_MINIMIZADO) lado.anterior = modo;
-    lado.modo = modo;
-    aplicarModoLado(true);
+  function aplicarModoFlotantePorModo(nombre, modo, borde) {
+    const estado = FLOTANTES[nombre].estado;
+    if (borde) estado.borde = borde;
+    if (modo !== MODO_MINIMIZADO && estado.modo !== MODO_MINIMIZADO) estado.anterior = modo;
+    estado.modo = modo;
+    aplicarModoFlotante(nombre, true);
   }
+
+  // compatibilidad con los llamadores que ya hablaban de la consola de Pantalla
+  function aplicarModoLado(persistir) { aplicarModoFlotante("vista", persistir); }
 
   function actualizarAria() {
     const panel = limitesPanel();
@@ -935,6 +1032,8 @@ export function crearPreviaPanel({ hospedador, proyecto, estadoPestana, editor }
       boton.classList.toggle("activo", visible);
     }
     if (persistir) guardarClave(CLAVE_VISIBLE, visible ? "1" : "0");
+    // la capa del registro vuelve con el panel: si estaba oculta, su caja era cero y se coloca ahora
+    if (visible && modo === "render") aplicarModoFlotante("panel", false);
     if (!visible && !vistaActiva()) return;
     if (modo === "render") pintarRender();
     else { pintarVivo(); programarVivo(0); }
@@ -968,6 +1067,9 @@ export function crearPreviaPanel({ hospedador, proyecto, estadoPestana, editor }
       if (seccionVivo) seccionVivo.hidden = modo !== "vivo";
       if (seccionRender) seccionRender.hidden = modo !== "render";
     }
+    // el registro del panel es una capa: si estaba oculto en Vista previa y aún no tenía caja, se
+    // coloca ahora que el emulador se ve; si ya tenía posición, solo se reacota a la ventana
+    if (modo === "render") aplicarModoFlotante("panel", false);
     if (persistir) guardarClave(CLAVE_MODO, modo);
     if (!visible && !vistaActiva()) return;
     if (modo === "render") pintarRender();
@@ -1433,14 +1535,15 @@ export function crearPreviaPanel({ hospedador, proyecto, estadoPestana, editor }
     const abrir = el(superficie === "panel" ? "previa-inspector-abrir" : "vista-inspector-abrir");
     if (contenedor) contenedor.hidden = !abierto;
     if (abrir) abrir.hidden = !!abierto;
-    // al reabrir la capa de Pantalla se reaplica su modo: pudo cambiar el tamaño de la ventana
-    // mientras estaba cerrada, y su posición libre tiene que seguir dentro de los bordes. Si se
-    // cerró plegada, reabrirla la despliega: el botón dice «Registro y consola», no «pastilla».
-    if (superficie === "vista" && abierto) {
-      if (lado.modo === MODO_MINIMIZADO) {
-        lado.modo = lado.anterior === MODO_ACOPLADO ? MODO_ACOPLADO : MODO_LIBRE;
+    // al reabrir una capa se reaplica su modo: pudo cambiar el tamaño de la ventana mientras estaba
+    // cerrada, y su posición libre tiene que seguir dentro de los bordes. Si se cerró plegada,
+    // reabrirla la despliega: el botón dice «Registro y consola», no «pastilla».
+    if (abierto) {
+      const estado = FLOTANTES[superficie].estado;
+      if (estado.modo === MODO_MINIMIZADO) {
+        estado.modo = estado.anterior === MODO_ACOPLADO ? MODO_ACOPLADO : MODO_LIBRE;
       }
-      aplicarModoLado(false);
+      aplicarModoFlotante(superficie, false);
     }
     if (persistir) {
       guardarClave(superficie === "panel" ? CLAVE_INSPECTOR_PANEL : CLAVE_INSPECTOR_VISTA,
@@ -1448,127 +1551,99 @@ export function crearPreviaPanel({ hospedador, proyecto, estadoPestana, editor }
     }
   }
 
-  function conectarArrastreInspector(contenedor, cabecera) {
-    if (!contenedor || !cabecera) return;
-    let mover = null;
-    cabecera.addEventListener("pointerdown", (e) => {
-      if (e.target && typeof e.target.closest === "function" && e.target.closest("button")) return;
-      const caja = contenedor.getBoundingClientRect();
-      const padre = contenedor.parentElement ? contenedor.parentElement.getBoundingClientRect() : null;
-      if (!padre) return;
-      // se fija la posición actual en left/top: el panel deja de estar pegado al borde y se mueve
-      // como una capa, sin cambiar el tamaño del canvas ni el reparto del marco
-      contenedor.style.left = (caja.left - padre.left) + "px";
-      contenedor.style.top = (caja.top - padre.top) + "px";
-      contenedor.style.right = "auto";
-      contenedor.style.bottom = "auto";
-      mover = {
-        x: e.clientX, y: e.clientY,
-        left: caja.left - padre.left, top: caja.top - padre.top,
-        ancho: caja.width, alto: caja.height,
-        padreAncho: padre.width, padreAlto: padre.height,
-      };
-      try { cabecera.setPointerCapture(e.pointerId); } catch (err) { /* puntero sintético */ }
-      e.preventDefault();
-    });
-    document.addEventListener("pointermove", (e) => {
-      if (!mover) return;
-      const maxLeft = Math.max(0, mover.padreAncho - mover.ancho);
-      const maxTop = Math.max(0, mover.padreAlto - mover.alto);
-      const left = Math.min(maxLeft, Math.max(0, mover.left + e.clientX - mover.x));
-      const top = Math.min(maxTop, Math.max(0, mover.top + e.clientY - mover.y));
-      contenedor.style.left = left + "px";
-      contenedor.style.top = top + "px";
-    });
-    const soltar = () => { mover = null; };
-    document.addEventListener("pointerup", soltar);
-    document.addEventListener("pointercancel", soltar);
-  }
-
-  // Arrastre de la consola desprendida. Se mueve por toda la ventana (coordenadas de viewport,
-  // no del padre) y se acota a sus bordes; arrastrar una acoplada la desprende sin saltar. No
-  // reordena ni recrea nada: el modelo, la sección activa y el scroll se conservan.
-  function conectarConsolaFlotante() {
-    const marco = marcoLado();
-    if (!marco) return;
-    const cabecera = marco.querySelector(".previa-inspector-cab");
-    if (!cabecera) return;
+  // Arrastre de una capa desprendida. Se mueve por toda la ventana (coordenadas de viewport, no
+  // del padre) y se acota a sus bordes; arrastrar una acoplada la desprende sin saltar. El gesto
+  // empieza solo en el asa: el resto de la cabecera deja pasar el clic al canvas que hay debajo.
+  // No reordena ni recrea nada: el modelo, la sección activa y el scroll se conservan.
+  function conectarFlotante(nombre) {
+    const f = FLOTANTES[nombre];
+    const estado = f.estado;
+    const contenedor = f.contenedor();
+    if (!contenedor) return;
+    const asa = el(f.ids.asidero);
+    if (!asa) return;
+    const cabecera = contenedor.querySelector(".previa-inspector-cab");
     let mover = null;
 
     const restaurar = () => {
-      lado.modo = lado.anterior === MODO_ACOPLADO ? MODO_ACOPLADO : MODO_LIBRE;
-      aplicarModoLado(true);
+      estado.modo = estado.anterior === MODO_ACOPLADO ? MODO_ACOPLADO : MODO_LIBRE;
+      aplicarModoFlotante(nombre, true);
     };
     const minimizar = () => {
-      if (lado.modo === MODO_MINIMIZADO) { restaurar(); return; }
-      lado.anterior = lado.modo;
-      lado.modo = MODO_MINIMIZADO;
-      aplicarModoLado(true);
+      if (estado.modo === MODO_MINIMIZADO) { restaurar(); return; }
+      estado.anterior = estado.modo;
+      estado.modo = MODO_MINIMIZADO;
+      aplicarModoFlotante(nombre, true);
     };
-    const acoplar = (borde) => aplicarModoLadoPorModo(MODO_ACOPLADO, borde);
+    const acoplar = (borde) => aplicarModoFlotantePorModo(nombre, MODO_ACOPLADO, borde);
 
-    cabecera.addEventListener("pointerdown", (e) => {
+    asa.addEventListener("pointerdown", (e) => {
       if (e.button !== undefined && e.button !== 0) return;
-      if (e.target && typeof e.target.closest === "function" && e.target.closest("button")) return;
-      if (lado.modo === MODO_MINIMIZADO) return;
-      const caja = marco.getBoundingClientRect();
-      if (lado.modo === MODO_ACOPLADO) {
+      if (estado.modo === MODO_MINIMIZADO) return;
+      const caja = contenedor.getBoundingClientRect();
+      if (estado.modo === MODO_ACOPLADO) {
         // se queda donde estaba y pasa a libre: el primer movimiento no da un salto
-        lado.modo = MODO_LIBRE;
-        lado.x = Math.round(caja.left);
-        lado.y = Math.round(caja.top);
-        aplicarModoLado(false);
+        estado.modo = MODO_LIBRE;
+        estado.x = Math.round(caja.left);
+        estado.y = Math.round(caja.top);
+        aplicarModoFlotante(nombre, false);
       }
       mover = {
         x: e.clientX, y: e.clientY,
         left: caja.left, top: caja.top,
         ancho: caja.width, alto: caja.height,
       };
-      try { cabecera.setPointerCapture(e.pointerId); } catch (err) { /* puntero sintético */ }
+      try { asa.setPointerCapture(e.pointerId); } catch (err) { /* puntero sintético */ }
       e.preventDefault();
     });
 
     document.addEventListener("pointermove", (e) => {
       if (!mover) return;
       const medidas = ventana();
-      lado.x = Math.round(acotar(mover.left + e.clientX - mover.x, 0, medidas.ancho - mover.ancho));
-      lado.y = Math.round(acotar(mover.top + e.clientY - mover.y, 0, medidas.alto - mover.alto));
-      marco.style.left = lado.x + "px";
-      marco.style.top = lado.y + "px";
-      marco.style.right = "auto";
-      marco.style.bottom = "auto";
+      estado.x = Math.round(acotar(mover.left + e.clientX - mover.x, 0,
+        Math.max(0, medidas.ancho - mover.ancho)));
+      estado.y = Math.round(acotar(mover.top + e.clientY - mover.y, 0,
+        Math.max(0, medidas.alto - mover.alto)));
+      contenedor.style.left = estado.x + "px";
+      contenedor.style.top = estado.y + "px";
+      contenedor.style.right = "auto";
+      contenedor.style.bottom = "auto";
       e.preventDefault();
     });
 
     const soltar = () => {
       if (!mover) return;
       mover = null;
-      aplicarModoLado(true);
+      aplicarModoFlotante(nombre, true);
     };
     document.addEventListener("pointerup", soltar);
     document.addEventListener("pointercancel", soltar);
 
-    // con la pastilla, un clic en la cabecera la despliega
-    cabecera.addEventListener("click", (e) => {
-      if (lado.modo !== MODO_MINIMIZADO) return;
-      if (e.target && typeof e.target.closest === "function" && e.target.closest("button")) return;
-      restaurar();
-    });
-
-    const botonMinimizar = el("vista-lado-minimizar");
-    if (botonMinimizar) {
-      botonMinimizar.addEventListener("click", () => {
-        if (lado.modo === MODO_MINIMIZADO) restaurar(); else minimizar();
+    // con la pastilla, un clic en la cabecera la despliega: el hueco, el título y el asa; los demás
+    // botones conservan su acción
+    if (cabecera) {
+      cabecera.addEventListener("click", (e) => {
+        if (estado.modo !== MODO_MINIMIZADO) return;
+        const boton = e.target && typeof e.target.closest === "function" ? e.target.closest("button") : null;
+        if (boton && boton !== asa) return;
+        restaurar();
       });
     }
-    const izquierda = el("vista-lado-acoplar-izquierda");
+
+    const botonMinimizar = el(f.ids.minimizar);
+    if (botonMinimizar) {
+      botonMinimizar.addEventListener("click", () => {
+        if (estado.modo === MODO_MINIMIZADO) restaurar(); else minimizar();
+      });
+    }
+    const izquierda = el(f.ids.izquierda);
     if (izquierda) izquierda.addEventListener("click", () => acoplar("izquierda"));
-    const derecha = el("vista-lado-acoplar-derecha");
+    const derecha = el(f.ids.derecha);
     if (derecha) derecha.addEventListener("click", () => acoplar("derecha"));
 
     // al cambiar el tamaño de la ventana, la capa libre se recorta a los bordes nuevos
     if (typeof window !== "undefined") {
-      window.addEventListener("resize", () => aplicarModoLado(false));
+      window.addEventListener("resize", () => aplicarModoFlotante(nombre, false));
     }
   }
 
@@ -1614,8 +1689,8 @@ export function crearPreviaPanel({ hospedador, proyecto, estadoPestana, editor }
       const abrir = el(prefijo + "-inspector-abrir");
       if (abrir) abrir.addEventListener("click", () => aplicarInspector(superficie, true));
     }
-    const inspector = el("previa-inspector");
-    if (inspector) conectarArrastreInspector(inspector, inspector.querySelector(".previa-inspector-cab"));
+    conectarFlotante("panel");
+    conectarFlotante("vista");
     // una pantalla completa no puede sobrevivir a cambiar de vista: taparía la vista nueva
     if (typeof MutationObserver === "function" && document.body) {
       new MutationObserver(() => {
@@ -3492,7 +3567,7 @@ export function crearPreviaPanel({ hospedador, proyecto, estadoPestana, editor }
     queridaLado.arriba = numeroOpcional(leerClave(CLAVE_LADO_ARRIBA, "0"), 0, LADO_ALTO_MINIMO * 8) || 0;
     visible = leerClave(CLAVE_VISIBLE, "1") !== "0";
     modo = leerClave(CLAVE_MODO, "vivo") === "render" ? "render" : "vivo";
-    leerLadoFlotante();
+    leerFlotantes();
 
     montarMarco(marco, {
       caja: () => caja,
@@ -3533,7 +3608,6 @@ export function crearPreviaPanel({ hospedador, proyecto, estadoPestana, editor }
     conectarCanvas("vista-previa");
     conectarEditable();
     conectarControles();
-    conectarConsolaFlotante();
     actualizarEnergiaBotones();
     aplicarPantalla(pantalla, false);
     aplicarInspector("panel", inspectorAbierto.panel, false);
@@ -3550,6 +3624,7 @@ export function crearPreviaPanel({ hospedador, proyecto, estadoPestana, editor }
         // alto disponible también cambia: se recorta la preferencia guardada, no la de un rato
         aplicarPanel(false);
         aplicarLado(false);
+        aplicarModoFlotante("panel", false);
         ajustarPantallas();
         if (!visible && !vistaActiva()) return;
         programarPintado();

@@ -537,8 +537,10 @@ kbd {
 .marco-vista-lado.minimizado .vista-lado > :not(.previa-inspector-cab) { display: none; }
 .marco-vista-lado.minimizado .previa-inspector-cab {
   border-bottom: 0;
-  padding: 5px 6px 5px 12px;
+  padding: 5px 6px 5px 4px;
   cursor: pointer;
+  /* la pastilla sí recibe el clic: es lo que la despliega */
+  pointer-events: auto;
 }
 .marco-vista-lado.minimizado .previa-inspector-titulo { flex: 0 1 auto; }
 .marco-vista-lado.minimizado #vista-lado-acoplar-izquierda,
@@ -658,6 +660,10 @@ kbd {
   padding: 1px 3px;
 }
 .previa-control-campo input { width: 4.2em; }
+/* El registro y la consola del panel del editor son otra capa desprendida, con el mismo sistema que
+   la de la vista Pantalla: `fixed` en los tres modos, arrastre por toda la ventana desde el asa y
+   recorte a los bordes. La superficie no reparte ni un píxel del emulador, así que abrirla, moverla,
+   acoplarla o minimizarla no cambia las medidas del canvas. */
 .previa-inspector {
   position: absolute;
   z-index: 5;
@@ -674,18 +680,55 @@ kbd {
   border-radius: 6px;
   box-shadow: 0 8px 22px rgba(0, 0, 0, .38);
   overflow: hidden;
+  /* la caja es una capa: solo sus hijos reciben el puntero, así el clic que cae en el hueco de la
+     cabecera llega al canvas que hay debajo (el botón del contador queda en esa franja) */
+  pointer-events: none;
 }
+.previa-inspector > * { pointer-events: auto; }
 .previa-inspector[hidden] { display: none; }
+.previa-inspector[data-modo="libre"],
+.previa-inspector[data-modo="acoplado"],
+.previa-inspector[data-modo="minimizado"] {
+  position: fixed;
+  /* por encima de los controles y del destino del arrastre del mismo panel, pero por debajo de las
+     capas del modo editar (z 60) y de los diálogos, como estaba cuando era `absolute` */
+  z-index: 6;
+  top: auto;
+  right: auto;
+  bottom: auto;
+  left: auto;
+  height: auto;
+  max-width: calc(100vw - 16px);
+}
+.previa-inspector.minimizado {
+  width: max-content;
+  border-radius: 999px;
+}
+.previa-inspector.minimizado > :not(.previa-inspector-cab) { display: none; }
+.previa-inspector.minimizado .previa-inspector-cab {
+  padding: 5px 6px 5px 4px;
+  border-bottom: 0;
+  cursor: pointer;
+  /* la pastilla sí recibe el clic: es lo que la despliega */
+  pointer-events: auto;
+}
+.previa-inspector.minimizado .previa-inspector-titulo { flex: 0 1 auto; }
+.previa-inspector.minimizado #previa-inspector-acoplar-izquierda,
+.previa-inspector.minimizado #previa-inspector-acoplar-derecha { display: none; }
 .previa-inspector-cab {
   display: flex;
   align-items: center;
   gap: 4px;
   flex: 0 0 auto;
-  padding: 2px 2px 2px 8px;
+  padding: 2px 2px 2px 2px;
   border-bottom: 1px solid var(--borde);
-  cursor: move;
+  /* la cabecera no intercepta el clic: el arrastre va por el asa y los botones sí lo reciben */
+  pointer-events: none;
   touch-action: none;
 }
+.previa-inspector-cab button,
+.previa-inspector-asidero { pointer-events: auto; }
+.previa-inspector-asidero { cursor: move; touch-action: none; }
 .previa-inspector-titulo {
   flex: 1 1 auto;
   min-width: 0;
@@ -716,9 +759,12 @@ kbd {
 }
 .previa-inspector-abrir:hover { background: var(--boton-hover); color: var(--blanco); }
 .previa-inspector-abrir[hidden] { display: none; }
-/* Pantalla completa: la superficie sale del reparto y cubre la ventana; el canvas se ajusta y
-   las capas flotantes siguen donde estaban. No hay recarga ni otro comando. */
-.pantalla-completa {
+/* Pantalla completa: la superficie sale del reparto y cubre la ventana; el canvas se ajusta y las
+   capas flotantes siguen donde estaban. No hay recarga ni otro comando. El selector lleva el id
+   porque `#previa-render { position: relative }` (1,0,0) ganaba a una clase suelta y la pantalla
+   completa no llegaba a fijarse: por eso el botón no hacía nada. */
+#previa-render.pantalla-completa,
+#vista-cuerpo.pantalla-completa {
   position: fixed;
   inset: 0;
   z-index: 70;
