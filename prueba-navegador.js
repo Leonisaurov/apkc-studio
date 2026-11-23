@@ -14,9 +14,13 @@ import { fileURLToPath } from "node:url";
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const CHROME = process.env.CHROME_BIN || "chromium-browser";
 
-const PUERTO = process.env.STUDIO_PORT || "9333";
-const HTTP_PORT = Number(process.env.STUDIO_NAV_PORT || 8789);
-const URL_PAGINA = "http://127.0.0.1:" + HTTP_PORT + "/index.html";
+// Puertos propios, no fijos: un chromium huérfano de una corrida anterior sigue escuchando en el
+// puerto de debug y `target()` se le acoplaría, leyendo su OPFS con el proyecto ya creado (el
+// estado de la vista previa saldría «res/layout/main.xml · 2 vistas» en vez de «Abre un
+// res/layout…»). Con 0 el sistema elige puertos libres y se leen los reales del propio navegador.
+const PUERTO = process.env.STUDIO_PORT || "0";
+let HTTP_PORT = Number(process.env.STUDIO_NAV_PORT || 0);
+let URL_PAGINA = "";
 
 const MIME = {
   ".html": "text/html; charset=utf-8", ".js": "text/javascript; charset=utf-8",
@@ -44,12 +48,16 @@ const servidor = http.createServer((peticion, respuesta) => {
   respuesta.end(fs.readFileSync(fichero));
 });
 servidor.listen(HTTP_PORT, "127.0.0.1");
+await new Promise((listo) => servidor.once("listening", listo));
+HTTP_PORT = servidor.address().port;
+URL_PAGINA = "http://127.0.0.1:" + HTTP_PORT + "/index.html";
 
-// perfil propio y limpio: chromium deja un SingletonLock cuando muere con SIGKILL, y el
-// siguiente arranque con el perfil de ~ no subre el debugger — el fallo parece de la pagina
-// y es del perfil. TMPDIR de Termux, nunca /tmp.
+// perfil propio y limpio de ESTA corrida (sufijo por PID): chromium deja un SingletonLock cuando
+// muere con SIGKILL y un perfil fijo compartido arrastra el OPFS del intento anterior (su proyecto
+// creado), que es justo lo que falsea el arranque «sin proyecto» de la vista previa. TMPDIR de
+// Termux, nunca /tmp.
 const TMP = process.env.PREFIX ? process.env.PREFIX + "/tmp" : (process.env.TMPDIR || "/tmp");
-const PERFIL = path.join(TMP, "studio-chrome-perfil");
+const PERFIL = path.join(TMP, "studio-chrome-perfil-" + process.pid);
 fs.rmSync(PERFIL, { recursive: true, force: true });
 
 const navegador = spawn(CHROME, [
@@ -66,13 +74,33 @@ navegador.stderr.on("data", (d) => { salidaNavegador += d.toString(); });
 
 const esperar = (ms) => new Promise((r) => setTimeout(r, ms));
 
+// Puerto de debug real: con `--remote-debugging-port=0` lo elige chromium y lo deja en
+// `DevToolsActivePort` del perfil. Leerlo evita acoplarse a un puerto fijo donde podría seguir vivo
+// un chromium de otra corrida.
+function puertoDevtools() {
+  try {
+    const primera = fs.readFileSync(path.join(PERFIL, "DevToolsActivePort"), "utf8").split("\n")[0].trim();
+    const n = Number(primera);
+    return Number.isFinite(n) && n > 0 ? n : null;
+  } catch (e) { return null; }
+}
+
 async function target() {
   for (let i = 0; i < 60; i++) {
-    try {
-      const lista = await (await fetch("http://127.0.0.1:" + PUERTO + "/json/list")).json();
-      const p = lista.find((t) => t.type === "page" && t.url.startsWith("http://127.0.0.1:" + HTTP_PORT));
-      if (p) return p;
-    } catch (e) { /* aun no escucha */ }
+    // si el navegador que lanzamos ya murió (p. ej. no pudo abrir el debugger), decirlo en vez de
+    // esperar 30 s o, peor, hablar con otro chromium que escuche en el puerto
+    if (navegador.exitCode !== null) {
+      throw new Error("chromium se cerró antes de abrir el debugger (¿puerto " + PUERTO +
+        " ocupado?):\n" + salidaNavegador.slice(0, 2000));
+    }
+    const puerto = PUERTO === "0" ? puertoDevtools() : Number(PUERTO);
+    if (puerto) {
+      try {
+        const lista = await (await fetch("http://127.0.0.1:" + puerto + "/json/list")).json();
+        const p = lista.find((t) => t.type === "page" && t.url.startsWith("http://127.0.0.1:" + HTTP_PORT));
+        if (p) return p;
+      } catch (e) { /* aun no escucha */ }
+    }
     await esperar(500);
   }
   throw new Error("chromium no subio el debugger:\n" + salidaNavegador.slice(0, 2000));
@@ -371,11 +399,13 @@ function comprueba(cond, msg) { if (!cond) { fallos++; console.log("  FALLO:", m
   ws.close();
   navegador.kill("SIGKILL");
   servidor.close();
+  fs.rmSync(PERFIL, { recursive: true, force: true });
   console.log(fallos ? "navegador: " + fallos + " problemas" : "navegador: todo en orden");
   process.exit(fallos ? 1 : 0);
 })().catch((e) => {
   console.log("  FALLO: " + e.message);
   navegador.kill("SIGKILL");
   servidor.close();
+  fs.rmSync(PERFIL, { recursive: true, force: true });
   process.exit(1);
 });
