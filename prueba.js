@@ -705,6 +705,67 @@ if (conDinamico.length !== 2 || conDinamico[1].texto !== "Pulsos: 1") {
   mal("rectsEscalados no usa textoDinamico: " + JSON.stringify(conDinamico.map((r) => r.texto)));
 }
 
+// 6c-bis. la entrada de texto del emulador: los tipos que admiten teclado son los mismos que
+//         `admiteTecleo` del intérprete, el toque elige el EditText más profundo y el texto tecleado
+//         viaja en el guion como `--escribir id/texto`, sin tocar el XML del editor.
+const modeloTexto = {
+  pantalla: { x: 0, y: 0, ancho: 100, alto: 100 },
+  raiz: {
+    tipo: "FrameLayout", rect: { x: 0, y: 0, ancho: 100, alto: 100 },
+    hijos: [
+      { tipo: "TextView", id: "id/etiqueta", idRef: "0x7f010000", texto: "Nombre",
+        rect: { x: 0, y: 0, ancho: 100, alto: 10 } },
+      { tipo: "EditText", id: "id/nombre", idRef: "0x7f010001", texto: "",
+        rect: { x: 0, y: 10, ancho: 100, alto: 20 } },
+      { tipo: "TextInputEditText", id: "id/apellido", idRef: "0x7f010002", texto: "",
+        rect: { x: 0, y: 30, ancho: 100, alto: 20 } },
+    ],
+  },
+};
+for (const tipo of ["EditText", "AutoCompleteTextView", "MultiAutoCompleteTextView", "TextInputEditText"]) {
+  if (!previaPanel.esEditableTexto(tipo)) mal("esEditableTexto rechaza " + tipo);
+}
+for (const tipo of ["TextView", "Button", "CheckBox", "", null]) {
+  if (previaPanel.esEditableTexto(tipo)) mal("esEditableTexto acepta " + tipo);
+}
+if (!previaPanel.editableEnPunto(modeloTexto, 100, 100, 50, 15) ||
+    previaPanel.editableEnPunto(modeloTexto, 100, 100, 50, 15).idRef !== "0x7f010001") {
+  mal("editableEnPunto no elige el primer EditText");
+}
+if (!previaPanel.editableEnPunto(modeloTexto, 100, 100, 50, 35) ||
+    previaPanel.editableEnPunto(modeloTexto, 100, 100, 50, 35).idRef !== "0x7f010002") {
+  mal("editableEnPunto no elige el segundo EditText");
+}
+if (previaPanel.editableEnPunto(modeloTexto, 100, 100, 50, 5) ||
+    previaPanel.editableEnPunto(modeloTexto, 100, 100, 150, 15)) {
+  mal("editableEnPunto acepta un punto fuera de los EditText");
+}
+if (previaPanel.oyenteEnPunto(modeloTexto, 100, 100, 50, 15)) {
+  mal("un EditText sin OnClickListener aparece como oyente");
+}
+const escritoEnModelo = JSON.parse(JSON.stringify(modeloTexto));
+escritoEnModelo.raiz.hijos[1].textoDinamico = "Ana";
+const rectEscrito = vistaPrevia.rectsEscalados(escritoEnModelo, 100, 100)
+  .find((r) => r.idRef === "0x7f010001");
+if (!rectEscrito || rectEscrito.texto !== "Ana") {
+  mal("el texto tecleado no llega al rect que pinta el canvas");
+}
+const argvTexto = previaPanel.argvDePrevia([
+  { tipo: "pulsar", valor: "id/enviar" },
+  { tipo: "escribir", idRef: "0x7f010001", valor: "Ana" },
+  { tipo: "escribir", idRef: "0x7f010002", valor: "Peña/Os" },
+  { tipo: "escribir", idRef: "0x7f010003", valor: "" },
+  { tipo: "menu" },
+], "build/app.apk");
+if (argvTexto.join(" ") !==
+    "preview --pulsar id/enviar --escribir 0x7f010001/Ana --escribir 0x7f010002/Peña/Os " +
+    "--escribir 0x7f010003/ --menu build/app.apk") {
+  mal("argvDePrevia no entrega --escribir en orden: " + JSON.stringify(argvTexto));
+}
+if (!/createElement\("input"\)/.test(fuentePreviaEstado) || !/--escribir/.test(fuentePreviaEstado)) {
+  mal("previa-panel.js no monta un campo real ni entrega --escribir al intérprete");
+}
+
 // 6d. la vista dividida: ancho del separador, ruta del layout y bloque `ejecucion`. Son funciones
 //     puras; el DOM y los píxeles se prueban en chromium (prueba-pestana.js).
 const ancho = previaPanel.anchoValido;

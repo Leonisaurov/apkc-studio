@@ -185,6 +185,11 @@ los imports y no debe depender de ese puente.
   oyentes»: no vuelvas a decir lo segundo antes de ejecutar `onCreate`. `apkc preview` enlaza los
   `android:onClick` del layout; si tocas ese enlace, su prueba es
   `TestElPreviewEnlazaElOnClickDeclarativoDelLayout`.
+- **Los EditText del emulador no mutan el documento.** El toque sobre una vista editable abre un
+  `<input>` real sobre el rect dibujado; el texto viaja como `--escribir idRef/texto` en el guion y
+  vuelve en `textoDinamico`, que el pintor ya prefiere. Es estado de la ejecución: ni `EDITOR.cambiar()`
+  ni OPFS ni `estadoPestana`. Al tocar fuera o apagar se cierra el campo; al compilar, cargar otra apk
+  o reiniciar se borra lo tecleado. Los tipos editable son los de `admiteTecleo` del intérprete.
 - **La barra separa consola de compilación.** El botón `#alternar-panel` se llama **Compilar** y
   abre la pestaña Compilar; la pestaña de salida se llama **Consola** y lleva el icono de terminal.
   No vuelvas a poner «Salida» ni un botón de build clásico: ese build no corre en wasm.

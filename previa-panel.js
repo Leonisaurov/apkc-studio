@@ -123,6 +123,14 @@ const ESPERA_TECLEO = 350;
 const ESPERA_DOCUMENTO = 160;
 const ESPERA_ARBOL = 400;
 const ESPERA_PREVIA = 120;
+// el tecleo se reúne en una sola pasada del intérprete: escribir cada letra repetiría el guion
+// completo en wasm, y lo que importa es el texto final que ve la app
+const ESPERA_ESCRITURA = 220;
+// los tipos que aceptan teclado del usuario, los mismos que `admiteTecleo` de apkc preview. Un toque
+// sobre uno de ellos se consume en el campo, no se entrega al OnClickListener del contenedor.
+const TIPOS_CON_TECLADO = new Set([
+  "EditText", "AutoCompleteTextView", "MultiAutoCompleteTextView", "TextInputEditText",
+]);
 
 const MENSAJE_SIN_EJECUCION = "El modelo no trae ejecución: el apk se leyó con --sin-ejecutar o no " +
   "tiene classes.dex. Sin capturas ni avisos.";
@@ -346,6 +354,12 @@ export function argvDePrevia(guion, apk) {
     const tipo = paso && paso.tipo;
     if (tipo === "menu") argv.push("--menu");
     else if (tipo === "menu-item") argv.push("--menu-item", String(paso.valor));
+    else if (tipo === "escribir") {
+      // `--escribir id/texto` entrega el texto como si el usuario lo tecleara; el idRef numérico no
+      // lleva barras, así que la primera separa el id del texto (que sí puede llevarlas y tildes)
+      const texto = paso.valor == null ? "" : String(paso.valor);
+      argv.push("--escribir", String(paso.idRef) + "/" + texto);
+    }
     else if (tipo === "intercambiar") {
       argv.push("--intercambiar", String(paso.firma) + "=" + String(paso.ruta));
     } else argv.push("--pulsar", String(paso && paso.valor));
@@ -443,6 +457,26 @@ export function oyenteEnPunto(modelo, ancho, alto, x, y) {
   let elegido = null;
   for (const r of rectsEscalados(modelo, ancho, alto)) {
     if (!r.oyente || !r.idRef) continue;
+    if (x < r.x || y < r.y || x > r.x + r.ancho || y > r.y + r.alto) continue;
+    if (!elegido || r.profundidad >= elegido.profundidad) elegido = r;
+  }
+  return elegido;
+}
+
+// ¿Esta vista admite texto del usuario? Es la misma lista que el intérprete rechaza con `--escribir`
+// sobre cualquier otro tipo; mantenerla aquí evita abrir un campo donde el aparato no dejaría teclear.
+export function esEditableTexto(tipo) {
+  return TIPOS_CON_TECLADO.has(String(tipo || ""));
+}
+
+// La vista editable bajo un punto, en las mismas coordenadas lógicas que el pintor. Se elige la más
+// profunda, como en `oyenteEnPunto`, para que un EditText dentro de un contenedor con listener se
+// quede con el toque en vez de disparar el clic del padre.
+export function editableEnPunto(modelo, ancho, alto, x, y) {
+  if (!Number.isFinite(x) || !Number.isFinite(y)) return null;
+  let elegido = null;
+  for (const r of rectsEscalados(modelo, ancho, alto)) {
+    if (!r.idRef || !esEditableTexto(r.tipo)) continue;
     if (x < r.x || y < r.y || x > r.x + r.ancho || y > r.y + r.alto) continue;
     if (!elegido || r.profundidad >= elegido.profundidad) elegido = r;
   }
@@ -709,6 +743,15 @@ export function crearPreviaPanel({ hospedador, proyecto, estadoPestana, editor, 
   // guarda la máquina; conservar el orden es lo que hace que un clic posterior al menú vea el mismo
   // estado que en el aparato.
   let guion = [];
+  // Lo tecleado en los EditText es estado de la EJECUCIÓN, no del documento: nunca se escribe en el
+  // XML. Se guarda por idRef y viaja en el guion como `--escribir id/texto`, en el orden del tecleo.
+  const textosEscritos = new Map();
+  // El campo real que recibe el teclado del dispositivo. Oculto salvo cuando un EditText tiene foco.
+  let campoTexto = null;
+  let focoTexto = null;
+  let temporizadorEscritura = 0;
+  // el pointerdown que abrió el campo: el mismo evento sube al documento y no puede cerrarlo
+  let ignorarCierreTexto = null;
   // el número del dex soltado: cada swap escribe su propio fichero en la zona de prueba para que
   // repetir el guion no cambie los bytes de los pasos anteriores
   let secuenciaIntercambio = 0;
@@ -2119,11 +2162,15 @@ export function crearPreviaPanel({ hospedador, proyecto, estadoPestana, editor, 
   // Un modelo nuevo (compilación, apk soltada, reinicio) empieza otra ejecución: los clics y las
   // órdenes del menú anteriores dejan de valer y el desplegable se cierra.
   function reiniciarGuion() {
+    cerrarCampoTexto(false);
     pulsos = [];
     guion = [];
     modeloDeClics = null;
     menuDesplegado = false;
     claveMenu = "";
+    // el texto tecleado era estado de la ejecución anterior: una compilación o una apk nueva
+    // arrancan desde `onCreate` y no heredan lo que el usuario escribió en la pantalla anterior
+    textosEscritos.clear();
   }
 
   function mensajeVistaPreviaRender(texto) {
@@ -2316,11 +2363,7 @@ export function crearPreviaPanel({ hospedador, proyecto, estadoPestana, editor, 
     apagado = false;
     guardarClave(CLAVE_ENERGIA, "encendido");
     actualizarEnergiaBotones();
-    pulsos = [];
-    guion = [];
-    modeloDeClics = null;
-    menuDesplegado = false;
-    claveMenu = "";
+    reiniciarGuion();
     rutaApkSoltada = RUTA_APK_SOLTADA;
     for (const superficie of SUPERFICIES) limpiarCanvas(el(superficie.canvasRender));
     mensajeEmulador("Abriendo " + nombre + "…");
@@ -2383,7 +2426,10 @@ export function crearPreviaPanel({ hospedador, proyecto, estadoPestana, editor, 
     if (persistir) guardarClave(CLAVE_ENERGIA, apagado ? "apagado" : "encendido");
     actualizarEnergiaBotones();
     if (apagado) {
-      // apagar no ejecuta ni borra la última apk: solo deja el lienzo en negro
+      // apagar no ejecuta ni borra la última apk: solo deja el lienzo en negro. El campo de texto
+      // se cierra y lo tecleado deja de valer, como el foco de un dispositivo que se apaga.
+      cerrarCampoTexto(false);
+      textosEscritos.clear();
       cerrarProgresoApk();
       mensajeEmulador(MENSAJE_APAGADO);
       pintarRender();
@@ -2655,6 +2701,151 @@ export function crearPreviaPanel({ hospedador, proyecto, estadoPestana, editor, 
     document.addEventListener(EVENTO_ULTIMA_APK, () => { actualizarUltima(); });
   }
 
+  // --- la entrada de texto del emulador -----------------------------------------------------
+  // El EditText del canvas no es un elemento editable: es un rectángulo dibujado. Para que el
+  // teclado del dispositivo funcione se abre un `<input>` real, oculto el resto del tiempo, sobre
+  // la caja del nodo. Lo que teclea el usuario NO toca el XML: es estado de la ejecución y se
+  // entrega a `apkc preview` con `--escribir`, que también lo publica en `textoDinamico`.
+  function rectDeIdRef(canvas, idRef) {
+    if (!canvas || !idRef) return null;
+    const espacio = canvas.__espacio || { ancho: 0, alto: 0 };
+    if (!(espacio.ancho > 0) || !(espacio.alto > 0)) return null;
+    const modelo = modeloParaEmulador();
+    if (!modelo) return null;
+    return rectsEscalados(modelo, espacio.ancho, espacio.alto).find((r) => r.idRef === idRef) || null;
+  }
+
+  // El texto con el que se abre el campo: lo ya tecleado en esta ejecución, o lo que el modelo
+  // muestra (el dinámico si la app escribió algo, el del layout si no).
+  function textoInicialDe(idRef) {
+    if (textosEscritos.has(idRef)) return textosEscritos.get(idRef);
+    for (const { nodo } of nodosAplanados(modeloActual())) {
+      if (nodo && nodo.idRef === idRef) return textoDeNodo(nodo);
+    }
+    return "";
+  }
+
+  function colocarCampoTexto() {
+    if (!campoTexto || !focoTexto || campoTexto.hidden) return;
+    const { canvas, idRef } = focoTexto;
+    const r = rectDeIdRef(canvas, idRef);
+    if (!r) { cerrarCampoTexto(); return; }
+    const espacio = canvas.__espacio || { ancho: 0, alto: 0 };
+    const caja = typeof canvas.getBoundingClientRect === "function"
+      ? canvas.getBoundingClientRect() : null;
+    if (!caja || !(caja.width > 0) || !(caja.height > 0)) return;
+    const sx = caja.width / espacio.ancho;
+    const sy = caja.height / espacio.alto;
+    campoTexto.style.left = (caja.left + r.x * sx) + "px";
+    campoTexto.style.top = (caja.top + r.y * sy) + "px";
+    campoTexto.style.width = Math.max(24, r.ancho * sx) + "px";
+    campoTexto.style.height = Math.max(18, r.alto * sy) + "px";
+    campoTexto.style.fontSize = Math.max(12, Math.min(28, r.alto * sy * 0.7)) + "px";
+  }
+
+  // Cerrar es perder el foco, no descartar lo tecleado: si quedaba una escritura aplazada se entrega
+  // antes. El campo se oculta y se le quita el foco; `focoTexto` se limpia ANTES del `blur` para que
+  // el manejador no vuelva a entrar aquí.
+  function cerrarCampoTexto(entregar = true) {
+    if (!campoTexto || !focoTexto) return;
+    if (temporizadorEscritura) {
+      clearTimeout(temporizadorEscritura);
+      temporizadorEscritura = 0;
+      // un reinicio o un apagado descarta la escritura pendiente: entregarla ejecutaría `--escribir`
+      // sobre una apk que ya no es la que hay en pantalla
+      if (entregar) escribirAhora();
+    }
+    const activo = typeof document !== "undefined" && document.activeElement === campoTexto;
+    campoTexto.hidden = true;
+    focoTexto = null;
+    if (activo) campoTexto.blur();
+  }
+
+  // Entrega el texto final al intérprete repitiendo el guion completo. Solo se fusiona con el último
+  // paso si ese paso es un `--escribir` del MISMO EditText: así teclear después de un clic no mueve
+  // la escritura por delante del clic, y dos EditText distintos conservan cada uno su texto.
+  async function enviarEscritura(idRef, valor) {
+    if (apagado || pulsando || typeof idRef !== "string" || !idRef) return null;
+    textosEscritos.set(idRef, valor);
+    const ultimo = guion[guion.length - 1];
+    if (ultimo && ultimo.tipo === "escribir" && ultimo.idRef === idRef) ultimo.valor = valor;
+    else guion.push({ tipo: "escribir", idRef, valor });
+    const copia = guion.map((p) => ({ ...p }));
+    const pintado = await ejecutaGuion(0, "Escribiendo en " + idRef + "…");
+    if (!pintado) {
+      // `ejecutaGuion` descarta el guion desde cero al fallar; aquí solo falló la escritura, así
+      // que se devuelven los clics y los textos anteriores tal como estaban.
+      guion.length = 0;
+      guion.push(...copia);
+      textosEscritos.delete(idRef);
+    }
+    return pintado;
+  }
+
+  function escribirAhora() {
+    return focoTexto ? enviarEscritura(focoTexto.idRef, focoTexto.valor) : Promise.resolve(null);
+  }
+
+  function programarEscritura() {
+    if (temporizadorEscritura) clearTimeout(temporizadorEscritura);
+    temporizadorEscritura = setTimeout(() => {
+      temporizadorEscritura = 0;
+      escribirAhora();
+    }, ESPERA_ESCRITURA);
+  }
+
+  function abrirCampoTexto(canvas, rect, evento) {
+    if (!campoTexto || apagado || pulsando || !rect || !rect.idRef) return;
+    if (focoTexto && focoTexto.idRef !== rect.idRef) cerrarCampoTexto();
+    focoTexto = { canvas, idRef: rect.idRef, valor: textoInicialDe(rect.idRef) };
+    campoTexto.value = focoTexto.valor;
+    campoTexto.hidden = false;
+    campoTexto.setAttribute("aria-label", "Texto del EditText " + rect.idRef + " del emulador");
+    // el mismo `pointerdown` sube al documento: sin esta marca el cierre de «toca fuera» lo cerraría
+    ignorarCierreTexto = evento || null;
+    colocarCampoTexto();
+    campoTexto.focus();
+    if (typeof campoTexto.setSelectionRange === "function") {
+      const fin = campoTexto.value.length;
+      campoTexto.setSelectionRange(fin, fin);
+    }
+  }
+
+  function montarCampoTexto() {
+    if (!conDocumento() || campoTexto) return;
+    const campo = document.createElement("input");
+    campo.type = "text";
+    campo.className = "previa-campo-texto";
+    campo.autocomplete = "off";
+    campo.spellcheck = false;
+    campo.hidden = true;
+    campo.setAttribute("aria-label", "Texto del EditText del emulador");
+    document.body.appendChild(campo);
+    campo.addEventListener("input", () => {
+      if (!focoTexto) return;
+      focoTexto.valor = campo.value;
+      programarEscritura();
+    });
+    campo.addEventListener("keydown", (e) => {
+      if (!focoTexto) return;
+      if (e.key === "Enter") {
+        e.preventDefault();
+        if (temporizadorEscritura) { clearTimeout(temporizadorEscritura); temporizadorEscritura = 0; }
+        escribirAhora();
+      } else if (e.key === "Escape") {
+        e.preventDefault();
+        cerrarCampoTexto();
+      }
+    });
+    // el IME dispara `input` igual que el teclado físico; `compositionend` solo asegura que un
+    // carácter pendiente quede contado si el navegador no emitió `input` al cerrar la composición
+    campo.addEventListener("compositionend", () => {
+      if (focoTexto) { focoTexto.valor = campo.value; programarEscritura(); }
+    });
+    campo.addEventListener("blur", () => { if (focoTexto) cerrarCampoTexto(); });
+    campoTexto = campo;
+  }
+
   // Un clic en el canvas se traduce a la vista que hay debajo, en las coordenadas lógicas del
   // panel. Si esa vista no tiene listener, el clic no hace nada (y no se inventa un aviso). Los dos
   // canvas —el del panel de la vista dividida y el de Pantalla— se conectan igual.
@@ -2673,7 +2864,17 @@ export function crearPreviaPanel({ hospedador, proyecto, estadoPestana, editor, 
       // el mismo modelo reescalado que se pintó: con el tamaño de pantalla elegido, el modelo
       // original no comparte la caja y el clic caería en otro nodo
       if (apagado) return;
-      const nodo = oyenteEnPunto(modeloParaEmulador(), ancho, alto, x, y);
+      const modelo = modeloParaEmulador();
+      // Un EditText se queda con el toque: se abre el campo real y NO se entrega el clic al
+      // contenedor que pueda tener listener, igual que en el framework.
+      const editable = editableEnPunto(modelo, ancho, alto, x, y);
+      if (editable) {
+        e.preventDefault();
+        abrirCampoTexto(canvas, editable, e);
+        return;
+      }
+      cerrarCampoTexto();
+      const nodo = oyenteEnPunto(modelo, ancho, alto, x, y);
       if (!nodo) return;
       e.preventDefault();
       pulsar(nodo.idRef);
@@ -2833,6 +3034,7 @@ export function crearPreviaPanel({ hospedador, proyecto, estadoPestana, editor, 
 
   function pintarRender(motivo) {
     if (!conDocumento()) return null;
+    if (apagado) cerrarCampoTexto();
     if (!apagado) ajustarPantallas();
     const modelo = apagado ? null : modeloParaEmulador();
     let primero = null;
@@ -2888,6 +3090,9 @@ export function crearPreviaPanel({ hospedador, proyecto, estadoPestana, editor, 
     // el Toast es una capa efímera: se enseña sobre el teléfono y se retira solo; la consola conserva
     // todas sus líneas
     pintarToast(modelo);
+    // el rect del EditText puede moverse al cambiar el tamaño de pantalla o el del panel; el campo
+    // sigue al nodo pintado mientras tenga el foco
+    colocarCampoTexto();
     return primero;
   }
 
@@ -4656,6 +4861,7 @@ export function crearPreviaPanel({ hospedador, proyecto, estadoPestana, editor, 
     conectarEntrada();
     conectarCanvas("previa-lateral-canvas");
     conectarCanvas("vista-previa");
+    montarCampoTexto();
     conectarEditable();
     conectarControles();
     montarMenuDeOpciones();
@@ -4664,6 +4870,10 @@ export function crearPreviaPanel({ hospedador, proyecto, estadoPestana, editor, 
     // el desplegable del menú se cierra al tocar fuera o con Escape, como cualquier popup; no toca
     // OPFS ni el documento: es estado de la interfaz
     document.addEventListener("pointerdown", (e) => {
+      // el pointerdown que abrió el campo es este mismo evento subiendo desde el canvas: no puede
+      // cerrarlo. Cualquier otro toque fuera del campo le quita el foco, sin tocar el documento.
+      if (e === ignorarCierreTexto) { ignorarCierreTexto = null; return; }
+      if (campoTexto && e.target !== campoTexto) cerrarCampoTexto();
       if (!menuDesplegado) return;
       const dentro = SUPERFICIES.some((s) => {
         const lista = el(s.menu.lista), boton = el(s.menu.control);
@@ -4679,6 +4889,9 @@ export function crearPreviaPanel({ hospedador, proyecto, estadoPestana, editor, 
         .find((b) => b && b.offsetParent !== null);
       if (boton) boton.focus();
     });
+    // el campo es `fixed`: al desplazarse o redimensionarse la ventana su caja de referencia cambia
+    window.addEventListener("scroll", colocarCampoTexto, true);
+    window.addEventListener("resize", colocarCampoTexto);
     actualizarEnergiaBotones();
     aplicarPantalla(pantalla, false);
     aplicarInspector("panel", inspectorAbierto.panel, false);
@@ -4739,6 +4952,16 @@ export function crearPreviaPanel({ hospedador, proyecto, estadoPestana, editor, 
     repintar,
     // un clic desde fuera (la prueba de chromium): la misma orden que el puntero del canvas
     pulsar,
+    // teclear desde fuera (pruebas y consola): el mismo paso `--escribir` que el campo real
+    escribir: enviarEscritura,
+    // lectura para las pruebas: el campo real y el EditText con el foco en este momento
+    campoTexto: () => ({
+      montado: !!campoTexto,
+      visible: !!(campoTexto && !campoTexto.hidden),
+      valor: campoTexto ? campoTexto.value : "",
+      idRef: focoTexto ? focoTexto.idRef : "",
+      textos: Object.fromEntries(textosEscritos),
+    }),
     // el modo editar, para las pruebas de chromium y la consola de desarrollo
     editar: aplicarEditable,
     anadir,

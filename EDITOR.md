@@ -425,6 +425,18 @@ clic usa `canvas.__espacio` (lo que dejó `pintarModelo`), no el `clientWidth` d
 el punto caiga sobre los píxeles visibles. `#previa-render` lleva `overflow-y: auto` y el marco un
 mínimo de 220 px.
 
+**Los EditText aceptan teclado.** Un toque sobre `EditText`, `AutoCompleteTextView`,
+`MultiAutoCompleteTextView` o `TextInputEditText` se queda en esa vista (no dispara el
+`OnClickListener` del contenedor) y abre un `<input>` real, oculto el resto del tiempo, sobre el rect
+dibujado. El campo lleva `aria-label` con el `idRef` y sigue al nodo si cambia el tamaño de la
+pantalla; el teclado del dispositivo y el IME escriben en él, `Enter` entrega el texto y `Escape` lo
+cierra. Tocar fuera o apagar el emulador quita el foco. **Lo tecleado es estado de la ejecución, no
+del documento**: viaja en el guion como `apkc preview --escribir <idRef>/<texto>` (un paso por
+EditText, en el orden del tecleo), el intérprete lo publica en `textoDinamico` y el canvas lo pinta;
+ninguna pulsación ni escritura llama a `EDITOR.cambiar()`, así que el XML abierto queda intacto. Una
+compilación, una apk nueva o un reinicio borran ese estado, como en un dispositivo que vuelve a
+`onCreate`. Los tipos que aceptan texto son los mismos que `admiteTecleo` del intérprete.
+
 **`android:onClick` del layout se ejecuta.** Una app que declara el clic en el XML
 (`android:onClick="sumar"` y `public void sumar(View v)` en la actividad, el patrón de los
 contadores de tutorial) no llama a `setOnClickListener` en `onCreate`. `apkc preview` enlaza esos

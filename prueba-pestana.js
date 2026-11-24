@@ -2105,6 +2105,182 @@ async function conductor() {
       await esperar(300);
     }
 
+    // 12a-ter-septies-ter-bis. el caso del usuario: los EditText del emulador no aceptaban teclado.
+    // Se compila un layout con dos EditText, se pulsa el primero con un puntero de verdad, se teclea
+    // con `Input.insertText` en el campo real que aparece sobre el rect dibujado y se comprueba que
+    // el texto llega al modelo (`textoDinamico`), al canvas y al guion `--escribir`, mientras el XML
+    // del editor sigue byte a byte como estaba. Después se repite en el segundo EditText y se cierra
+    // el campo al tocar fuera y al apagar el emulador.
+    const layoutEditText = [
+      '<?xml version="1.0" encoding="utf-8"?>',
+      '<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"',
+      '    android:orientation="vertical"',
+      '    android:layout_width="match_parent"',
+      '    android:layout_height="match_parent">',
+      '    <EditText',
+      '        android:id="@+id/nombre"',
+      '        android:layout_width="match_parent"',
+      '        android:layout_height="wrap_content"',
+      '        android:text=""/>',
+      '    <EditText',
+      '        android:id="@+id/apellido"',
+      '        android:layout_width="match_parent"',
+      '        android:layout_height="wrap_content"',
+      '        android:text=""/>',
+      '    <Button',
+      '        android:id="@+id/enviar"',
+      '        android:layout_width="wrap_content"',
+      '        android:layout_height="wrap_content"',
+      '        android:text="Enviar"/>',
+      '</LinearLayout>',
+      "",
+    ].join("\n");
+    const fuenteEditText = [
+      "package com.myapp;",
+      "",
+      "import android.app.*;",
+      "import android.os.*;",
+      "",
+      "public class MainActivity extends Activity {",
+      "    @Override",
+      "    public void onCreate(Bundle savedInstanceState) {",
+      "        super.onCreate(savedInstanceState);",
+      "        setContentView(R.layout.main);",
+      "    }",
+      "}",
+      "",
+    ].join("\n");
+    const xmlAntesTexto = await evaluar(`document.getElementById("codigo").value`);
+    const baseTexto = await evaluar(`(async () => {
+      await hospedador.escribir("/proyecto/res/layout/main.xml", new TextEncoder().encode(${JSON.stringify(layoutEditText)}));
+      await hospedador.escribir("/proyecto/src/com/myapp/MainActivity.java", new TextEncoder().encode(${JSON.stringify(fuenteEditText)}));
+      await hospedador.limpiar("/proyecto/build");
+      document.getElementById("storepass-compilar").value = "android";
+      document.getElementById("previa-modo-render").click();
+      await compilarDelTodo();
+      const vp = await import("/vista-previa.js");
+      const modelo = vp.modeloActual();
+      const canvas = document.getElementById("previa-lateral-canvas");
+      const espacio = canvas.__espacio || { ancho: canvas.clientWidth, alto: canvas.clientHeight };
+      const caja = canvas.getBoundingClientRect();
+      const rects = vp.rectsEscalados(modelo, espacio.ancho, espacio.alto);
+      const punto = (id) => {
+        const r = rects.find((x) => x.id === id);
+        if (!r) return null;
+        return {
+          x: caja.left + (r.x + r.ancho / 2) * (caja.width / espacio.ancho),
+          y: caja.top + (r.y + r.alto / 2) * (caja.height / espacio.alto),
+        };
+      };
+      return {
+        modelo: !!modelo,
+        ids: rects.map((r) => r.id),
+        nombre: punto("id/nombre"), apellido: punto("id/apellido"), enviar: punto("id/enviar"),
+        xml: document.getElementById("codigo").value,
+      };
+    })()`);
+    comprueba("el emulador compila un layout con dos EditText y ninguno se escribe en el XML",
+      baseTexto.modelo === true && baseTexto.nombre && baseTexto.apellido && baseTexto.enviar &&
+      baseTexto.xml === xmlAntesTexto,
+      JSON.stringify({ ids: baseTexto.ids, xmlIgual: baseTexto.xml === xmlAntesTexto }).slice(0, 320));
+    if (baseTexto.modelo && baseTexto.nombre && baseTexto.apellido && baseTexto.enviar) {
+      await exec("Input.dispatchMouseEvent",
+        { type: "mousePressed", x: baseTexto.nombre.x, y: baseTexto.nombre.y, button: "left", clickCount: 1 });
+      await exec("Input.dispatchMouseEvent",
+        { type: "mouseReleased", x: baseTexto.nombre.x, y: baseTexto.nombre.y, button: "left", clickCount: 1 });
+      const abierto = await evaluar(`(() => {
+        const campo = document.querySelector(".previa-campo-texto");
+        return {
+          existe: !!campo, visible: !!(campo && !campo.hidden),
+          enfocado: !!(campo && document.activeElement === campo),
+          valor: campo ? campo.value : null,
+          idRef: typeof PREVIA_PANEL !== "undefined" ? PREVIA_PANEL.campoTexto().idRef : null,
+        };
+      })()`);
+      comprueba("al pulsar un EditText aparece un campo real enfocado sobre el rect dibujado",
+        abierto.existe && abierto.visible && abierto.enfocado && abierto.valor === "" &&
+        /^0x[0-9a-f]+$/i.test(String(abierto.idRef)),
+        JSON.stringify(abierto));
+      await exec("Input.insertText", { text: "Ana Peña/Os" });
+      const escrito = await evaluar(`(async () => {
+        const vp = await import("/vista-previa.js");
+        const nodo = () => {
+          const m = vp.modeloActual();
+          if (!m || !m.raiz) return null;
+          return (m.raiz.hijos || []).find((h) => h.id === "id/nombre") || null;
+        };
+        let n = nodo();
+        for (let i = 0; i < 150 && (!n || n.textoDinamico !== "Ana Peña/Os"); i++) {
+          await new Promise((ok) => setTimeout(ok, 100));
+          n = nodo();
+        }
+        const m = vp.modeloActual();
+        const canvas = document.getElementById("previa-lateral-canvas");
+        const espacio = canvas.__espacio || { ancho: 0, alto: 0 };
+        const r = m ? vp.rectsEscalados(m, espacio.ancho, espacio.alto).find((x) => x.id === "id/nombre") : null;
+        return {
+          texto: n ? (n.textoDinamico || "") : null,
+          pintado: r ? r.texto : null,
+          capturas: m && m.ejecucion ? (m.ejecucion.capturas || []).map((c) => c.origen) : [],
+          guion: typeof PREVIA_PANEL !== "undefined" ? PREVIA_PANEL.estado().guion : [],
+          xml: document.getElementById("codigo").value,
+        };
+      })()`);
+      comprueba("escribir en el campo actualiza el texto dibujado y el modelo de ejecución",
+        escrito.texto === "Ana Peña/Os" && escrito.pintado === "Ana Peña/Os" &&
+        escrito.capturas.includes("usuario.escribir") &&
+        escrito.guion.some((p) => /^escribir:0x/.test(p)),
+        JSON.stringify({ texto: escrito.texto, pintado: escrito.pintado,
+          capturas: escrito.capturas, guion: escrito.guion }).slice(0, 400));
+      comprueba("el tecleo del emulador no cambia el XML del editor",
+        escrito.xml === xmlAntesTexto,
+        JSON.stringify({ xmlIgual: escrito.xml === xmlAntesTexto }).slice(0, 120));
+      // el segundo EditText conserva el primero: dos pasos `--escribir`, uno por vista
+      await exec("Input.dispatchMouseEvent",
+        { type: "mousePressed", x: baseTexto.apellido.x, y: baseTexto.apellido.y, button: "left", clickCount: 1 });
+      await exec("Input.dispatchMouseEvent",
+        { type: "mouseReleased", x: baseTexto.apellido.x, y: baseTexto.apellido.y, button: "left", clickCount: 1 });
+      const segundoAbierto = await evaluar(`(typeof PREVIA_PANEL !== "undefined" ? PREVIA_PANEL.campoTexto() : null)`);
+      await exec("Input.insertText", { text: "García" });
+      const dosCampos = await evaluar(`(async () => {
+        const vp = await import("/vista-previa.js");
+        const textoDe = (id) => {
+          const m = vp.modeloActual();
+          const n = m && m.raiz ? (m.raiz.hijos || []).find((h) => h.id === id) : null;
+          return n ? (n.textoDinamico || "") : null;
+        };
+        for (let i = 0; i < 150 && textoDe("id/apellido") !== "García"; i++) {
+          await new Promise((ok) => setTimeout(ok, 100));
+        }
+        return {
+          nombre: textoDe("id/nombre"), apellido: textoDe("id/apellido"),
+          guion: typeof PREVIA_PANEL !== "undefined" ? PREVIA_PANEL.estado().guion : [],
+          xml: document.getElementById("codigo").value,
+        };
+      })()`);
+      comprueba("dos EditText conservan cada uno su texto en dos pasos `--escribir`",
+        segundoAbierto && segundoAbierto.idRef && segundoAbierto.idRef !== abierto.idRef &&
+        dosCampos.nombre === "Ana Peña/Os" && dosCampos.apellido === "García" &&
+        dosCampos.guion.filter((p) => /^escribir:/.test(p)).length === 2 &&
+        dosCampos.xml === xmlAntesTexto,
+        JSON.stringify({ segundo: segundoAbierto && segundoAbierto.idRef, dosCampos,
+          xmlIgual: dosCampos.xml === xmlAntesTexto }).slice(0, 400));
+      // tocar fuera quita el foco sin tocar el documento; apagar limpia también lo tecleado
+      await exec("Input.dispatchMouseEvent",
+        { type: "mousePressed", x: baseTexto.enviar.x, y: baseTexto.enviar.y, button: "left", clickCount: 1 });
+      await exec("Input.dispatchMouseEvent",
+        { type: "mouseReleased", x: baseTexto.enviar.x, y: baseTexto.enviar.y, button: "left", clickCount: 1 });
+      const trasFuera = await evaluar(`(typeof PREVIA_PANEL !== "undefined" ? PREVIA_PANEL.campoTexto() : null)`);
+      await evaluar(`document.getElementById("previa-energia").click()`);
+      const trasApagar = await evaluar(`(typeof PREVIA_PANEL !== "undefined" ? PREVIA_PANEL.campoTexto() : null)`);
+      comprueba("el campo se cierra al tocar fuera y al apagar el emulador",
+        trasFuera && trasFuera.visible === false && trasApagar && trasApagar.visible === false &&
+        trasApagar.idRef === "" && Object.keys(trasApagar.textos || {}).length === 0,
+        JSON.stringify({ trasFuera, trasApagar }).slice(0, 320));
+      await evaluar(`document.getElementById("previa-energia").click()`);
+      await esperar(300);
+    }
+
     // 12a-ter-septies-quater. el caso del usuario, «Clicker» de tutorial: el clic se declara en el
     // layout con android:onClick y la actividad solo tiene el método. Sin esto, la ejecución no
     // registraba ningún oyente y la pestaña decía «Esta ejecución no registró ningún

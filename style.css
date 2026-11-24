@@ -1177,6 +1177,23 @@ body.arrastrando-paleta { cursor: grabbing; }
 .previa-canvas.editable:active { cursor: grabbing; }
 .previa-canvas.previa-canvas-recibiendo { outline: 2px dashed var(--acento); outline-offset: 1px; }
 .previa-canvas:focus-visible { outline: 2px solid var(--foco); outline-offset: 2px; }
+/* El campo real que recibe el teclado cuando un EditText del emulador tiene el foco. Se coloca
+   sobre el rect dibujado en coordenadas de la ventana; el resto del tiempo está oculto. */
+.previa-campo-texto {
+  position: fixed;
+  z-index: 20;
+  box-sizing: border-box;
+  margin: 0;
+  padding: 0 3px;
+  border: 1px solid var(--acento);
+  border-radius: 2px;
+  background: color-mix(in srgb, var(--superficie2) 88%, transparent);
+  color: var(--texto-fuerte);
+  font-family: inherit;
+  line-height: 1.2;
+  caret-color: var(--acento);
+}
+.previa-campo-texto[hidden] { display: none; }
 /* El progreso del apk soltado: una barra indeterminada centrada sobre el marco del teléfono, en
    las tres superficies. No captura el puntero (el emulador se sigue pudiendo pulsar debajo) y su
    texto es el mismo mensaje que la línea de estado. */
