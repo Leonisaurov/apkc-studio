@@ -12,6 +12,8 @@ import { modeloDeSalida, pintarVistaPrevia, mensajeVistaPrevia } from "./vista-p
 import { crearPreviaPanel } from "./previa-panel.js";
 import { crearPanelDeps } from "./deps.js";
 import { guardarUltimaApk, EVENTO_ULTIMA_APK } from "./ultima-apk.js";
+import { CONTRATO_NUCLEO } from "./wisp.js";
+import { instalarPuenteWisp } from "./wisp-puente.js";
 
 // La pestaña que hace: editor de fuente + un arbol en OPFS + los comandos de apkc.wasm.
 //
@@ -68,6 +70,7 @@ const hospedador = (() => {
       for (const otro of [...pendientes.keys()]) resolverPendiente(otro, fallo(texto));
       try { if (worker) worker.terminate(); } catch (e) { /* ya estaba muerto */ }
       worker = null;
+      puenteWisp.desactivar();
       raizPedida = null;
     }, ESPERA_WORKER);
   };
@@ -86,6 +89,7 @@ const hospedador = (() => {
       for (const id of [...pendientes.keys()]) resolverPendiente(id, fallo(texto));
       try { worker.terminate(); } catch (e) { /* ya estaba muerto */ }
       worker = null;
+      puenteWisp.desactivar();
       raizPedida = null;
     };
     worker.addEventListener("error", (e) => {
@@ -104,6 +108,19 @@ const hospedador = (() => {
         CONSOLA.escribir(String(e.data.texto || "") + "\n");
         return;
       }
+      // El núcleo WISP corre en el wasm del worker; la página solo lo ve cuando el binario lo
+      // anuncia con su contrato. Un contrato distinto no instala nada: se queda sin núcleo.
+      if (e.data && e.data.tipo === "wisp-nucleo") {
+        if (e.data.activo === false) puenteWisp.desactivar();
+        else {
+          try { puenteWisp.activar(e.data); }
+          catch (error) {
+            falloSilencioso("wisp-nucleo", error);
+            puenteWisp.desactivar();
+          }
+        }
+        return;
+      }
       resolverPendiente(e.data.id, e.data);
     };
     return worker;
@@ -119,6 +136,13 @@ const hospedador = (() => {
       resolverPendiente(id, fallo("no se pudo hablar con el hospedador: " +
         (e && e.message ? e.message : e)));
     }
+  });
+  // El puente se crea aquí, después de `pedir`, porque necesita la función que pone el id y espera
+  // la respuesta. No instala nada en globalThis hasta que llegue el mensaje `wisp-nucleo`.
+  const puenteWisp = instalarPuenteWisp({
+    global: globalThis,
+    enviar: (mensaje) => pedir(mensaje),
+    contrato: CONTRATO_NUCLEO,
   });
   // navigator.storage no existe dentro del worker, así que el mango raíz de OPFS lo baja la
   // página y se lo pasa al hospedador; sin esto el fs no tiene dónde escribir
@@ -141,6 +165,7 @@ const hospedador = (() => {
     if (!worker) { roto = null; return false; }
     try { worker.terminate(); } catch (e) { /* ya estaba muerto */ }
     worker = null;
+    puenteWisp.desactivar();
     raizPedida = null;
     roto = null;
     for (const id of [...pendientes.keys()]) {
@@ -160,6 +185,8 @@ const hospedador = (() => {
     renombrar: async (de, a) => { await bajarRaiz(); return pedir({ tipo: "renombrar", de, a }); },
     cwd: async (ruta) => { await bajarRaiz(); return pedir({ tipo: "cwd", ruta }); },
     sondear: async () => { await bajarRaiz(); return pedir({ tipo: "sondeo" }); },
+    // el puente de la página usa esta misma cola: el id y el vigilante los pone `pedir`
+    wispLlamar: (metodo, payload) => pedir({ tipo: "wisp", metodo, payload }),
     // la salida llega por trozos mientras el comando corre; `correr` la pinta sin esperar al final
     escucharSalida(fn) { alSalir = fn; },
     // Go wasm no tiene kill: se termina el worker entero y se recrea en el siguiente comando. El

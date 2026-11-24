@@ -19,6 +19,10 @@ let arranque = null;           // la promesa del init en curso: ver iniciar()
 let bytesModule = null;        // los bytes del wasm, una sola bajada; la instancia no se reutiliza
 let recuperadoPorTrozos = false; // avisa a la página si la copia cacheada estaba incompleta
 let errorWasmExec = null;      // el motivo por el que no se pudo cargar wasm_exec.js
+// El contrato del núcleo WISP es el mismo que congeló la página (wisp.js): el worker solo anuncia
+// el núcleo cuando el wasm que se está corriendo lo registró en globalThis.
+const CONTRATO_WISP = "apkc-wisp/1";
+let nucleoWispActivo = false;
 let ocupado = false;
 let cola = [];
 let entregarRaiz = null;
@@ -240,7 +244,16 @@ async function ejecutar(argv, env) {
   // la instancia se crea CADA VEZ: un binario de Go en wasm no puede volver a correrse sobre la
   // misma instancia después de salir, así que lo que se guarda son los bytes, no la instancia
   const { instance } = await WebAssembly.instantiate(bytesModule.slice(0), go.importObject);
-  await go.run(instance);
+  // El binario del fork registra apkcWisp en globalThis de este worker. La página no puede verlo:
+  // se lo anuncia por mensaje para que instale el puente, y se lo retira cuando el wasm termina.
+  nucleoWispActivo = true;
+  postMessage({ tipo: "wisp-nucleo", activo: true, contrato: CONTRATO_WISP });
+  try {
+    await go.run(instance);
+  } finally {
+    nucleoWispActivo = false;
+    postMessage({ tipo: "wisp-nucleo", activo: false, contrato: CONTRATO_WISP });
+  }
   return { ok: true, codigo: codigo === null ? 1 : codigo, consola: sistema.consola.volcar() };
 }
 
@@ -304,11 +317,43 @@ self.onmessage = async (evento) => {
       const conCodigo = r && r.ok === false ? { ...r, codigo: -1 } : r;
       return void postMessage({ id: m.id, tipo: "terminado", ...conCodigo });
     }
+    if (m.tipo === "wisp") {
+      if (m.metodo !== "obtener" && m.metodo !== "cargarCAs") {
+        return void postMessage({ id: m.id, tipo: "error", error: "método WISP desconocido: " + m.metodo });
+      }
+      const nucleo = globalThis.apkcWisp;
+      const funcion = nucleo && typeof nucleo[m.metodo] === "function" ? nucleo[m.metodo] :
+        (m.metodo === "cargarCAs" ? globalThis.apkcWispCargarCAs : null);
+      if (!nucleoWispActivo || typeof funcion !== "function") {
+        return void postMessage({ id: m.id, tipo: "error", error: "núcleo WISP no activo en el hospedador" });
+      }
+      try {
+        const r = await funcion(m.payload);
+        // El núcleo entrega un Uint8Array. Cambiar el dueño del buffer y transferirlo evita copiar
+        // un artefacto de decenas de megabytes al cruzar al hilo principal.
+        let respuesta = { ...r };
+        if (r && r.bytes instanceof Uint8Array) {
+          const u8 = r.bytes;
+          const buffer = u8.buffer.slice(u8.byteOffset, u8.byteOffset + u8.byteLength);
+          respuesta = { ...respuesta, bytes: buffer };
+        }
+        const transferencia = respuesta.bytes instanceof ArrayBuffer ? [respuesta.bytes] : [];
+        return void postMessage({ id: m.id, tipo: "wisp", respuesta }, transferencia);
+      } catch (e) {
+        return void postMessage({ id: m.id, tipo: "error", error: String((e && e.message) || e) });
+      }
+    }
     if (m.tipo === "sondeo") {
+      const nucleo = globalThis.apkcWisp;
       return void postMessage({
         id: m.id, tipo: "sondeo",
         haySistema: !!sistema, tipoGo: typeof globalThis.Go, aislada: crossOriginIsolated,
         errorWasmExec, bytesWasm: bytesModule ? bytesModule.length : 0,
+        // El puente de la página se activa SOLO por el contrato anunciado por el wasm, nunca por
+        // `tipoGo` ni por `bytesWasm`: esos dos solo dicen que el cargador está vivo.
+        contrato: nucleo && nucleo.version ? String(nucleo.version) : null,
+        hayCAs: typeof globalThis.apkcWispCargarCAs === "function",
+        nucleoActivo: nucleoWispActivo,
       });
     }
     postMessage({ id: m.id, tipo: "error", error: "mensaje sin tipo: " + m.tipo });

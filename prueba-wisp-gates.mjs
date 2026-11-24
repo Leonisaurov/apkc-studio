@@ -8,6 +8,8 @@ import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import * as gates from "./wisp-gates.js";
+import { resolverPorWisp, nucleoDisponible, CONTRATO_NUCLEO } from "./wisp.js";
+import { instalarPuenteWisp } from "./wisp-puente.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const PUERTO = 8791;
@@ -227,6 +229,71 @@ const hosts = gates.hostsDeRelays(leidos.relays);
     } catch (e) { motivo = String(e.message); }
     comprueba("handshake: " + que + " se rechaza", motivo.length > 0, motivo.slice(0, 180));
   }
+}
+
+// --- el puente del núcleo: la página solo ve apkcWisp cuando el wasm lo anuncia ------------------
+// Sin red y sin navegador: el doble de `enviar` contesta con bytes enlatados y un sha256 calculado
+// aquí, que es lo que `validarRespuestaNucleo` (wisp.js:294-323) exige antes de pintar el artefacto.
+{
+  const bytes = new TextEncoder().encode("artefacto enlatado para el puente WISP\n");
+  const resumen = await crypto.subtle.digest("SHA-256", bytes);
+  const huella = [...new Uint8Array(resumen)].map((b) => b.toString(16).padStart(2, "0")).join("");
+  const buffer = bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength);
+  const pagina = {};
+  let llamadas = 0;
+  const puente = instalarPuenteWisp({
+    global: pagina, contrato: CONTRATO_NUCLEO,
+    enviar: (mensaje) => {
+      llamadas++;
+      if (mensaje.tipo !== "wisp") throw new Error("el puente envió " + mensaje.tipo + ", no wisp");
+      return Promise.resolve({
+        id: llamadas, tipo: "wisp",
+        respuesta: {
+          ok: true, bytes: buffer, sha256: huella,
+          ruta: "/deps/com.example/prueba/1.0/prueba-1.0.jar",
+        },
+      });
+    },
+  });
+  const consultar = () => resolverPorWisp({
+    relay: "wss://wisp.local/wisp/", coordenada: "com.example:prueba:1.0",
+    hospedador: { escribir() {} }, global: pagina,
+  });
+
+  comprueba("puente WISP: al instalarlo, la página no ve ningún núcleo",
+    nucleoDisponible(pagina) === false && puente.estaActivo() === false);
+
+  let motivo = "";
+  try { await consultar(); } catch (e) { motivo = String(e.message); }
+  comprueba("puente WISP: sin activar falla con el error del contrato y sin hablar con el worker",
+    /núcleo WISP no disponible/.test(motivo) && llamadas === 0,
+    motivo.slice(0, 130) + " — llamadas " + llamadas);
+
+  let contratoAjeno = "";
+  try { puente.activar({ contrato: "apkc-wisp/2", activo: true }); }
+  catch (e) { contratoAjeno = String(e.message); }
+  comprueba("puente WISP: un contrato ajeno no activa el núcleo",
+    contratoAjeno.length > 0 && nucleoDisponible(pagina) === false && llamadas === 0,
+    contratoAjeno.slice(0, 130));
+
+  puente.activar({ contrato: CONTRATO_NUCLEO, activo: true });
+  comprueba("puente WISP: activar con el contrato expone los dos globales del contrato",
+    nucleoDisponible(pagina) === true &&
+    typeof pagina.apkcWispCargarCAs === "function" && puente.estaActivo() === true);
+
+  const recibido = await consultar();
+  comprueba("puente WISP: un mensaje obtener devuelve bytes, sha256 y ruta validados",
+    llamadas === 1 && recibido.bytes instanceof Uint8Array &&
+    recibido.sha256 === huella && recibido.ruta.startsWith("/deps/"),
+    JSON.stringify({ llamadas, sha256: recibido.sha256 === huella, ruta: recibido.ruta }).slice(0, 160));
+
+  puente.desactivar();
+  let sinNucleoDespues = "";
+  try { await consultar(); } catch (e) { sinNucleoDespues = String(e.message); }
+  comprueba("puente WISP: desactivar retira el núcleo y vuelve al error de sin núcleo",
+    nucleoDisponible(pagina) === false && !pagina.apkcWispCargarCAs &&
+    /núcleo WISP no disponible/.test(sinNucleoDespues) && llamadas === 1,
+    sinNucleoDespues.slice(0, 130) + " — llamadas " + llamadas);
 }
 
 console.log(fallos ? "\nfalsificación FALLA: " + fallos + " problemas" :
