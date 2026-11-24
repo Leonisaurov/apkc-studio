@@ -108,14 +108,21 @@ compilar_fixture() { # $1 carpeta
     falla "no se pudo compilar $1: $(tail -2 "$TMP/studio-fixture-$(basename "$1").log" | tr '\n' ' ')"
 }
 
+# Un apk de la sesión anterior no prueba el generador vigente: si app.js es más nuevo, se siembra
+# y se compila otra vez. Es lo que pasó con las plantillas nuevas, cuyo apk llevaba desde el 23-nov.
+fixture_fresco() { # $1 destino
+  [ -f "$1/build/app.apk" ] || return 1
+  [ -z "$(find "$AQUI/app.js" -newer "$1/build/app.apk" -print -quit)" ]
+}
+
 FIXTURE="$TMP/studio-e2e-java/com.hola.apkcstudio"
-if [ ! -f "$FIXTURE/build/app.apk" ]; then
+if ! fixture_fresco "$FIXTURE"; then
   sembrar_proyecto "$FIXTURE" com.hola.apkcstudio hola
   compilar_fixture "$FIXTURE"
 fi
 
 CONTADOR="$TMP/studio-e2e-contador/com.hola.contador"
-if [ ! -f "$CONTADOR/build/app.apk" ]; then
+if ! fixture_fresco "$CONTADOR"; then
   sembrar_proyecto "$CONTADOR" com.hola.contador contador
   compilar_fixture "$CONTADOR"
 fi
@@ -138,14 +145,19 @@ fi
 
 # 0b. las plantillas nuevas (ciclo, menú y textos traducidos) no se dan por buenas porque el
 # generador escriba texto: se compilan con --linker go --compiler go y se pasan por los oráculos.
-for plantilla in ciclo menu traducido; do
+for plantilla in ciclo menu traducido lienzo notas chatbt tareas cronometro; do
   case "$plantilla" in
     ciclo) paquete=com.hola.ciclo ;;
     menu) paquete=com.hola.menu ;;
     traducido) paquete=com.hola.traducido ;;
+    lienzo) paquete=com.hola.lienzo ;;
+    notas) paquete=com.hola.notas ;;
+    chatbt) paquete=com.hola.chatbt ;;
+    tareas) paquete=com.hola.tareas ;;
+    cronometro) paquete=com.hola.cronometro ;;
   esac
   destino="$TMP/studio-e2e-$plantilla/$paquete"
-  if [ ! -f "$destino/build/app.apk" ]; then
+  if ! fixture_fresco "$destino"; then
     sembrar_proyecto "$destino" "$paquete" "$plantilla"
     compilar_fixture "$destino"
   fi
@@ -262,6 +274,63 @@ vista_previa() {
   avisa "vista previa: $(cat "$TMP/studio-preview-resumen.log")"
 }
 vista_previa
+
+# 0d. emulación de las diez plantillas con el mismo `apkc preview` que corre en la pestaña. Las
+# comprobaciones de prueba.js son estructurales o de fixture; aquí se ejecuta el intérprete sobre
+# el apk que acaba de compilar este gate. Cada plantilla aporta el guion que ejerce su rasgo propio.
+destino_de() {
+  case "$1" in
+    hola) printf '%s' "$FIXTURE" ;;
+    contador) printf '%s' "$CONTADOR" ;;
+    *) printf '%s' "$TMP/studio-e2e-$1/com.hola.$1" ;;
+  esac
+}
+guion_de() {
+  case "$1" in
+    hola) printf '%s' '--avanzar 1000' ;;
+    contador) printf '%s' '--pulsar id/pulsar' ;;
+    ciclo) printf '%s' '--recrear' ;;
+    menu) printf '%s' '--menu --menu-item menu/0' ;;
+    traducido) printf '%s' '' ;;
+    lienzo) printf '%s' '' ;;
+    notas) printf '%s' '--escribir id/editor/TextoDePrueba --pulsar id/guardar' ;;
+    chatbt) printf '%s' '--escribir id/entrada/hola --pulsar id/enviar' ;;
+    tareas) printf '%s' '' ;;
+    cronometro) printf '%s' '--pulsar id/iniciar --avanzar 1000' ;;
+  esac
+}
+for plantilla in hola contador ciclo menu traducido lienzo notas chatbt tareas cronometro; do
+  apk="$(destino_de "$plantilla")/build/app.apk"
+  if [ ! -f "$apk" ]; then
+    falla "emulación de $plantilla: no hay apk en $apk"
+    continue
+  fi
+  guion=$(guion_de "$plantilla")
+  # El guion se expansiona a propósito: cada plantilla decide sus propias banderas.
+  # shellcheck disable=SC2086
+  if ! ejecutar "$APKC" preview $guion "$apk" \
+      >"$TMP/studio-emular-$plantilla.json" 2>"$TMP/studio-emular-$plantilla.log"; then
+    falla "emulación de $plantilla: $(tail -2 "$TMP/studio-emular-$plantilla.log" | tr '\n' ' ')"
+    continue
+  fi
+  if ! node -e '
+    const fs = require("node:fs");
+    const m = JSON.parse(fs.readFileSync(process.argv[1], "utf8"));
+    const problemas = [];
+    const p = m.pantalla || {};
+    if (!(p.ancho > 0 && p.alto > 0)) problemas.push("pantalla sin dimensiones");
+    if (!(m.nodos > 0)) problemas.push("sin nodos");
+    if (!((m.ejecucion || {}).pasos > 0)) problemas.push("sin pasos de ejecución");
+    if (m.error) problemas.push("error: " + m.error);
+    if (problemas.length) { console.error(problemas.join("; ")); process.exit(1); }
+    console.log(m.nodos + " nodos, " + m.ejecucion.pasos + " pasos, " +
+      (m.avisos || []).length + " avisos");
+  ' "$TMP/studio-emular-$plantilla.json" >"$TMP/studio-emular-$plantilla-resumen.log" 2>&1; then
+    falla "emulación de $plantilla: $(tail -2 "$TMP/studio-emular-$plantilla-resumen.log" | tr '\n' ' ')"
+    continue
+  fi
+  avisa "emulación $plantilla: $(cat "$TMP/studio-emular-$plantilla-resumen.log")"
+done
 
 # 1. el test propio de la página
 if ! node "$AQUI/prueba.js" >"$TMP/studio-prueba.log" 2>&1; then
