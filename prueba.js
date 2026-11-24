@@ -259,6 +259,72 @@ for (const nombre of ["cero", "parado", "iniciar", "pausar", "vuelta", "reinicia
   }
 }
 
+// 2f. el cronómetro no se da por emulado porque compile: `apkc preview` lee la APK y el
+//     intérprete tiene que reprogramar el Runnable y mover el reloj lógico. Se activa con
+//     APKC_PREVIEW y APK_CRONOMETRO (los fija quien corra los fixtures); sin ellos se omite,
+//     igual que la comparación con el repo, y no se finge que se emuló.
+if (process.env.APKC_PREVIEW && process.env.APK_CRONOMETRO) {
+  const binario = process.env.APKC_PREVIEW;
+  const apk = process.env.APK_CRONOMETRO;
+  const preview = (...args) => {
+    const crudo = execFileSync(binario, ["preview", ...args, apk], { encoding: "utf8", maxBuffer: 8 << 20 });
+    try { return JSON.parse(crudo); }
+    catch (e) { mal("apkc preview no devuelve JSON: " + e.message); return null; }
+  };
+  const reposo = preview();
+  const tick = preview("--pulsar", "id/iniciar", "--avanzar", "1000");
+  if (reposo && tick) {
+    const nodo = (modelo, id) => {
+      const buscar = (n) => {
+        if (!n) return null;
+        if (n.id === id) return n;
+        for (const h of n.hijos || []) { const r = buscar(h); if (r) return r; }
+        return null;
+      };
+      return buscar(modelo.raiz);
+    };
+    const e0 = reposo.ejecucion || {}, e1 = tick.ejecucion || {};
+    for (const [nombre, modelo, ejecucion] of [["reposo", reposo, e0], ["tick", tick, e1]]) {
+      if (!Number.isInteger(modelo.nodos) || modelo.nodos < 1) mal(nombre + ": nodos=" + modelo.nodos);
+      if (!(modelo.pantalla && modelo.pantalla.ancho > 0 && modelo.pantalla.alto > 0)) {
+        mal(nombre + ": pantalla=" + JSON.stringify(modelo.pantalla));
+      }
+      if (!(ejecucion.pasos > 0)) mal(nombre + ": ejecución sin pasos=" + JSON.stringify(ejecucion.pasos));
+      if (modelo.avisos || modelo.error) {
+        mal(nombre + ": avisos/error=" + JSON.stringify([modelo.avisos, modelo.error]));
+      }
+    }
+    const tiempo0 = nodo(reposo, "id/tiempo"), estado0 = nodo(reposo, "id/estado");
+    if (!tiempo0 || tiempo0.textoDinamico !== "00:00.00") {
+      mal("el cronómetro en reposo no muestra 00:00.00: " + JSON.stringify(tiempo0 && tiempo0.textoDinamico));
+    }
+    if (!estado0 || !/parado/.test(estado0.textoDinamico || "")) {
+      mal("el cronómetro en reposo no dice parado: " + JSON.stringify(estado0 && estado0.textoDinamico));
+    }
+    if (!(e0.oyentes || []).some((o) => o.id === "id/iniciar")) {
+      mal("el modelo no registra oyente en id/iniciar: " + JSON.stringify(e0.oyentes));
+    }
+    if (e1.reloj !== 1000) mal("el reloj no avanzó 1000 ms: " + JSON.stringify(e1.reloj));
+    if (!(e1.tareas >= 20)) mal("el Runnable no se reprogramó: tareas=" + JSON.stringify(e1.tareas));
+    const tiempo1 = nodo(tick, "id/tiempo"), estado1 = nodo(tick, "id/estado");
+    if (!tiempo1 || tiempo1.textoDinamico !== "00:01.00") {
+      mal("el texto del cronómetro no sigue al reloj: " + JSON.stringify(tiempo1 && tiempo1.textoDinamico));
+    }
+    if (!estado1 || !/corriendo/.test(estado1.textoDinamico || "") ||
+        !/pulsos/.test(estado1.textoDinamico || "")) {
+      mal("el estado no cuenta los ticks: " + JSON.stringify(estado1 && estado1.textoDinamico));
+    }
+    if (e1.interacciones !== 1) {
+      mal("--pulsar id/iniciar no se entregó: interacciones=" + e1.interacciones);
+    }
+    console.log("  emulación Cronómetro: reloj=" + e1.reloj + " ms, " + e1.tareas +
+      " ticks, " + JSON.stringify(tiempo1 && tiempo1.textoDinamico) + ", " +
+      JSON.stringify(estado1 && estado1.textoDinamico));
+  }
+} else {
+  console.log("  (sin APKC_PREVIEW/APK_CRONOMETRO: la emulación del Cronómetro se omite)");
+}
+
 const chatbt = a.buildProject({ ...estado, template: "chatbt", kotlin: false, libs: false,
   native: false, assets: false, device: false });
 if (!/BLUETOOTH_CONNECT/.test(chatbt.files["AndroidManifest.xml"])) {
