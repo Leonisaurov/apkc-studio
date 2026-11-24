@@ -27,10 +27,19 @@ export function urlRelayValida(url) {
   if (!texto) return "la URL del relay está vacía";
   if (!ESQUEMA_RELAY.test(texto)) return "la URL del relay tiene que empezar por wss:// (o ws:// para uno local)";
   if (/\s/.test(texto)) return "la URL del relay lleva espacios";
+  if (texto.includes("?") || texto.includes("#")) {
+    return "la URL del relay no admite «#» ni «?»; recibido " + JSON.stringify(texto);
+  }
   let analizada;
   try { analizada = new URL(texto); }
   catch (e) { return "la URL del relay no se puede analizar: " + texto; }
   if (!analizada.host) return "la URL del relay no lleva servidor: " + texto;
+  if (/^wss?:\/\/[^/?#]*@/i.test(texto)) {
+    return "la URL del relay no admite credenciales de usuario; recibido " + JSON.stringify(texto);
+  }
+  if (analizada.protocol === "ws:" && !/^(localhost|127\.0\.0\.1|\[?::1\]?)$/i.test(analizada.hostname)) {
+    return "el relay debe usar wss:// (o ws:// en localhost); recibido " + JSON.stringify(texto);
+  }
   if (!texto.endsWith("/")) return "la URL del relay tiene que acabar en «/» (spec v1.2), no en «" + texto.slice(-1) + "»";
   return "";
 }

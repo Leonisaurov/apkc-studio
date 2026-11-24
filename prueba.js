@@ -4207,6 +4207,17 @@ public final class R {
         wispMod.urlRelayValida("ws://127.0.0.1:8080/") !== "") {
       mal("urlRelayValida rechaza un relay que la spec v1.2 admite");
     }
+    // la forma de Go rechaza query/fragmento, credenciales y ws:// ajeno antes de abrir el socket
+    for (const [rota, motivo] of [
+      ["wss://evil@wisp.mercurywork.shop/wisp/", "la URL del relay no admite credenciales de usuario; recibido "],
+      ["wss://wisp.mercurywork.shop/wisp/?x=/", "la URL del relay no admite «#» ni «?»; recibido "],
+      ["ws://ejemplo/wisp/", "el relay debe usar wss:// (o ws:// en localhost); recibido "],
+    ]) {
+      const obtenido = wispMod.urlRelayValida(rota);
+      if (obtenido !== motivo + JSON.stringify(rota)) {
+        mal("urlRelayValida no rechaza " + rota + " con el mensaje de la forma de Go: " + JSON.stringify(obtenido));
+      }
+    }
     let relaysRepetidos = "";
     try { wispMod.leerRelays({ version: 1, relays: [verificado.relays[0], verificado.relays[0]] }); }
     catch (e) { relaysRepetidos = String(e && e.message ? e.message : e); }
