@@ -49,7 +49,11 @@ Opciones:
 - `--jar <ruta>` indexa un jar real en vez del sintético; el SHA-256 y los bytes son los del
   fichero de entrada.
 - `--coordenada grupo:artefacto:versión` (por defecto `com.example:prueba:1.0`).
-- `--licencia <texto>` (por defecto `CC0-1.0` para el jar sintético; usa p. ej. `Apache-2.0`).
+- `--licencia <texto>` declara la licencia del artefacto (`Apache-2.0`, `MIT`…). El jar **sintético**
+  que genera el propio script se declara `CC0-1.0` si no la pasas, porque lo creamos nosotros; un
+  jar **real** (`--jar`) sin `--licencia` sale con `licencia: null` (el panel dirá «sin declarar») y
+  el script avisa por stdout: la licencia de un artefacto de terceros solo la puede declarar quien
+  lo indexa.
 - `--fecha <iso>` fija la fecha del índice (útil para pruebas reproducibles).
 
 El script imprime la ruta del índice, la del artefacto, la coordenada, los bytes, el `sha256`, la

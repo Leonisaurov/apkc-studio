@@ -12,7 +12,8 @@
 //     --salida <dir>        dónde dejar deps-index.json y deps/ (obligatorio)
 //     --jar <ruta>          jar real a indexar; si se omite se genera uno mínimo en memoria
 //     --coordenada <g:a:v>  por defecto com.example:prueba:1.0 (solo si no hay --jar)
-//     --licencia <texto>    licencia declarada; por defecto CC0-1.0 para el jar sintético
+//     --licencia <texto>    licencia declarada; solo el jar sintético (creado por nosotros) toma
+//                           CC0-1.0 por defecto — un jar real sin --licencia sale sin declararla
 //     --fecha <iso>         fecha del índice; por defecto ahora en UTC
 //
 // El índice y el artefacto se sirven con el propio origen: `SITIO_DIR=<dir> node studio/servidor.js`
@@ -31,8 +32,10 @@ function morir(mensaje) {
 }
 
 function partirArgs(argv) {
+  // La licencia no tiene valor por defecto aquí: la decide `main` según lo que se indexe. Declarar
+  // CC0-1.0 un jar de terceros sería una afirmación que este generador no puede hacer.
   const opciones = { salida: "", jar: "", coordenada: "com.example:prueba:1.0",
-    licencia: "CC0-1.0", fecha: "" };
+    licencia: "", fecha: "" };
   for (let i = 0; i < argv.length; i++) {
     const a = argv[i];
     const valor = () => {
@@ -156,6 +159,20 @@ function main() {
     if (!PARTE.test(valor) || valor.includes("..")) morir(que + " no válido: " + JSON.stringify(valor));
   }
 
+  // Solo el jar sintético —un zip que construimos aquí con nuestro manifiesto— se declara CC0-1.0
+  // al no pedir licencia. Un jar real es de quien lo escribió: si no se pasa `--licencia`, la
+  // entrada sale con `licencia: null` (el panel dirá «sin declarar») y el generador avisa.
+  let licencia = opciones.licencia;
+  if (!licencia) {
+    if (opciones.jar) {
+      licencia = null;
+      console.log("aviso: el jar " + path.basename(opciones.jar) + " no declara licencia; " +
+        "pasa --licencia <texto> (p. ej. --licencia Apache-2.0) para que el índice la registre");
+    } else {
+      licencia = "CC0-1.0";
+    }
+  }
+
   const nombre = artefacto + "-" + version + ".jar";
   const fichero = ["deps", grupo, artefacto, version, nombre].join("/");
   const sha256 = crypto.createHash("sha256").update(datos).digest("hex");
@@ -165,7 +182,7 @@ function main() {
     fichero,
     bytes: datos.length,
     sha256,
-    licencia: opciones.licencia,
+    licencia,
     fecha,
   };
   const indice = {
@@ -187,7 +204,7 @@ function main() {
   console.log("fichero: " + fichero);
   console.log("bytes: " + datos.length);
   console.log("sha256: " + sha256);
-  console.log("licencia: " + entrada.licencia);
+  console.log("licencia: " + (entrada.licencia || "sin declarar"));
   console.log("fecha: " + fecha);
 }
 

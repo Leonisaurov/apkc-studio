@@ -5793,6 +5793,7 @@ async function conductor() {
         bytes: document.getElementById("deps-bytes").textContent,
         hash: document.getElementById("deps-hash").textContent,
         licencia: document.getElementById("deps-licencia").textContent,
+        fecha: document.getElementById("deps-fecha").textContent,
         ruta: document.getElementById("deps-ruta").textContent,
         indice: document.getElementById("deps-indice").textContent,
         visible: !document.getElementById("deps-resultado").hidden,
@@ -5808,10 +5809,10 @@ async function conductor() {
       rutasResolver[1] === "/deps/com.example/prueba/1.0/prueba-1.0.jar" &&
       delResolver.every((u) => u.startsWith("http://127.0.0.1:" + PUERTO)),
       rutasResolver.join(", ") || "sin peticiones");
-    comprueba("el artefacto importado muestra nombre, tamaño, hash y licencia del índice",
+    comprueba("el artefacto importado muestra nombre, tamaño, hash, licencia y fecha del índice",
       resuelto && resuelto.visible === true && resuelto.nombre === "prueba-1.0.jar" &&
       /2052 bytes/.test(String(resuelto.bytes)) && resuelto.hash === hashDepFalso &&
-      resuelto.licencia === "Apache-2.0" &&
+      resuelto.licencia === "Apache-2.0" && /2026-11-22/.test(String(resuelto.fecha)) &&
       resuelto.ruta === "/deps/com.example/prueba/1.0/prueba-1.0.jar" &&
       /2026-11-22/.test(String(resuelto.indice)),
       JSON.stringify(resuelto).slice(0, 360));

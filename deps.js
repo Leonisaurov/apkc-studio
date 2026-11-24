@@ -426,6 +426,7 @@ export function crearPanelDeps({ hospedador, conBloqueo, alImportar } = {}) {
   const ruta = document.getElementById("deps-ruta");
   const origen = document.getElementById("deps-indice");
   const licencia = document.getElementById("deps-licencia");
+  const fecha = document.getElementById("deps-fecha");
   const seleccion = document.getElementById("deps-ficheros");
   const zonaSoltar = document.getElementById("deps-soltar");
   const progreso = document.getElementById("deps-progreso");
@@ -449,8 +450,10 @@ export function crearPanelDeps({ hospedador, conBloqueo, alImportar } = {}) {
     if (hash) hash.textContent = r.hash;
     if (ruta) ruta.textContent = r.ruta;
     if (origen) origen.textContent = "índice: " + (r.indice || "sin fecha");
-    // La licencia solo se pinta si el índice la trae; un índice viejo sin ella no inventa texto.
+    // La licencia y la fecha solo se pintan si el índice las trae; un índice viejo sin ellas no
+    // inventa texto. La fecha es la del índice (cuándo se indexó ese artefacto).
     if (licencia) licencia.textContent = r.licencia || "sin declarar";
+    if (fecha) fecha.textContent = r.fecha || "sin declarar";
     caja.hidden = false;
   };
   const resolver = async () => {

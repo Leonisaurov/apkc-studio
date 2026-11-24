@@ -3241,9 +3241,11 @@ public final class R {
       hospedador: { escribir: async (r, d) => { escritoLocal.set(r, d); return { tipo: "montado", bytes: d.length }; } },
     });
     if (importadoLocalGen.hash !== hashLocal || importadoLocalGen.licencia !== "Apache-2.0" ||
+        importadoLocalGen.fecha !== fechaFija ||
         !escritoLocal.has("/deps/com.example/prueba/1.0/prueba-1.0.jar")) {
       mal("la página no importa el índice del generador local: " + JSON.stringify({
-        hash: importadoLocalGen.hash, licencia: importadoLocalGen.licencia }).slice(0, 240));
+        hash: importadoLocalGen.hash, licencia: importadoLocalGen.licencia,
+        fecha: importadoLocalGen.fecha }).slice(0, 240));
     }
     // y el mismo generador indexa un jar real (--jar): el sha es el del fichero de entrada
     const dirJar = fs.mkdtempSync(path.join(tmp, "deps-jar-"));
@@ -3257,14 +3259,42 @@ public final class R {
         entJar.fichero !== "deps/com.example/real/2.0/real-2.0.jar") {
       mal("el generador no indexa un jar real con su coordenada: " + JSON.stringify(entJar).slice(0, 240));
     }
+    // La licencia no se presume: un jar real sin `--licencia` sale con `licencia: null` y el
+    // generador avisa por stdout; solo el sintético, que creamos nosotros, nace con CC0-1.0.
+    const dirJarSin = fs.mkdtempSync(path.join(tmp, "deps-jar-sin-licencia-"));
+    const salidaSin = execFileSync(process.execPath, [path.join(__dirname, "deps-index-local.mjs"),
+      "--salida", dirJarSin, "--jar", path.join(dirIndice, entLocal.fichero),
+      "--coordenada", "com.example:tercero:3.0", "--fecha", fechaFija], { stdio: "pipe" });
+    const entSin = JSON.parse(fs.readFileSync(path.join(dirJarSin, "deps-index.json"), "utf8")).artefactos[0];
+    if (entSin.licencia !== null || !/aviso/.test(String(salidaSin)) || !/--licencia/.test(String(salidaSin))) {
+      mal("un jar real sin --licencia no puede declararse CC0-1.0 en silencio: " +
+        JSON.stringify({ licencia: entSin.licencia, salida: String(salidaSin).slice(0, 200) }).slice(0, 360));
+    }
+    if (depsMod.validarEntrada(entSin) !== "") {
+      mal("el índice de un jar sin licencia no valida: " + depsMod.validarEntrada(entSin));
+    }
+    const dirSinteticoSin = fs.mkdtempSync(path.join(tmp, "deps-sin-licencia-"));
+    execFileSync(process.execPath, [path.join(__dirname, "deps-index-local.mjs"),
+      "--salida", dirSinteticoSin, "--fecha", fechaFija], { stdio: "pipe" });
+    const entSintetica = JSON.parse(fs.readFileSync(path.join(dirSinteticoSin, "deps-index.json"), "utf8")).artefactos[0];
+    if (entSintetica.licencia !== "CC0-1.0") {
+      mal("el jar sintético del generador debería declararse CC0-1.0: " + JSON.stringify(entSintetica.licencia));
+    }
 
     // ids contrato de la sección, y la pestaña propia separada de Compilar/Diagnóstico/Historial
     for (const id of ["deps-coordenada", "deps-resolver", "deps-estado", "deps-resultado",
-      "deps-nombre", "deps-bytes", "deps-hash", "deps-licencia", "deps-ruta", "deps-indice",
+      "deps-nombre", "deps-bytes", "deps-hash", "deps-licencia", "deps-fecha", "deps-ruta", "deps-indice",
       "deps-ficheros", "deps-soltar", "deps-progreso", "deps-importar-estado", "deps-importado",
       "deps-importado-ficheros", "deps-importado-bytes", "deps-importado-destino",
       "deps-importado-descriptor"]) {
       if (!ids.has(id)) mal("index.html no tiene el id de dependencias #" + id);
+    }
+    // la fecha del artefacto se pinta junto a la licencia, y no se inventa si el índice no la trae
+    const pintarDeps = fuenteDeps.slice(fuenteDeps.indexOf("const pintar = (r) =>"),
+      fuenteDeps.indexOf("const resolver = async"));
+    if (!/deps-fecha/.test(fuenteDeps) ||
+        !/fecha\.textContent = r\.fecha \|\| "sin declarar"/.test(pintarDeps)) {
+      mal("el panel de dependencias no pinta la fecha del artefacto junto a la licencia");
     }
     if (!/data-panel="deps"/.test(html) || !/id="panel-deps"/.test(html)) {
       mal("la sección de dependencias no tiene su pestaña data-panel=deps");
