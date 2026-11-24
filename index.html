@@ -917,6 +917,16 @@
                       <input type="text" id="wisp-url" placeholder="wss://mi-wisp.local/wisp/"
                              autocomplete="off" spellcheck="false" class="ruta"></label>
                     <p class="nota" id="wisp-url-estado">vacío: se usa el relay elegido en la lista</p>
+                    <label>certificados de confianza (PEM local, opcional)
+                      <input type="file" id="wisp-cas" accept=".pem,.crt,application/x-pem-file,text/plain">
+                    </label>
+                    <label>huella SHA-256 esperada (opcional)
+                      <input type="text" id="wisp-cas-huella" placeholder="64 dígitos hex; vacío = la del fichero"
+                             autocomplete="off" spellcheck="false" class="ruta">
+                    </label>
+                    <p class="nota" id="wisp-cas-estado" role="status" aria-live="polite">sin CAs: el
+                      bundle se lee de tu dispositivo y se pasa al núcleo; nunca se descarga por el
+                      relay.</p>
                     <p class="nota">Relays de terceros, sin auditar; la latencia es la de un
                       handshake de prueba y cambia. La URL de un WISP propio tiene que acabar en «/».</p>
                   </div>
@@ -1277,6 +1287,9 @@
       reales.</p>
     <p>Los relays de la lista son de terceros y no están auditados: nadie revisó quién los opera.
       Si levantas tu propio WISP, escribe su URL en el campo de URL personalizada.</p>
+    <p>El bundle de CAs se lee de tu dispositivo (un fichero PEM local), nunca del relay: se pasa
+      al núcleo para que verifique el TLS. Si cargas el bundle de CAs de otro, conviertes a ese
+      relay en una CA: podría firmar el certificado de cualquier host y leer lo que pase.</p>
   </div>
   <label class="dialogo-check">
     <input type="checkbox" id="wisp-recordar">

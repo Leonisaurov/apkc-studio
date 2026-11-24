@@ -3,6 +3,7 @@
 import fs from "node:fs";
 import path from "node:path";
 import { execFileSync } from "node:child_process";
+import { X509Certificate } from "node:crypto";
 import { fileURLToPath } from "node:url";
 import { buildProject, makeZip, analyze, RULES, crc32 } from "./app.js";
 import * as pestanaMod from "./pestana.js";
@@ -3469,6 +3470,126 @@ public final class R {
       if (!fallo) mal("destinoDeCoordenada acepta una coordenada rota: " + JSON.stringify(mala));
     }
 
+    // el contrato de CAs: el bundle sale del dispositivo, se valida como `CargarCAsPEM` y se pasa
+    // al núcleo como `{pem, huella}`. La clave es texto: no hay ningún binario versionado.
+    const derCA = "MIIDAjCCAeqgAwIBAgIUcfLu8HtBeK0Pc4ZtX36u3FU77OswDQYJKoZIhvcNAQEL" +
+      "BQAwITEfMB0GA1UEAwwWYXBrYy1zdHVkaW8gcHJ1ZWJhIENBczAeFw0yNjExMjQw" +
+      "NDE2MzZaFw0zNjExMjEwNDE2MzZaMCExHzAdBgNVBAMMFmFwa2Mtc3R1ZGlvIHBy" +
+      "dWViYSBDQXMwggEiMA0GCSqGSIb3DQEBAQUAA4IBDwAwggEKAoIBAQCfNXjQA/mO" +
+      "w6KFf77v0K4iszPUBH2P9x3GvgaThIx5Hk8j0Mc1URGaYFKPdAC6mIitGt+EB2MF" +
+      "BfvIbBje564rZflcjKPzY0OMbfb4Kf3naZuNXehSFhoDCL49O5j8AmMkDnXVMe2M" +
+      "Ns6W9kmAJRSQtD6z2tYHm5p4KDrSvDyapPmNT+5+4lVa/IZUUnBh1OUZtO6IVyjF" +
+      "E9lXv4NZ2ToFgqzx0eMdwXNv/h6vjGjJ3mXM0vt1CyHB4OQxKt63bO6pDeou3HF2" +
+      "B9WGbiSrhDacGzm5qGRSuswYSkJJ2Ed9xXH4CpdaNaxE+xpK4dPgy+IwoT3kHBpE" +
+      "NWq1TcBmLSWLAgMBAAGjMjAwMB0GA1UdDgQWBBRIgcsCpoXOy9Z1uGO79MVtLAOn" +
+      "pjAPBgNVHRMBAf8EBTADAQH/MA0GCSqGSIb3DQEBCwUAA4IBAQBizkZ9Glrqeuze" +
+      "YyKe2ekq6SnTuqrTPuSre0+jWBTXsukdyZ1oW4K4IGFD30fb81PDsV1aMADUHtwO" +
+      "Go1a3x3l/EypLdJtRkNt/hpyvdjjp0RJTc6p3pOxBMrDAQVKhtSn7cVU5xjhnbZb" +
+      "FD48IEf8WgnXYs39VoDb5paybSnwUSGDUR+FvEcj4qpsaYoNunXSjBMR76TgRTyU" +
+      "T+fMAgzuxdtiCNoSX7zj9rQLa/QhPpbDL0ivZRA6pas5NnRjgrwBMVLBXj7k4YOE" +
+      "kGeizPtoymklUU1ak9Ag8Xyc2eGxT9VeztyRh7Y+RCNFA3HwdbkfPBFBW7O21tO5" +
+      "11dIxSEU";
+    const armarPEM = (b64) => "-----BEGIN CERTIFICATE-----\n" +
+      String(b64).match(/.{1,64}/g).join("\n") + "\n-----END CERTIFICATE-----\n";
+    const pemCA = armarPEM(derCA);
+    const bytesCA = new TextEncoder().encode(pemCA);
+    // el PEM de prueba es un certificado autocertificado de verdad: node lo parsea
+    const certCA = new X509Certificate(pemCA);
+    if (!/apkc-studio/.test(certCA.subject)) {
+      mal("el PEM de prueba no es el certificado autocertificado: " + certCA.subject);
+    }
+    const problemaPEM = wispMod.validarCAsPEM(pemCA);
+    if (problemaPEM) mal("validarCAsPEM rechaza un bundle válido: " + problemaPEM);
+    for (const basura of ["", "no es pem", "-----BEGIN CERTIFICATE-----\nAAAA\n",
+      "-----BEGIN RSA PRIVATE KEY-----\nAAAA\n-----END RSA PRIVATE KEY-----\n",
+      pemCA + "basura", "----BEGIN CERTIFICATE-----\nAAAA\n-----END CERTIFICATE-----\n"]) {
+      if (!wispMod.validarCAsPEM(basura)) {
+        mal("validarCAsPEM acepta basura: " + JSON.stringify(basura).slice(0, 90));
+      }
+    }
+    if (wispMod.nombreCASValido("ca.pem") || wispMod.nombreCASValido("CA.CRT")) {
+      mal("nombreCASValido rechaza un .pem/.crt local");
+    }
+    for (const nombre of ["https://relay.example/ca.pem", "ca.pfx", "certificados/ca.pem", ""]) {
+      if (!wispMod.nombreCASValido(nombre)) {
+        mal("nombreCASValido acepta un fichero que no es un .pem/.crt local: " + JSON.stringify(nombre));
+      }
+    }
+
+    const preparado = await wispMod.prepararCAS({ nombre: "ca.pem", bytes: bytesCA });
+    const huellaCA = await depsMod.sha256Hex(bytesCA);
+    if (preparado.pem !== pemCA || preparado.bytes !== bytesCA.length || preparado.huella !== huellaCA) {
+      mal("prepararCAS no devuelve el PEM y su huella sha256: " + JSON.stringify(preparado).slice(0, 160));
+    }
+    const fijado = await wispMod.prepararCAS({
+      nombre: "ca.pem", bytes: bytesCA, huellaEsperada: huellaCA.toUpperCase().replace(/(..)/g, "$1:").slice(0, -1),
+    });
+    if (fijado.huella !== huellaCA) mal("prepararCAS no acepta la huella esperada en mayúscula y con «:»");
+    let huellaMala = "";
+    try {
+      await wispMod.prepararCAS({ nombre: "ca.pem", bytes: bytesCA, huellaEsperada: "00".repeat(32) });
+    } catch (e) { huellaMala = String(e && e.message ? e.message : e); }
+    if (!/no coincide/.test(huellaMala)) mal("prepararCAS acepta un bundle con la huella equivocada: " + huellaMala);
+    let casGrande = "";
+    try {
+      await wispMod.prepararCAS({ nombre: "ca.pem", bytes: new Uint8Array(64 * 1024 + 1).fill(10) });
+    } catch (e) { casGrande = String(e && e.message ? e.message : e); }
+    if (!/64 KiB/.test(casGrande)) mal("prepararCAS no acota el bundle a 64 KiB: " + casGrande);
+    let casBasura = "";
+    try {
+      await wispMod.prepararCAS({ nombre: "ca.pem", bytes: new TextEncoder().encode("basura") });
+    } catch (e) { casBasura = String(e && e.message ? e.message : e); }
+    if (!/CERTIFICATE/.test(casBasura)) mal("prepararCAS acepta un fichero que no es PEM: " + casBasura);
+    let casUrl = "";
+    try {
+      await wispMod.prepararCAS({ nombre: "https://relay.example/ca.pem", bytes: bytesCA });
+    } catch (e) { casUrl = String(e && e.message ? e.message : e); }
+    if (!/no de una URL/.test(casUrl)) mal("prepararCAS acepta un nombre con URL: " + casUrl);
+
+    // el puente: sin núcleo lo dice, con núcleo sin CAs lo dice, y con el puente recibe {pem, huella}
+    let sinNucleoCA = "";
+    try { await wispMod.cargarCAsEnNucleo({ pem: pemCA, huella: huellaCA, global: {} }); }
+    catch (e) { sinNucleoCA = String(e && e.message ? e.message : e); }
+    if (!/núcleo WISP no disponible en esta compilación/.test(sinNucleoCA)) {
+      mal("sin núcleo, cargarCAsEnNucleo no dice qué falta: " + sinNucleoCA);
+    }
+    let sinPuente = "";
+    try {
+      await wispMod.cargarCAsEnNucleo({
+        pem: pemCA, huella: huellaCA,
+        global: { apkcWisp: { version: "apkc-wisp/1", obtener: async () => ({}) } },
+      });
+    } catch (e) { sinPuente = String(e && e.message ? e.message : e); }
+    if (!/sin carga de CAs/.test(sinPuente)) {
+      mal("un núcleo sin apkcWispCargarCAs no se rechaza con motivo: " + sinPuente);
+    }
+    let payloadCA = null;
+    const globalCAS = {
+      apkcWisp: { version: "apkc-wisp/1", obtener: async () => ({}) },
+      apkcWispCargarCAs: async (peticion) => { payloadCA = peticion; return { ok: true }; },
+    };
+    await wispMod.cargarCAsEnNucleo({ pem: pemCA, huella: huellaCA, global: globalCAS });
+    if (!payloadCA || payloadCA.pem !== pemCA || payloadCA.huella !== huellaCA ||
+        Object.keys(payloadCA).sort().join(",") !== "huella,pem") {
+      mal("apkcWispCargarCAs no recibe exactamente {pem, huella}: " + JSON.stringify(payloadCA).slice(0, 160));
+    }
+    // y Resolver carga las CAs antes de abrir el relay: el orden es contrato
+    const ordenCA = [];
+    const globalOrden = {
+      apkcWisp: {
+        version: "apkc-wisp/1",
+        obtener: async () => { ordenCA.push("obtener"); return { bytes: new Uint8Array([1]), sha256: "ff", ruta: "/deps/x" }; },
+      },
+      apkcWispCargarCAs: async () => { ordenCA.push("cas"); return { ok: true }; },
+    };
+    await wispMod.resolverPorWisp({
+      relay: "wss://wisp.local/wisp/", coordenada: "com.example:prueba:1.0",
+      hospedador: hospedadorFalso, cas: preparado, global: globalOrden,
+    });
+    if (ordenCA.join(",") !== "cas,obtener") {
+      mal("resolverPorWisp no carga las CAs antes de usar el relay: " + ordenCA.join(","));
+    }
+
     // el aviso dice las cuatro cosas que importan, y las dice el HTML que se pinta, no una copia
     const desdeAviso = html.indexOf('id="wisp-aviso"');
     const hastaAviso = desdeAviso < 0 ? -1 : html.indexOf("</dialog>", desdeAviso);
@@ -3482,7 +3603,7 @@ public final class R {
     }
     for (const id of ["wisp-aviso", "wisp-aviso-activar", "wisp-aviso-cancelar", "wisp-recordar",
       "wisp-estado", "wisp-activar", "wisp-desactivar", "wisp-selector", "wisp-relay", "wisp-url",
-      "wisp-url-estado"]) {
+      "wisp-url-estado", "wisp-cas", "wisp-cas-huella", "wisp-cas-estado"]) {
       if (!ids.has(id)) mal("index.html no tiene el id del módulo WISP #" + id);
     }
     // el selector nace plegado: sin opt-in no hay nada que elegir
@@ -3517,7 +3638,8 @@ public final class R {
       porId[id] = nodo();
     }
     for (const id of ["wisp-estado", "wisp-activar", "wisp-desactivar", "wisp-selector",
-      "wisp-relay", "wisp-url", "wisp-url-estado", "wisp-aviso", "wisp-recordar"]) {
+      "wisp-relay", "wisp-url", "wisp-url-estado", "wisp-aviso", "wisp-recordar",
+      "wisp-cas", "wisp-cas-huella", "wisp-cas-estado"]) {
       porId[id] = nodo();
     }
     porId["wisp-aviso"].open = false;
@@ -3549,6 +3671,29 @@ public final class R {
       }
       if (!/400 ms/.test(String(porId["wisp-relay"].children[0].textContent))) {
         mal("el selector no muestra la latencia medida del primer relay");
+      }
+
+      // (a2) el fichero de CAs del dispositivo: válido se acepta con su huella, basura se rechaza
+      const casPanel = await panelWisp.seleccionarCAS({ name: "ca.pem", bytes: bytesCA });
+      if (!casPanel || !panelWisp.casActual() || panelWisp.casActual().huella !== huellaCA ||
+          !/aceptadas/.test(String(porId["wisp-cas-estado"].textContent))) {
+        mal("el panel no acepta un PEM local válido con su huella: " +
+          String(porId["wisp-cas-estado"].textContent));
+      }
+      let casPanelBasura = "";
+      try {
+        await panelWisp.seleccionarCAS({ name: "ca.pem", bytes: new TextEncoder().encode("basura") });
+      } catch (e) { casPanelBasura = String(e && e.message ? e.message : e); }
+      if (!/CERTIFICATE/.test(casPanelBasura) || panelWisp.casActual() ||
+          !/rechazadas/.test(String(porId["wisp-cas-estado"].textContent))) {
+        mal("el panel no rechaza un fichero con basura y deja de tener CAs: " + casPanelBasura);
+      }
+      let casPanelUrl = "";
+      try {
+        await panelWisp.seleccionarCAS({ name: "https://relay.example/ca.pem", bytes: bytesCA });
+      } catch (e) { casPanelUrl = String(e && e.message ? e.message : e); }
+      if (!/no de una URL/.test(casPanelUrl) || panelWisp.casActual()) {
+        mal("el panel acepta un .pem con nombre de URL: " + casPanelUrl);
       }
 
       // (b) sin opt-in, el panel de dependencias sigue pidiendo el índice del propio origen

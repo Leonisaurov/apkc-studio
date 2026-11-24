@@ -146,12 +146,14 @@ un muro. Eso rompe la regla 4 (nada fuera del origen) y por eso es un módulo **
 aviso; el modo por defecto sigue con **cero peticiones ajenas**.
 
 **El aviso.** Al pulsar **Resolver** con el módulo sin decidir, se abre `#wisp-aviso` sin tocar la
-red. Dice las cuatro cosas que importan: (1) sirve para saltarse el CORS abriendo TCP desde el
+red. Dice las seis cosas que importan: (1) sirve para saltarse el CORS abriendo TCP desde el
 relay; (2) descarga **archivos extra del módulo** desde este mismo origen —el binario del núcleo
 `wasm` y la lista de relays—; (3) si el **TLS propio del núcleo** no está en esta compilación, el
 contenido viaja **en claro** por el relay y cualquiera en su camino puede leerlo o sustituirlo:
-el TLS del núcleo es la opción segura y, sin él, esto es solo para pruebas; (4) los relays son de
-**terceros y no están auditados**. Ofrece «Activar para esta sesión» y «Cancelar», con la casilla
+el TLS del núcleo es la opción segura y, sin él, esto es solo para pruebas; (4) el bundle de CAs
+se lee **del dispositivo**, nunca del relay; (5) un bundle de CAs ajeno convertiría al relay en
+una CA que puede firmar el certificado de cualquier host; (6) los relays son de **terceros y no
+están auditados**. Ofrece «Activar para esta sesión» y «Cancelar», con la casilla
 **«Recordar elección»** desmarcada. Cancelar deja el módulo apagado, no guarda nada y esa misma
 pulsación sigue por `deps-index.json` del propio origen.
 
@@ -203,25 +205,57 @@ y no abre ningún socket; después de esa decisión de la persona, el panel no i
 silencioso. El puente puede registrarlo la página o el worker (`hospedador.js`) por `postMessage`:
 lo que **no** cambia es la forma de llamada, que es `wisp.js`.
 
+**Las CAs: del dispositivo al núcleo.** En `js/wasm` no existe `x509.SystemCertPool`
+(`apkc/wispcerts_js.go`), así que el `RootCAs` lo inyecta la página. El contrato es un método
+global aparte, para no cambiar la forma de `obtener`:
+
+```js
+globalThis.apkcWispCargarCAs({ pem, huella }) =>
+  Promise<{ ok: true } | { ok: false, error: string }>
+```
+
+- `pem` es el texto del fichero **local** que la persona elige en `#wisp-cas` (`input file`,
+  same-origin, sin red): solo `.pem`/`.crt`, hasta **64 KiB**, con uno o más bloques
+  `CERTIFICATE` y cero bytes fuera de bloque. La página lo valida con `prepararCAS()` antes de
+  llamar al núcleo, que vuelve a validarlo con `CargarCAsPEM` (`apkc/depswisp.go:104`).
+- `huella` es el sha256 del bundle tal cual (`HuellaCAsPEM`), en hexadecimal de 64 dígitos. Si la
+  persona escribe una esperada en `#wisp-cas-huella`, `prepararCAS()` la compara y rechaza el
+  fichero si no coincide; el núcleo puede usar `CargarCAsPEMFijadas` (`depswisp.go:166`).
+- `resolverPorWisp({ cas })` llama a `apkcWispCargarCAs` **antes** de `obtener`. Sin núcleo, el
+  error es el de siempre; con un núcleo que no acepta CAs, dice **«núcleo WISP sin carga de CAs en
+  esta compilación»** y no abre el relay.
+- El bundle **nunca** llega por el relay: un bundle ajeno convertiría al relay en una CA capaz de
+  firmar cualquier host. La página no descarga CAs de ninguna URL y rechaza un nombre con esquema
+  (`https://…`) antes de leer el fichero.
+
 **Qué queda del núcleo y los gates.** El framing v1 (`CONNECT`/`DATA`/`CONTINUE`/`CLOSE`, el
 `CONTINUE` inicial con `streamID` 0 y el `bufferPackets` leído), `crypto/tls` sobre el `net.Conn`
-con las CAs embebidas (`js/wasm` no trae `SystemCertPool`), el puente desde la página o el worker,
-y **dos gates**: el de por defecto, con cero peticiones ajenas, y el del modo externo, que abre un
-relay de verdad y re-mide `wisp-relays.json`. La publicación del sitio sigue pendiente de orden.
+con las CAs inyectadas, el registro de **`apkcWispCargarCAs`** y la llamada a `CargarCAsPEMFijadas`
+desde él, el puente desde la página o el worker, y **dos gates**: el de por defecto, con cero
+peticiones ajenas, y el del modo externo, que abre un relay de verdad y re-mide `wisp-relays.json`.
+La publicación del sitio sigue pendiente de orden.
 
 **Pruebas del módulo.**
 
 - `node prueba.js`: el JSON de relays (seis, latencias medidas, sin `bufferPackets` por relay) y su
   validador (sin handshake, sin latencia, sin barra final o con `v2`, fuera); la elección —sin
   recordar no escribe nada, con recordar persiste activo e inactivo—; el contrato (sin núcleo dice
-  qué falta, con un núcleo de mentira recibe relay, coordenada y destino); el texto del aviso,
-  comprobado **contra el HTML que se pinta**, no contra una copia; y el panel: sin opt-in va al
-  índice del propio origen, con opt-in y sin núcleo no hace ni una petición.
+  qué falta, con un núcleo de mentira recibe relay, coordenada y destino); **las CAs**: un PEM
+  autocertificado de prueba se acepta y produce `{pem, huella}` con el sha256 real, la basura y
+  los bytes fuera de bloque se rechazan, el fichero de más de 64 KiB se rechaza, un nombre con
+  `https://` se rechaza antes de leerlo, la huella esperada se compara y `apkcWispCargarCAs`
+  recibe exactamente `{pem, huella}` **antes** de `obtener`; el texto del aviso —seis ideas,
+  incluidas las dos de CAs— comprobado **contra el HTML que se pinta**, no contra una copia; y el
+  panel: sin opt-in va al índice del propio origen, con opt-in y sin núcleo no hace ni una
+  petición, y elegir un PEM del disco deja `casActual()` con su huella.
 - `node prueba-pestana.js`: sin opt-in, el selector no se muestra y Resolver abre el aviso con
-  **cero** peticiones; el aviso contiene CORS, archivos extra, «en claro»/MITM y terceros;
-  «Cancelar» sigue por el índice; activar sin recordar no escribe en `localStorage` y lista los 6
-  relays con su latencia en **una** petición al propio origen; con el módulo activo y sin núcleo,
-  Resolver falla con el motivo y **cero** peticiones; una URL sin barra final se rechaza con el
-  motivo de la spec; «Recordar elección» persiste y la recarga deja el módulo activo sin volver a
-  preguntar; y la comprobación global cierra con **cero peticiones fuera del origen**.
+  **cero** peticiones; el aviso contiene CORS, archivos extra, «en claro»/MITM, CAs del
+  dispositivo y terceros; «Cancelar» sigue por el índice; activar sin recordar no escribe en
+  `localStorage` y lista los 6 relays con su latencia en **una** petición al propio origen; con
+  el módulo activo y sin núcleo, Resolver falla con el motivo y **cero** peticiones; un PEM real
+  metido con `DataTransfer` se acepta con su sha256 y con un núcleo de mentira Resolver le pasa
+  `{pem, huella}` antes de pedir el artefacto; la basura y un nombre con URL se rechazan con su
+  motivo; una URL sin barra final se rechaza con el motivo de la spec; «Recordar elección»
+  persiste y la recarga deja el módulo activo sin volver a preguntar; y la comprobación global
+  cierra con **cero peticiones fuera del origen**.
 

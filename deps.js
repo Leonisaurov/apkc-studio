@@ -493,9 +493,11 @@ export function crearPanelDeps({ hospedador, conBloqueo, alImportar, wisp } = {}
       if (usarWisp) {
         const relay = modulo.relayActual();
         const coord = entrada.value.trim();
-        decir("módulo WISP: pidiendo «" + coord + "» por " + hostDeRelay(relay) + "…");
+        const cas = typeof modulo.casActual === "function" ? modulo.casActual() : null;
+        decir("módulo WISP: pidiendo «" + coord + "» por " + hostDeRelay(relay) +
+          (cas ? " con las CAs del dispositivo (" + cas.huella.slice(0, 16) + "…)" : " sin bundle de CAs") + "…");
         const r = await resolverPorWisp({
-          relay, coordenada: coord, destino: destinoDeCoordenada(coord), hospedador,
+          relay, coordenada: coord, destino: destinoDeCoordenada(coord), hospedador, cas,
         });
         pintarWisp(r, relay);
         decir("listo: «" + coord + "» traído por el relay " + hostDeRelay(relay) +

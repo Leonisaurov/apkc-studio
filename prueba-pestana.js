@@ -6004,6 +6004,97 @@ async function conductor() {
       JSON.stringify({ estado: String(sinNucleo.estado).slice(0, 200),
         peticiones: peticiones.length - antesNucleo }).slice(0, 320));
 
+    // Las CAs: el bundle sale del dispositivo. Se conduce el input `file` con un File real
+    // (DataTransfer), sin descargar nada. El PEM es un certificado autocertificado de prueba.
+    const derCAPestana = "MIIDAjCCAeqgAwIBAgIUcfLu8HtBeK0Pc4ZtX36u3FU77OswDQYJKoZIhvcNAQEL" +
+      "BQAwITEfMB0GA1UEAwwWYXBrYy1zdHVkaW8gcHJ1ZWJhIENBczAeFw0yNjExMjQw" +
+      "NDE2MzZaFw0zNjExMjEwNDE2MzZaMCExHzAdBgNVBAMMFmFwa2Mtc3R1ZGlvIHBy" +
+      "dWViYSBDQXMwggEiMA0GCSqGSIb3DQEBAQUAA4IBDwAwggEKAoIBAQCfNXjQA/mO" +
+      "w6KFf77v0K4iszPUBH2P9x3GvgaThIx5Hk8j0Mc1URGaYFKPdAC6mIitGt+EB2MF" +
+      "BfvIbBje564rZflcjKPzY0OMbfb4Kf3naZuNXehSFhoDCL49O5j8AmMkDnXVMe2M" +
+      "Ns6W9kmAJRSQtD6z2tYHm5p4KDrSvDyapPmNT+5+4lVa/IZUUnBh1OUZtO6IVyjF" +
+      "E9lXv4NZ2ToFgqzx0eMdwXNv/h6vjGjJ3mXM0vt1CyHB4OQxKt63bO6pDeou3HF2" +
+      "B9WGbiSrhDacGzm5qGRSuswYSkJJ2Ed9xXH4CpdaNaxE+xpK4dPgy+IwoT3kHBpE" +
+      "NWq1TcBmLSWLAgMBAAGjMjAwMB0GA1UdDgQWBBRIgcsCpoXOy9Z1uGO79MVtLAOn" +
+      "pjAPBgNVHRMBAf8EBTADAQH/MA0GCSqGSIb3DQEBCwUAA4IBAQBizkZ9Glrqeuze" +
+      "YyKe2ekq6SnTuqrTPuSre0+jWBTXsukdyZ1oW4K4IGFD30fb81PDsV1aMADUHtwO" +
+      "Go1a3x3l/EypLdJtRkNt/hpyvdjjp0RJTc6p3pOxBMrDAQVKhtSn7cVU5xjhnbZb" +
+      "FD48IEf8WgnXYs39VoDb5paybSnwUSGDUR+FvEcj4qpsaYoNunXSjBMR76TgRTyU" +
+      "T+fMAgzuxdtiCNoSX7zj9rQLa/QhPpbDL0ivZRA6pas5NnRjgrwBMVLBXj7k4YOE" +
+      "kGeizPtoymklUU1ak9Ag8Xyc2eGxT9VeztyRh7Y+RCNFA3HwdbkfPBFBW7O21tO5" +
+      "11dIxSEU";
+    const pemCAPestana = "-----BEGIN CERTIFICATE-----\n" +
+      derCAPestana.match(/.{1,64}/g).join("\n") + "\n-----END CERTIFICATE-----\n";
+    const meterCAS = (nombre, texto) => evaluar(`(() => {
+      const entrada = document.getElementById("wisp-cas");
+      const datos = new DataTransfer();
+      datos.items.add(new File([${JSON.stringify(texto)}], ${JSON.stringify(nombre)},
+        { type: "application/x-pem-file" }));
+      entrada.files = datos.files;
+      entrada.dispatchEvent(new Event("change", { bubbles: true }));
+      return true;
+    })()`);
+    const esperarEstadoCAS = async (patron) => {
+      let visto = null;
+      for (let i = 0; i < 60; i++) {
+        visto = await evaluar(`document.getElementById("wisp-cas-estado").textContent`);
+        if (patron.test(String(visto))) break;
+        await esperar(150);
+      }
+      return String(visto || "");
+    };
+
+    await meterCAS("ca-prueba.pem", pemCAPestana);
+    const casBien = await esperarEstadoCAS(/^CAs aceptadas/);
+    const huellaBien = (casBien.match(/sha256 ([0-9a-f]{64})/) || [])[1] || "";
+    comprueba("un PEM local válido se acepta y muestra su huella sha256",
+      /^CAs aceptadas/.test(casBien) && huellaBien.length === 64, casBien.slice(0, 220));
+
+    // con un núcleo de mentira, Resolver pasa exactamente {pem, huella} antes de pedir el artefacto
+    await evaluar(`(() => {
+      window.__casVista = null;
+      window.__peticionVista = null;
+      window.apkcWisp = { version: "apkc-wisp/1", obtener: async (peticion) => {
+        window.__peticionVista = peticion;
+        return { bytes: new Uint8Array([1, 2, 3]), sha256: "ff", ruta: peticion.destino + "prueba-1.0.jar" };
+      } };
+      window.apkcWispCargarCAs = async (payload) => { window.__casVista = payload; return { ok: true }; };
+      return true;
+    })()`);
+    await evaluar(`(() => {
+      document.getElementById("deps-coordenada").value = ${JSON.stringify(coordFalsa)};
+      document.getElementById("deps-resolver").click();
+      return true;
+    })()`);
+    let conCAS = null;
+    for (let i = 0; i < 60; i++) {
+      conCAS = await evaluar(`(() => ({
+        estado: document.getElementById("deps-estado").textContent,
+        cas: window.__casVista,
+        peticion: window.__peticionVista,
+      }))()`);
+      if (/^listo/.test(String(conCAS.estado))) break;
+      await esperar(200);
+    }
+    comprueba("Resolver entrega al núcleo el {pem, huella} del dispositivo antes de abrir el relay",
+      conCAS && /^listo/.test(String(conCAS.estado)) && conCAS.cas &&
+      conCAS.cas.pem === pemCAPestana && conCAS.cas.huella === huellaBien &&
+      conCAS.peticion && conCAS.peticion.coordenada === coordFalsa,
+      JSON.stringify({ estado: String(conCAS && conCAS.estado).slice(0, 120),
+        huella: conCAS && conCAS.cas && conCAS.cas.huella,
+        claves: conCAS && conCAS.cas && Object.keys(conCAS.cas).join(",") }).slice(0, 300));
+    await evaluar(`(() => { delete window.apkcWisp; delete window.apkcWispCargarCAs; return true; })()`);
+
+    await meterCAS("ca-prueba.pem", "basura que no es PEM");
+    const casBasura = await esperarEstadoCAS(/^CAs rechazadas/);
+    comprueba("un fichero con basura se rechaza con el motivo y no deja CAs cargadas",
+      /^CAs rechazadas/.test(casBasura) && /CERTIFICATE/.test(casBasura), casBasura.slice(0, 220));
+
+    await meterCAS("https://relay.example/ca.pem", pemCAPestana);
+    const casUrl = await esperarEstadoCAS(/^CAs rechazadas/);
+    comprueba("un .pem con nombre de URL se rechaza antes de leer el fichero",
+      /^CAs rechazadas/.test(casUrl) && /no de una URL/.test(casUrl), casUrl.slice(0, 220));
+
     // una URL personalizada sin barra final se rechaza con el motivo de la spec, antes de la red
     const conUrlPropia = await evaluar(`(() => {
       document.getElementById("wisp-url").value = "wss://mi-wisp.local/wisp";
