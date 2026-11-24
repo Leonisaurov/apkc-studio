@@ -6378,7 +6378,9 @@ async function conductor() {
       window.__peticionVista = null;
       window.apkcWisp = { version: "apkc-wisp/1", obtener: async (peticion) => {
         window.__peticionVista = peticion;
-        return { bytes: new Uint8Array([1, 2, 3]), sha256: "ff", ruta: peticion.destino + "prueba-1.0.jar" };
+        return { bytes: new Uint8Array([1, 2, 3]),
+          sha256: "039058c6f2c0cb492c533b0a4d14ef77cc0f78abccced5287d84a1a2011cfb81",
+          ruta: peticion.destino + "prueba-1.0.jar" };
       } };
       window.apkcWispCargarCAs = async (payload) => { window.__casVista = payload; return { ok: true }; };
       return true;
