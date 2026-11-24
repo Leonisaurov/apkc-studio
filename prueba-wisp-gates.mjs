@@ -81,6 +81,33 @@ const hosts = gates.hostsDeRelays(leidos.relays);
   console.log("  salida falsificación 1: gate por defecto -> " +
     (conAjeno.ajenas.length ? "FALLA con " + conAjeno.ajenas.length + " URL ajena (" + conAjeno.ajenas[0] + ")"
       : "PASA (mal: no detectó el wss://)"));
+
+  // falsificación 3: `data:` y `blob:` no se aceptan por el esquema, sino por el origen que
+  // incrustan. Un host ajeno dentro del texto opaco tiene que romper el gate igual que un `wss://`
+  for (const [que, url, local] of [
+    ["blob: con origin ajeno incrustado", "blob:https://relay-ajeno.example/uuid", false],
+    ["data: con wss:// ajeno incrustado", "data:text/html,wss://relay-ajeno.example/wisp/", false],
+    ["blob: con origin local incrustado", "blob:http://127.0.0.1:" + PUERTO + "/uuid", true],
+    ["data: sin contenido externo", "data:text/html,<b>hola</b>", true],
+  ]) {
+    const r = gates.clasificarUrls([url], { puerto: PUERTO });
+    comprueba("gate por defecto: " + que + " se clasifica como " + (local ? "local" : "ajena"),
+      local ? (r.locales.length === 1 && r.ajenas.length === 0) : (r.locales.length === 0 && r.ajenas.length === 1),
+      "locales: [" + r.locales.join(", ") + "] ajenas: [" + r.ajenas.join(", ") + "]");
+  }
+
+  // la regla anterior (aceptar `data:`/`blob:` por el mero esquema) es la que dejaba pasar el host
+  // ajeno; se reproduce aquí para dejar escrito qué es lo que el filtro nuevo impide
+  const filtroAnterior = (texto) => /^(?:data|blob):/i.test(String(texto));
+  comprueba("falsificación 3: sin el filtro de origen incrustado, el blob: ajeno sería local",
+    filtroAnterior("blob:https://relay-ajeno.example/uuid") === true &&
+    gates.clasificarUrls(["blob:https://relay-ajeno.example/uuid"], { puerto: PUERTO }).ajenas.length === 1,
+    "regla anterior: local; regla actual: ajena");
+  console.log("  salida falsificación 3: regla anterior -> " +
+    (filtroAnterior("blob:https://relay-ajeno.example/uuid") ? "local (mal)" : "ajena") +
+    " | regla actual -> " +
+    (gates.clasificarUrls(["blob:https://relay-ajeno.example/uuid"], { puerto: PUERTO }).ajenas.length
+      ? "ajena (bien)" : "local (mal)"));
 }
 
 // --- gate del modo externo ----------------------------------------------------------------------

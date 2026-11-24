@@ -2,8 +2,9 @@
 // pestaña y la falsificación de node usan exactamente la misma regla.
 //
 //   (1) Gate por defecto: el módulo está apagado y la pestaña no puede sacar ni una petición ni
-//       abrir un WebSocket fuera de su propio origen (`http://127.0.0.1:<puerto>`, `data:` y
-//       `blob:`). Un `wss://` cuenta como ajeno y hace fallar el gate.
+//       abrir un WebSocket fuera de su propio origen (`http://127.0.0.1:<puerto>` y los `data:` y
+//       `blob:` cuyo origen incrustado —si lo llevan— también es el local). Un `wss://` cuenta como
+//       ajeno y hace fallar el gate, aunque vaya dentro de un `data:` o un `blob:`.
 //   (2) Gate del modo externo: con `APKC_WISP_EXTERNO=1`, el módulo está encendido y cableado. Se
 //       valida `wisp-relays.json` (seis relays verificados, con latencia y protocolo v1), se hace
 //       solo el handshake inicial (CONTINUE con `streamID=0`, sin pedir artefactos) a cada relay y
@@ -24,13 +25,47 @@ export const TIPO_DATA = 0x02;
 export const TIPO_CONTINUE = 0x03;
 export const TIPO_CLOSE = 0x04;
 
+// La URL incrustada que hay que mirar en un `data:` o un `blob:`, si la hay.
+//
+//   `blob:` sí lleva un origen delante del uuid (`blob:https://host/uuid`): se extrae ese prefijo
+//   —esquema, host y puerto, sin ruta— y se compara como una URL. Un `blob:null/uuid`, sin origen,
+//   no incrusta nada.
+//   `data:` no lleva origen, solo contenido; desde un documento `data:` lo único que puede salir a
+//   la red como conexión es un WebSocket, así que se buscan sus `ws://`/`wss://`. Mirar además cada
+//   `http://` del contenido marcaría como ajeno un namespace legítimo (`http://www.w3.org/2000/svg`)
+//   sin ganar ninguna comprobación de egress.
+function origenesIncrustados(texto) {
+  const blob = /^blob:(?:https?|wss?):\/\/[^\s"'<>\\/]+/i.exec(String(texto));
+  if (blob) return [blob[0].replace(/^blob:/i, "")];
+  if (/^data:/i.test(texto)) return String(texto).match(/wss?:\/\/[^\s"'<>\\]+/gi) || [];
+  return [];
+}
+
+// ¿La URL incrustada apunta al origen local? Se compara host y puerto, no el texto: así el prefijo
+// `127.0.0.1:8791` de `127.0.0.1:87910` no se cuela, y el esquema (`http:`, `ws:`) no importa.
+function esOrigenEmbebidoLocal(incrustada, puerto) {
+  try {
+    const analizada = new URL(incrustada);
+    return analizada.hostname === "127.0.0.1" && analizada.port === String(puerto);
+  } catch (e) { return false; }
+}
+
 // El filtro del gate por defecto, tal como se documenta en `prueba-pestana.js`: el prefijo local y
-// los dos esquemas que no salen a la red. Se exige que tras el prefijo venga el principio de una
+// los dos esquemas de contenido opaco. Se exige que tras el prefijo venga el principio de una
 // ruta, una consulta o un ancla; así `http://127.0.0.1:87910/…` no se cuela por empezar igual que
 // `http://127.0.0.1:8791`. Es más estricto que el `startsWith` antiguo, nunca más laxo.
+//
+// `data:` y `blob:` no se aceptan por el mero esquema: se miran las URLs que incrustan. Sin ninguna
+// (un `data:text/plain,hola` o el `blob:null/uuid` de un origen opaco) cuenta como local, porque no
+// hay a dónde salir; con alguna, todas tienen que apuntar a `127.0.0.1:<puerto>`. Decisión: estricta
+// — un `blob:https://relay-ajeno.example/uuid` o un `data:` con un `wss://` ajeno se clasifican como
+// ajenos, aunque `new WebSocket` sobre ellos lance y hoy no haya egress probado.
 export function esUrlDelOrigen(url, puerto) {
   const texto = String(url == null ? "" : url);
-  if (/^(?:data|blob):/i.test(texto)) return true;
+  if (/^(?:data|blob):/i.test(texto)) {
+    const incrustadas = origenesIncrustados(texto);
+    return incrustadas.every((u) => esOrigenEmbebidoLocal(u, puerto));
+  }
   const prefijo = "http://127.0.0.1:" + puerto;
   if (!texto.startsWith(prefijo)) return false;
   const resto = texto.slice(prefijo.length);
