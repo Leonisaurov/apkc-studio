@@ -150,6 +150,39 @@ if (!/android:text="Hello World!"/.test(cicloEmulacion.files["res/layout/main.xm
   mal("plantilla Ciclo: el layout ya no muestra el texto que preview devuelve en raiz.hijos");
 }
 
+// 2c-ter. la plantilla traducida también se EMULA, no solo compila: `apkc preview` del apk que
+// generó buildProject devuelve un modelo medido el 2026-11-24 con apkc 46a9a792 (ver el informe
+// del subagente). Se copia ese JSON para que la suite de node no dependa del binario nativo.
+// Contrato medido: pantalla positiva, nodos y pasos de ejecución, y el nodo id/saludo resuelve
+// @string/saludo al texto BASE de values/ ("Hello!"). El «Hola!» de values-es/ NO llega al modelo:
+// `bloqueDeTipo` (apkc/recursos.go:604) elige siempre la configuración base y `preview` no acepta
+// idioma, así que sin pedir locale el intérprete no aplica la traducción. Se fija aquí para que no
+// se confunda «está en resources.arsc» con «llega al emulador».
+const modeloTraducido = JSON.parse(`{"paquete":"com.hola.traducido","version":"0.1","actividad":".MainActivity","layout":"res/layout/main.xml","pantalla":{"x":0,"y":0,"ancho":360,"alto":640},"aproximado":true,"nodos":2,"ejecucion":{"actividad":"com.hola.traducido.MainActivity","metodo":"onCreate","pasos":6,"pantallas":["com.hola.traducido.MainActivity"],"ciclo":["com.hola.traducido.MainActivity.onCreate"]},"raiz":{"tipo":"LinearLayout","ancho":"match_parent","alto":"match_parent","gravity":"center","rect":{"x":0,"y":0,"ancho":360,"alto":640},"hijos":[{"tipo":"TextView","id":"id/saludo","idRef":"0x7f010000","texto":"Hello!","estilo":"@0x01030042","ancho":"wrap_content","alto":"wrap_content","rect":{"x":148,"y":308,"ancho":64,"alto":24}}]}}`);
+const lineaTraducido = "un aviso suelto\n" + JSON.stringify(modeloTraducido) + "\n[apkc] finished in 1ms\n";
+const leidoTraducido = vistaPrevia.modeloDeSalida(lineaTraducido);
+if (!leidoTraducido || leidoTraducido.paquete !== "com.hola.traducido") {
+  mal("modeloDeSalida no lee el modelo de la plantilla traducida");
+} else {
+  if (!(leidoTraducido.pantalla.ancho > 0 && leidoTraducido.pantalla.alto > 0)) {
+    mal("el modelo de la traducida no trae pantalla positiva");
+  }
+  if (!(leidoTraducido.nodos > 0)) mal("el modelo de la traducida no trae nodos");
+  if (!((leidoTraducido.ejecucion && leidoTraducido.ejecucion.pasos) > 0)) {
+    mal("el modelo de la traducida no trae pasos de ejecución");
+  }
+  if (leidoTraducido.avisos && leidoTraducido.avisos.length) mal("el modelo de la traducida trae avisos");
+  if (leidoTraducido.error) mal("el modelo de la traducida trae error");
+  const saludo = vistaPrevia.nodosAplanados(leidoTraducido).find((x) => x.nodo.id === "id/saludo");
+  if (!saludo) mal("el modelo de la traducida no declara id/saludo");
+  else if (vistaPrevia.textoDeNodo(saludo.nodo) !== "Hello!") {
+    mal("el emulador no resuelve @string/saludo al texto base: " + vistaPrevia.textoDeNodo(saludo.nodo));
+  }
+  if (JSON.stringify(leidoTraducido).includes("Hola!")) {
+    mal("el modelo de la traducida incluye Hola! de values-es: el intérprete no debería traducir sin locale");
+  }
+}
+
 // 2d. las cinco apps de banco/apps-ejemplo son plantillas de verdad: su opcion esta en el selector
 //     de la pagina y buildProject escribe sus fuentes completas, no el esqueleto de Hola mundo.
 //     e2e.sh no las compila todavia; la compilacion se midio en el banco y esta prueba vigila que
@@ -271,9 +304,11 @@ if (!pintar || /drawLine/.test(pintar[1]) || !/circulos\(/.test(pintar[1]) ||
 const javaChatbt = chatbt.files[fuentesApp + "/MainActivity.java"] || "";
 const metodoPermisos = javaChatbt.slice(javaChatbt.indexOf("void pedirPermisos()"));
 const declPermisos = metodoPermisos.indexOf("String[] cuales");
+const siPermisos = metodoPermisos.indexOf("if (permiso");
 const retornoPermisos = metodoPermisos.indexOf("return;");
-if (declPermisos < 0 || retornoPermisos < 0 || declPermisos > retornoPermisos) {
-  mal("la plantilla chatbt declara los permisos después del return de pedirPermisos y no compila");
+if (declPermisos < 0 || siPermisos < 0 || retornoPermisos < 0 ||
+    declPermisos > siPermisos || declPermisos > retornoPermisos) {
+  mal("la plantilla chatbt declara los permisos después del if o del return de pedirPermisos y no compila");
 }
 
 // 3. el EOCD y los modos: un lector estricto (zipcheck.py) es el que ve lo que zipfile tolera
