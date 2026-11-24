@@ -184,15 +184,17 @@ export function nucleoDisponible(global = globalThis) {
   return !!nucleo && nucleo.version === CONTRATO_NUCLEO && typeof nucleo.obtener === "function";
 }
 
-// La carpeta de OPFS donde el núcleo deja el artefacto, con la misma forma que usa la vía del
-// índice (`/deps/<grupo>/<artefacto>/<versión>/`). El nombre del fichero lo decide el núcleo,
-// porque sin índice no se sabe si el artefacto es `.jar` o `.aar`.
+// La carpeta de OPFS donde el núcleo deja el artefacto: el grupo se trocea con barras, igual que
+// hace el núcleo (`strings.ReplaceAll(grupo, ".", "/")`), no con puntos como la vía del índice.
+// El nombre del fichero lo decide el núcleo, porque sin índice no se sabe si el artefacto es `.jar` o `.aar`.
 export function destinoDeCoordenada(coordenada) {
   const partes = String(coordenada == null ? "" : coordenada).trim().split(":");
-  if (partes.length !== 3 || partes.some((p) => !/^[A-Za-z0-9][A-Za-z0-9._+-]*$/.test(p) || p.includes(".."))) {
+  if (partes.length !== 3 ||
+      partes.some((p) => !/^[A-Za-z0-9][A-Za-z0-9._+-]*$/.test(p) || p.includes("..")) ||
+      partes[0].split(".").some((s) => !s)) {
     throw new Error("la coordenada no tiene la forma grupo:artefacto:versión: " + JSON.stringify(coordenada));
   }
-  return "/deps/" + partes.join("/") + "/";
+  return "/deps/" + partes[0].replaceAll(".", "/") + "/" + partes[1] + "/" + partes[2] + "/";
 }
 
 // La llamada al núcleo. Sin él, el error dice exactamente qué falta y no se abre ningún socket:

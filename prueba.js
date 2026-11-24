@@ -4401,7 +4401,7 @@ public final class R {
     });
     if (!conNucleo || conNucleo.bytes.length !== 3 ||
         visto.relay !== "wss://wisp.local/wisp/" || visto.coordenada !== "com.example:prueba:1.0" ||
-        visto.destino !== "/deps/com.example/prueba/1.0/") {
+        visto.destino !== "/deps/com/example/prueba/1.0/") {
       mal("el contrato del núcleo no recibe relay, coordenada y destino: " + JSON.stringify(visto));
     }
 
@@ -4450,7 +4450,17 @@ public final class R {
       });
     } catch (e) { relaySinBarra = String(e && e.message ? e.message : e); }
     if (!/acabar en «\/»/.test(relaySinBarra)) mal("el relay sin barra final no se rechaza: " + relaySinBarra);
-    for (const mala of ["com.example:", "com.example:prueba", "../x:y:1.0", "a:b:1.0:extra"]) {
+    for (const [coord, destino] of [
+      ["com.example:prueba:1.0", "/deps/com/example/prueba/1.0/"],
+      ["com.google.code.gson:gson:2.10.1", "/deps/com/google/code/gson/gson/2.10.1/"],
+      ["gson:gson:2.10.1", "/deps/gson/gson/2.10.1/"],
+    ]) {
+      const vistoDestino = wispMod.destinoDeCoordenada(coord);
+      if (vistoDestino !== destino) {
+        mal("destinoDeCoordenada trocea mal " + JSON.stringify(coord) + ": " + JSON.stringify(vistoDestino));
+      }
+    }
+    for (const mala of ["com.example:", "com.example:prueba", "../x:y:1.0", "a:b:1.0:extra", "com.:prueba:1.0"]) {
       let fallo = "";
       try { wispMod.destinoDeCoordenada(mala); } catch (e) { fallo = String(e && e.message ? e.message : e); }
       if (!fallo) mal("destinoDeCoordenada acepta una coordenada rota: " + JSON.stringify(mala));
@@ -4834,7 +4844,7 @@ public final class R {
       globalThis.apkcWisp = {
         version: wispMod.CONTRATO_NUCLEO,
         obtener: async () => ({ bytes: bytesDep, sha256: hashDep,
-          ruta: "/deps/com.example/prueba/1.0/prueba-1.0.jar" }),
+          ruta: "/deps/com/example/prueba/1.0/prueba-1.0.jar" }),
       };
       porId["deps-coordenada"].value = "com.example:prueba:1.0";
       const panelRelay = depsMod.crearPanelDeps({

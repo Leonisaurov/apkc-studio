@@ -250,7 +250,7 @@ const hosts = gates.hostsDeRelays(leidos.relays);
         id: llamadas, tipo: "wisp",
         respuesta: {
           ok: true, bytes: buffer, sha256: huella,
-          ruta: "/deps/com.example/prueba/1.0/prueba-1.0.jar",
+          ruta: "/deps/com/example/prueba/1.0/prueba-1.0.jar",
         },
       });
     },
