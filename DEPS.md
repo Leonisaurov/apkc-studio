@@ -185,25 +185,42 @@ Ni los hosts ni las latencias se inventan: los seis salen del `§254` de `docs/e
 **pruebas, no auditoría**. La lista se **re-mide en el gate del modo externo** (el que abre un
 relay de verdad), porque la latencia de un handshake cambia y un host puede caerse.
 
-**El contrato con el núcleo.** Esta página **no** implementa WISP ni TLS: el framing v1 y el
-`crypto/tls` viven en `apkc/`, compilados a `GOOS=js`. Cuando la compilación los incluya, registrarán
+**El contrato con el núcleo.** Esta página **no** implementa WISP ni TLS: el framing v1
+(`apkc/wisp.go:16-21`), el `crypto/tls` sobre el `net.Conn` (`apkc/depswisp.go:582`) y los GET sobre
+esa conexión ya autenticada (`apkc/puente_wisp.go:96-121`) viven en `apkc/`. Ya no hay una inclusión
+condicional decidida por la página: con build tag `js && wasm`, `init()` registra `apkcWisp` y
+`apkcWispCargarCAs` en el `globalThis` del worker (`apkc/puente_wisp_js.go:1,36-68`). El contrato
+es:
 
 ```js
 globalThis.apkcWisp = {
   version: "apkc-wisp/1",
-  // relay ya validado (acaba en «/»); coordenada = grupo:artefacto:versión;
-  // destino = carpeta de OPFS donde escribir el artefacto
-  obtener({ relay, coordenada, destino }) =>
+  // relay: forma validada en la página y allowlist en el núcleo;
+  // coordenada = grupo:artefacto:versión; destino = carpeta canónica de OPFS
+  obtener({ version, relay, coordenada, destino }) =>
     Promise<{ bytes: Uint8Array, sha256: string, ruta: string }>
 };
 ```
 
-`destino` es `/deps/<grupo>/<artefacto>/<versión>/` (la misma forma que la vía del índice) y el
-nombre del fichero lo decide el núcleo, porque sin índice no se sabe si es `.jar` o `.aar`. Si el
-objeto no existe, `resolverPorWisp()` falla con **«núcleo WISP no disponible en esta compilación»**
-y no abre ningún socket; después de esa decisión de la persona, el panel no inventa un respaldo
-silencioso. El puente puede registrarlo la página o el worker (`hospedador.js`) por `postMessage`:
-lo que **no** cambia es la forma de llamada, que es `wisp.js`.
+`version` viaja en cada llamada (`wisp.js:216-219`) y el núcleo la exige
+(`apkc/puente_wisp.go:62-65`). La URL se valida **dos veces**: la forma —`wss://` (o `ws://` local),
+sin espacios ni credenciales y con barra final— en la página (`wisp.js:25-45`), y la allowlist en
+el núcleo (`apkc/puente_wisp.go:72-75`). `destino` es `/deps/<grupo>/<artefacto>/<versión>/`, con
+los puntos del grupo convertidos en barras (`a.b.c` → `a/b/c`), que es la carpeta canónica que
+construye el núcleo (`apkc/puente_wisp.go:78-85`); el núcleo la exige igual y la página contrasta
+la ruta devuelta (`wisp.js:316-322`). El nombre del fichero lo decide el núcleo, porque sin índice no se
+sabe si es `.jar` o `.aar`. Si el worker no anuncia el núcleo, `resolverPorWisp()` falla con
+**«núcleo WISP no disponible en esta compilación»** y no abre ningún socket; después de esa
+decisión de la persona, el panel no inventa un respaldo silencioso.
+
+**El puente real: del worker a la página.** El wasm corre dentro del worker, así que la página no
+ve sus globales: el worker anuncia `wisp-nucleo` con el contrato justo antes de `go.run(instance)`
+y lo retira en `finally` (`hospedador.js:247-256`). Al recibirlo, la página instala el proxy con
+`instalarPuenteWisp()` y el mismo `CONTRATO_NUCLEO`: `apkcWisp.obtener` y
+`apkcWispCargarCAs` reenvían por `postMessage` al wasm (`pestana.js:111-146`,
+`wisp-puente.js:5-7,35-55`). Un mensaje con otro contrato no instala nada, y al detener el
+hospedador se desactiva el proxy (`pestana.js:164-168`). La forma de llamada sigue siendo la de
+`wisp.js`, que contrasta `bytes`, `sha256` y `ruta` antes de pintarlos (`wisp.js:294-324`).
 
 **Las CAs: del dispositivo al núcleo.** En `js/wasm` no existe `x509.SystemCertPool`
 (`apkc/wispcerts_js.go`), así que el `RootCAs` lo inyecta la página. El contrato es un método
@@ -217,23 +234,28 @@ globalThis.apkcWispCargarCAs({ pem, huella }) =>
 - `pem` es el texto del fichero **local** que la persona elige en `#wisp-cas` (`input file`,
   same-origin, sin red): solo `.pem`/`.crt`, hasta **64 KiB**, con uno o más bloques
   `CERTIFICATE` y cero bytes fuera de bloque. La página lo valida con `prepararCAS()` antes de
-  llamar al núcleo, que vuelve a validarlo con `CargarCAsPEM` (`apkc/depswisp.go:104`).
-- `huella` es el sha256 del bundle tal cual (`HuellaCAsPEM`), en hexadecimal de 64 dígitos. Si la
-  persona escribe una esperada en `#wisp-cas-huella`, `prepararCAS()` la compara y rechaza el
-  fichero si no coincide; el núcleo puede usar `CargarCAsPEMFijadas` (`depswisp.go:166`).
-- `resolverPorWisp({ cas })` llama a `apkcWispCargarCAs` **antes** de `obtener`. Sin núcleo, el
-  error es el de siempre; con un núcleo que no acepta CAs, dice **«núcleo WISP sin carga de CAs en
-  esta compilación»** y no abre el relay.
+  llamar al núcleo, que vuelve a validarlo con `CargarCAsPEM` (`apkc/depswisp.go:257`).
+- `huella` es `sha256(pem)` calculado sobre el PEM **entregado**, no sobre el fichero crudo: un BOM
+  inicial se quita y cualquier otro `U+FEFF` se rechaza (`wisp.js:341-381`). La huella esperada de
+  `#wisp-cas-huella` se normaliza —separadores `:` y mayúsculas— antes de compararse
+  (`wisp.js:326-335`), y `cargarCAsEnNucleo()` vuelve a exigir `sha256(pem) === huella`
+  (`wisp.js:391-403`). El núcleo la decodifica con `hex.DecodeString` y pide 32 bytes
+  (`apkc/puente_wisp_js.go:186-200`) antes de fijarla con `CargarCAsPEMFijadas`
+  (`apkc/depswisp.go:319`).
+- `resolverPorWisp({ cas })` llama a `apkcWispCargarCAs` **antes** de `obtener` (`wisp.js:213-215`).
+  Sin núcleo, el error es el de siempre; con un núcleo que no acepta CAs, dice **«núcleo WISP sin
+  carga de CAs en esta compilación»** y no abre el relay.
 - El bundle **nunca** llega por el relay: un bundle ajeno convertiría al relay en una CA capaz de
   firmar cualquier host. La página no descarga CAs de ninguna URL y rechaza un nombre con esquema
   (`https://…`) antes de leer el fichero.
 
-**Qué queda del núcleo y los gates.** El framing v1 (`CONNECT`/`DATA`/`CONTINUE`/`CLOSE`, el
-`CONTINUE` inicial con `streamID` 0 y el `bufferPackets` leído), `crypto/tls` sobre el `net.Conn`
-con las CAs inyectadas, el registro de **`apkcWispCargarCAs`** y la llamada a `CargarCAsPEMFijadas`
-desde él, y el puente desde la página o el worker siguen siendo trabajo del núcleo (`apkc/`). Los
-**dos gates ya están implementados** en `studio/wisp-gates.js` y se documentan abajo. La
-publicación del sitio sigue pendiente de orden.
+**Qué queda y qué no.** El puente ya está implementado de punta a punta en el código: el registro
+en `init()` con build tag `js && wasm`, el framing y el TLS en `apkc/`, la doble validación del
+relay, la conversión de puntos a barras, el anuncio `wisp-nucleo` entre worker y página y el
+contraste de la respuesta. Los **dos gates ya están implementados** en `studio/wisp-gates.js` y se
+documentan abajo. Fuera del código queda **publicar el sitio** (pendiente de orden) y **correr el
+gate del modo externo** contra relays reales: es opt-in y **no se ha ejecutado**, así que aquí no
+se afirma que el puente funcione contra relays de terceros.
 
 **Los dos gates.** La regla vive en un solo módulo, `wisp-gates.js`, y la usan la pestaña, la
 prueba y la falsificación; no hay una copia más laxa en cada sitio.
