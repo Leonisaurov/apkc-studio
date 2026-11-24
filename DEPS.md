@@ -231,9 +231,40 @@ globalThis.apkcWispCargarCAs({ pem, huella }) =>
 **Qué queda del núcleo y los gates.** El framing v1 (`CONNECT`/`DATA`/`CONTINUE`/`CLOSE`, el
 `CONTINUE` inicial con `streamID` 0 y el `bufferPackets` leído), `crypto/tls` sobre el `net.Conn`
 con las CAs inyectadas, el registro de **`apkcWispCargarCAs`** y la llamada a `CargarCAsPEMFijadas`
-desde él, el puente desde la página o el worker, y **dos gates**: el de por defecto, con cero
-peticiones ajenas, y el del modo externo, que abre un relay de verdad y re-mide `wisp-relays.json`.
-La publicación del sitio sigue pendiente de orden.
+desde él, y el puente desde la página o el worker siguen siendo trabajo del núcleo (`apkc/`). Los
+**dos gates ya están implementados** en `studio/wisp-gates.js` y se documentan abajo. La
+publicación del sitio sigue pendiente de orden.
+
+**Los dos gates.** La regla vive en un solo módulo, `wisp-gates.js`, y la usan la pestaña, la
+prueba y la falsificación; no hay una copia más laxa en cada sitio.
+
+- **Gate por defecto (el que corre siempre).** El módulo está apagado y la pestaña no puede sacar
+  ninguna `Network.requestWillBeSent` ni abrir ninguna `Network.webSocketCreated` fuera de
+  `http://127.0.0.1:<puerto>`, `data:` y `blob:`. Un `wss://` cuenta como ajeno y **hace fallar el
+  gate**. Se ejecuta con `prueba-pestana.js` sin variables de entorno (lo lanza `e2e.sh` y
+  `tools/entorno.sh gate`), y la falsificación se prueba con:
+
+  ```sh
+  node studio/prueba-wisp-gates.mjs   # o: tools/entorno.sh wisp
+  ```
+
+- **Gate del modo externo (opt-in y sin red en CI).** Con `APKC_WISP_EXTERNO=1` se enciende el
+  módulo y el gate: valida que `wisp-relays.json` trae **6** relays `verified: true`, con latencia y
+  `protocol: "v1"`; exige que `nucleoDisponible()` sea cierto y, si no lo es, falla con
+  **«núcleo WISP no disponible en esta compilación»** **antes** de llamar a la sonda (cero
+  sockets); y, con núcleo, abre cada relay y acepta **solo** el CONTINUE inicial con `streamID=0`,
+  sin mandar CONNECT ni descargar artefactos, exigiendo que todas las conexiones salgan de los
+  hosts de esa lista. Se corre así:
+
+  ```sh
+  APKC_WISP_EXTERNO=1 tools/entorno.sh wisp-externo
+  # equivale a, con wasm y una apk de prueba ya construidos:
+  APKC_WISP_EXTERNO=1 APKC_WASM=… APK_EJEMPLO=… KS_EJEMPLO=… node studio/prueba-pestana.js
+  ```
+
+  Sin `APKC_WISP_EXTERNO=1`, `prueba-pestana.js` imprime «omitido gate del modo externo» y no abre
+  ni un relay. **Este gate no se corre en CI**: necesita red hacia relays de terceros y no está
+  auditado; en CI solo corre el gate por defecto y la falsificación, que no toca la red.
 
 **Pruebas del módulo.**
 
@@ -257,5 +288,12 @@ La publicación del sitio sigue pendiente de orden.
   `{pem, huella}` antes de pedir el artefacto; la basura y un nombre con URL se rechazan con su
   motivo; una URL sin barra final se rechaza con el motivo de la spec; «Recordar elección»
   persiste y la recarga deja el módulo activo sin volver a preguntar; y la comprobación global
-  cierra con **cero peticiones fuera del origen**.
+  cierra con **cero peticiones y cero aperturas de WebSocket** fuera del origen (suma
+  `Network.requestWillBeSent` y `Network.webSocketCreated`). Con `APKC_WISP_EXTERNO=1`, el gate
+  externo valida la lista, exige el núcleo cableado y, sin él, falla con el motivo sin abrir
+  socket.
+- `node prueba-wisp-gates.mjs`: falsifica los dos gates sin red: un `wss://` ajeno rompe el gate
+  por defecto; un relay fuera de la lista rompe el modo externo; sin núcleo no se abre ningún
+  socket; una lista de 5 relays, uno sin verificar, sin latencia o con `v2` se rechazan; el
+  handshake acepta solo CONTINUE con `streamID` 0 y rechaza DATA u otro flujo.
 

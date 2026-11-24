@@ -10,6 +10,7 @@ import fs from "node:fs";
 import net from "node:net";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import * as gates from "./wisp-gates.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const CHROME = process.env.CHROME_BIN || "chromium-browser";
@@ -159,9 +160,14 @@ async function conductor() {
   ]);
   const evaluar = (expression) => conPlazo(evaluarSinPlazo(expression), 150000, expression.slice(0, 70).replace(/\s+/g, " "));
   const peticiones = [];
+  // Un `wss://` no aparece en `requestWillBeSent`: solo lo ve `webSocketCreated`. El gate por
+  // defecto cuenta los dos, porque un relay abierto en la pestaña es tráfico ajeno aunque no sea
+  // una petición HTTP.
+  const webSockets = [];
   ws.addEventListener("message", (ev) => {
     const m = JSON.parse(ev.data);
     if (m.method === "Network.requestWillBeSent") peticiones.push(m.params.request.url);
+    else if (m.method === "Network.webSocketCreated") webSockets.push(m.params.url);
   });
   await exec("Network.enable");
   await exec("Runtime.enable");
@@ -169,12 +175,12 @@ async function conductor() {
     try { if (await evaluar("!!document.getElementById('codigo') && typeof correr === 'function'")) break; } catch (e) { /* */ }
     await esperar(300);
   }
-  return { exec, evaluar, ws, peticiones };
+  return { exec, evaluar, ws, peticiones, webSockets };
 }
 
 // --- la prueba ----------------------------------------------------------------------------
 (async () => {
-  const { evaluar, exec, ws, peticiones } = await conductor();
+  const { evaluar, exec, ws, peticiones, webSockets } = await conductor();
   const fuera = path.join(TMP, "pestana-apk");
   fs.mkdirSync(fuera, { recursive: true });
   const descargas = path.join(TMP, "pestana-descargas");
@@ -6034,11 +6040,14 @@ async function conductor() {
       entrada.dispatchEvent(new Event("change", { bubbles: true }));
       return true;
     })()`);
-    const esperarEstadoCAS = async (patron) => {
+    const esperarEstadoCAS = async (patron, previo = "") => {
       let visto = null;
       for (let i = 0; i < 60; i++) {
         visto = await evaluar(`document.getElementById("wisp-cas-estado").textContent`);
-        if (patron.test(String(visto))) break;
+        const texto = String(visto || "");
+        // El estado del fichero anterior también empieza por «CAs rechazadas»: sin exigir que el
+        // texto cambie, la espera devuelve la basura vieja antes de que el `change` nuevo corra.
+        if (patron.test(texto) && texto !== previo) break;
         await esperar(150);
       }
       return String(visto || "");
@@ -6086,12 +6095,12 @@ async function conductor() {
     await evaluar(`(() => { delete window.apkcWisp; delete window.apkcWispCargarCAs; return true; })()`);
 
     await meterCAS("ca-prueba.pem", "basura que no es PEM");
-    const casBasura = await esperarEstadoCAS(/^CAs rechazadas/);
+    const casBasura = await esperarEstadoCAS(/^CAs rechazadas/, casBien);
     comprueba("un fichero con basura se rechaza con el motivo y no deja CAs cargadas",
       /^CAs rechazadas/.test(casBasura) && /CERTIFICATE/.test(casBasura), casBasura.slice(0, 220));
 
     await meterCAS("https://relay.example/ca.pem", pemCAPestana);
-    const casUrl = await esperarEstadoCAS(/^CAs rechazadas/);
+    const casUrl = await esperarEstadoCAS(/^CAs rechazadas/, casBasura);
     comprueba("un .pem con nombre de URL se rechaza antes de leer el fichero",
       /^CAs rechazadas/.test(casUrl) && /no de una URL/.test(casUrl), casUrl.slice(0, 220));
 
@@ -6197,11 +6206,82 @@ async function conductor() {
     await evaluar(`(() => { document.getElementById("wisp-desactivar").click(); localStorage.removeItem(${JSON.stringify(claveWisp)}); return true; })()`);
   }
 
+  // 32. el gate del modo externo. Apagado por defecto: sin `APKC_WISP_EXTERNO=1` no se abre ni un
+  //     relay y la prueba lo dice con el motivo. Encendido, valida la lista, exige el cableado del
+  //     núcleo y solo entonces hace el handshake inicial (CONTINUE con streamID=0, sin artefactos).
+  {
+    const EXTERNO = process.env.APKC_WISP_EXTERNO === "1";
+    const rutaRelays = path.join(__dirname, "wisp-relays.json");
+    let datosRelays = null;
+    try { datosRelays = JSON.parse(fs.readFileSync(rutaRelays, "utf8")); }
+    catch (e) { datosRelays = null; }
+
+    if (!EXTERNO) {
+      console.log("  omitido  gate del modo externo: APKC_WISP_EXTERNO no está a 1 " +
+        "(no se abre ningún relay)");
+    } else {
+      const antesExterno = peticiones.length + webSockets.length;
+      let leidos = null;
+      try { leidos = gates.revisarRelays(datosRelays); } catch (e) { leidos = null; }
+      comprueba("modo externo: wisp-relays.json trae 6 relays verificados, con latencia y protocolo v1",
+        !!leidos && leidos.relays.length === gates.RELAYS_ESPERADOS,
+        leidos ? leidos.relays.length + " relays" : "lista no válida: " + String(datosRelays ? "" : "no se pudo leer"));
+
+      // El núcleo, tal como lo ve la página: es el mismo `nucleoDisponible` que usa Resolver.
+      const nucleo = await evaluar(`import("./wisp.js").then((m) => !!m.nucleoDisponible(window))`);
+      if (!nucleo) {
+        // Sin núcleo, el gate falla con el motivo y con `abrir` prohibido: si se llamara, la
+        // promesa rechazaría y el contador de sockets no sería cero.
+        let llamadas = 0;
+        const resultado = await gates.ejecutarGateExterno({
+          datos: datosRelays, nucleo: false, puerto: PUERTO,
+          abrir: () => { llamadas++; return Promise.reject(new Error("el gate abrió un socket sin núcleo")); },
+        });
+        comprueba("modo externo: sin núcleo falla con el motivo y sin abrir socket",
+          resultado.ok === false && resultado.motivo === gates.MOTIVO_SIN_NUCLEO &&
+          resultado.sockets === 0 && llamadas === 0 &&
+          peticiones.length + webSockets.length === antesExterno,
+          JSON.stringify({ motivo: resultado.motivo, sockets: resultado.sockets,
+            llamadas, nuevas: peticiones.length + webSockets.length - antesExterno }).slice(0, 320));
+      } else {
+        const resultado = await gates.ejecutarGateExterno({
+          datos: datosRelays, nucleo: true, puerto: PUERTO,
+          abrir: (url) => gates.sondearRelay(url, { plazoMs: 10000 }),
+        });
+        comprueba("modo externo: el handshake inicial de los 6 relays solo abre hosts de la lista",
+          resultado.ok === true,
+          JSON.stringify({ motivo: resultado.motivo, sockets: resultado.sockets }).slice(0, 320));
+        const { ajenas: wsAjenos } = gates.clasificarUrls(webSockets,
+          { puerto: PUERTO, hostsPermitidos: resultado.hosts || [] });
+        comprueba("modo externo: el navegador no abre un WebSocket fuera de los hosts declarados",
+          wsAjenos.length === 0, wsAjenos.slice(0, 3).join(", ") || "cero WebSockets ajenos");
+      }
+    }
+  }
+
   // requisito del proyecto, escrito como comprobación: la pestaña no puede pedir nada fuera de
-  // su origen. Ni un CDN de un runtime de terceros, ni telemetría, ni una fuente.
-  const ajenas = peticiones.filter((u) => !u.startsWith("http://127.0.0.1:" + PUERTO) && !u.startsWith("data:") && !u.startsWith("blob:"));
-  comprueba("la pestaña no pide nada fuera de su origen (" + peticiones.length + " peticiones)",
-    ajenas.length === 0, ajenas.length ? "fuera del origen: " + ajenas.slice(0, 4).join(", ") : peticiones.length + " peticiones, todas locales");
+  // su origen. Ni un CDN de un runtime de terceros, ni telemetría, ni una fuente. En el modo
+  // externo la lista blanca son los hosts de `wisp-relays.json`; por defecto va vacía y cualquier
+  // `wss://` hace fallar el gate. El conteo suma peticiones y aperturas de WebSocket.
+  let hostsExternos = [];
+  if (process.env.APKC_WISP_EXTERNO === "1") {
+    try {
+      const datos = JSON.parse(fs.readFileSync(path.join(__dirname, "wisp-relays.json"), "utf8"));
+      hostsExternos = gates.hostsDeRelays(gates.revisarRelays(datos).relays);
+    } catch (e) { hostsExternos = []; }
+  }
+  const observadas = peticiones.concat(webSockets);
+  const { ajenas } = gates.clasificarUrls(observadas, { puerto: PUERTO, hostsPermitidos: hostsExternos });
+  comprueba("la pestaña no pide nada fuera de su origen (" + peticiones.length + " peticiones, " +
+    webSockets.length + " websockets)",
+    ajenas.length === 0, ajenas.length ? "fuera del origen: " + ajenas.slice(0, 4).join(", ") :
+      observadas.length + " URLs, todas locales" +
+        (hostsExternos.length ? " o de " + hostsExternos.join(", ") : ""));
+  const { ajenas: wsAjenas } = gates.clasificarUrls(webSockets,
+    { puerto: PUERTO, hostsPermitidos: hostsExternos });
+  comprueba("gate por defecto: cero WebSocket fuera del origen declarado",
+    wsAjenas.length === 0, wsAjenas.length ? "wss:// ajenos: " + wsAjenas.slice(0, 3).join(", ") :
+      webSockets.length + " websockets, todos locales");
 
   ws.close();
   console.log("\n" + hechos + " comprobaciones bien, " + fallos + " mal");
