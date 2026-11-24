@@ -126,6 +126,30 @@ for (const [nombre, esperado] of Object.entries(plantillasNuevas)) {
   }
 }
 
+// 2c-bis. la plantilla «Ciclo» fija el contrato de emulación que `apkc preview` publica en su
+// JSON. Medido el 2026-11-24 con el apkc nativo 46a9a792 sobre la apk generada por este mismo
+// buildProject: en reposo, `ejecucion.consola` trae el Toast "Ciclo: onCreate" (secuencia 1),
+// `ejecucion.capturas` el Activity.setTitle "Ciclo: onStart", `ejecucion.ciclo` es
+// [onCreate, onStart], `pasos`=15, `nodos`=2 y el TextView dice "Hello World!"; con --recrear,
+// `pasos`=30, hay dos Toasts y el ciclo se repite [onCreate, onStart, onCreate, onStart], y el
+// JSON es byte a byte idéntico al repetir el mismo guion. Estas tres llamadas son la causa de esas
+// tres huellas: si se quitan, la app sigue compilando pero el emulador no tiene nada que publicar.
+// El recorrido en tiempo de ejecución se comprueba en e2e.sh; aquí se fija la parte que depende
+// exclusivamente del generador, sin binarios ni navegador.
+const cicloEmulacion = a.buildProject({ ...estado, template: "ciclo", kotlin: false, libs: false,
+  native: false, assets: false, device: false });
+const actCicloEmulacion = cicloEmulacion.files["src/" + estado.package.split(".").join("/") + "/MainActivity.java"];
+if (!/Toast\.makeText\(this, "Ciclo: onCreate", Toast\.LENGTH_SHORT\)\.show\(\);/.test(actCicloEmulacion)) {
+  mal("plantilla Ciclo: falta el Toast de onCreate que preview publica en ejecucion.consola");
+}
+if (!/public void onStart\(\)/.test(actCicloEmulacion) || !/super\.onStart\(\);/.test(actCicloEmulacion) ||
+    !/setTitle\("Ciclo: onStart"\);/.test(actCicloEmulacion)) {
+  mal("plantilla Ciclo: faltan onStart/super.onStart/setTitle que preview publica en capturas y ciclo");
+}
+if (!/android:text="Hello World!"/.test(cicloEmulacion.files["res/layout/main.xml"])) {
+  mal("plantilla Ciclo: el layout ya no muestra el texto que preview devuelve en raiz.hijos");
+}
+
 // 2d. las cinco apps de banco/apps-ejemplo son plantillas de verdad: su opcion esta en el selector
 //     de la pagina y buildProject escribe sus fuentes completas, no el esqueleto de Hola mundo.
 //     e2e.sh no las compila todavia; la compilacion se midio en el banco y esta prueba vigila que
