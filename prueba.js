@@ -259,7 +259,7 @@ for (const nombre of ["cero", "parado", "iniciar", "pausar", "vuelta", "reinicia
   }
 }
 
-// 2f. el cronómetro no se da por emulado porque compile: `apkc preview` lee la APK y el
+// 2e-bis. el cronómetro no se da por emulado porque compile: `apkc preview` lee la APK y el
 //     intérprete tiene que reprogramar el Runnable y mover el reloj lógico. Se activa con
 //     APKC_PREVIEW y APK_CRONOMETRO (los fija quien corra los fixtures); sin ellos se omite,
 //     igual que la comparación con el repo, y no se finge que se emuló.
