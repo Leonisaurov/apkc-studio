@@ -751,12 +751,14 @@ public class MainActivity extends Activity implements View.OnClickListener {
     }
 
     private void pedirPermisos() {
+        // Los permisos se preparan antes del if: un local declarado despues de un return dentro del
+        // if se lee como "sin asignar en algun camino" en el verificador del emisor (aload_2).
+        String[] cuales = new String[] { "android.permission.BLUETOOTH_CONNECT", "android.permission.BLUETOOTH_SCAN" };
         int permiso = checkSelfPermission("android.permission.BLUETOOTH_CONNECT");
         if (permiso == PackageManager.PERMISSION_GRANTED) {
             preparar();
             return;
         }
-        String[] cuales = new String[] { "android.permission.BLUETOOTH_CONNECT", "android.permission.BLUETOOTH_SCAN" };
         requestPermissions(cuales, 7);
     }
 

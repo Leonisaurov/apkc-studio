@@ -208,7 +208,7 @@ if (!/BLUETOOTH_CONNECT/.test(chatbt.files["AndroidManifest.xml"])) {
   mal("la plantilla chatbt no declara los permisos de Bluetooth en el manifiesto");
 }
 
-// 2e. Lienzo es la plantilla de la vista propia: no hay layout XML y el contenido se dibuja con
+// 2f. Lienzo es la plantilla de la vista propia: no hay layout XML y el contenido se dibuja con
 // Canvas. Lo que la hace compilar es el reparto de métodos: onDraw delega en pintar, y los seis
 // rayos van en métodos de una sola instrucción, porque el emisor reparte registros por método y
 // seis drawLine juntos agotan la forma corta de aload/fload. Esta comprobación fija esa forma.
@@ -238,6 +238,18 @@ const pintar = lienzoJava.match(/private void pintar\(Canvas lienzo\) \{([^}]*)\
 if (!pintar || /drawLine/.test(pintar[1]) || !/circulos\(/.test(pintar[1]) ||
     !/rayos\(/.test(pintar[1]) || !/textos\(/.test(pintar[1])) {
   mal("pintar de Lienzo no reparte el dibujo entre circulos, rayos y textos");
+}
+
+// 2g. regresión del verificador: en pedirPermisos el arreglo de permisos se declara ANTES del if
+//     que termina en return. Declararlo después hace que el emisor lea el hueco sin asignar en el
+//     camino del return («se lee el hueco 2 sin asignar en algún camino», aload_2) y la plantilla
+//     no compila. e2e.sh mide la compilación; aquí se vigila el orden del fuente para no regresar.
+const javaChatbt = chatbt.files[fuentesApp + "/MainActivity.java"] || "";
+const metodoPermisos = javaChatbt.slice(javaChatbt.indexOf("void pedirPermisos()"));
+const declPermisos = metodoPermisos.indexOf("String[] cuales");
+const retornoPermisos = metodoPermisos.indexOf("return;");
+if (declPermisos < 0 || retornoPermisos < 0 || declPermisos > retornoPermisos) {
+  mal("la plantilla chatbt declara los permisos después del return de pedirPermisos y no compila");
 }
 
 // 3. el EOCD y los modos: un lector estricto (zipcheck.py) es el que ve lo que zipfile tolera
