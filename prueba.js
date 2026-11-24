@@ -5155,6 +5155,88 @@ public final class R {
     console.log("menú (fixture): sin APKC/APK_MENU, se omite");
   }
 
+
+  // 6z-ter. la plantilla «tareas» no solo compila: se emula. Dos etiquetas: (a) estructural, con el
+  //         JSON medido con `apkc preview --escribir id/nueva/Comprar leche --pulsar id/agregar`
+  //         sobre la apk generada por buildProject desde esta rama; (b) de fixture, si APKC y
+  //         APK_TAREAS apuntan al binario y a esa apk. Medido el 2026-11-24 con apkc 46a9a792:
+  //         el EditText entrega el texto, el botón Agregar lo guarda en SharedPreferences, el
+  //         adaptador pinta la fila "[ ] Comprar leche (Casa)" y el rótulo dice 1 pendiente.
+  const tareasPr = a.buildProject({ name: "Hola apkc", package: "com.hola.tareas",
+    minsdk: "21", targetsdk: "34", hello: "Hello World!", template: "tareas",
+    button: false, kotlin: false, libs: false, native: false, assets: false, device: false });
+  const actividadTareas = tareasPr.files["src/com/hola/tareas/MainActivity.java"] || "";
+  const layoutTareas = tareasPr.files["res/layout/principal.xml"] || "";
+  for (const id of ["nueva", "categoria", "casa", "trabajo", "estudio", "agregar", "completar",
+    "filtrar", "lista"]) {
+    if (!layoutTareas.includes('android:id="@+id/' + id + '"')) {
+      mal(`tareas (estructural): el layout no declara id/${id}`);
+    }
+  }
+  if (!/getSharedPreferences\("tareas", 0\)/.test(actividadTareas) ||
+      !/new ArrayAdapter\(this, R\.layout\.item, copia\)/.test(actividadTareas) ||
+      !/lista\.setAdapter\(adaptador\)/.test(actividadTareas) ||
+      !/etiqueta\.setText\(texto\)/.test(actividadTareas)) {
+    mal("tareas (estructural): faltan SharedPreferences, el adaptador o el rótulo del filtro");
+  }
+  const guionTareas = [
+    { tipo: "escribir", idRef: "id/nueva", valor: "Comprar leche" },
+    { tipo: "pulsar", valor: "id/agregar" },
+  ];
+  const argvTareas = previaPanel.argvDePrevia(guionTareas, "build/app.apk");
+  if (argvTareas.join(" ") !==
+      "preview --escribir id/nueva/Comprar leche --pulsar id/agregar build/app.apk") {
+    mal("tareas (estructural): argvDePrevia no entrega --escribir y --pulsar: " +
+      JSON.stringify(argvTareas));
+  }
+  const compruebaTareas = (salida, etiqueta) => {
+    const modelo = vistaPrevia.modeloDeSalida(salida);
+    if (!modelo) { mal(`tareas (${etiqueta}): apkc preview no devolvió un modelo JSON`); return; }
+    const pantalla = modelo.pantalla || {};
+    if (!(pantalla.ancho > 0 && pantalla.alto > 0) || !(modelo.nodos > 0) ||
+        !((modelo.ejecucion || {}).pasos > 0) || modelo.avisos || modelo.error) {
+      mal(`tareas (${etiqueta}): pantalla/nodos/pasos o avisos/error`);
+      return;
+    }
+    const resumen = previaPanel.resumenEjecucion(modelo);
+    if (!resumen || !(resumen.capturas || []).some((c) =>
+        c.id === "id/categoria" && c.texto === "Filtro: Todas - 1 - pendientes 1")) {
+      mal(`tareas (${etiqueta}): el rótulo no llega a capturas: ` +
+        JSON.stringify(resumen && resumen.capturas));
+      return;
+    }
+    const nodos = vistaPrevia.nodosAplanados(modelo).map((x) => x.nodo);
+    const categoria = nodos.find((n) => n.id === "id/categoria");
+    if (!categoria || vistaPrevia.textoDeNodo(categoria) !== "Filtro: Todas - 1 - pendientes 1") {
+      mal(`tareas (${etiqueta}): el pintor no ve el textoDinamico de id/categoria`);
+      return;
+    }
+    const lista = nodos.find((n) => n.id === "id/lista");
+    if (!lista || !Array.isArray(lista.hijos) ||
+        !lista.hijos.some((f) => (f.texto || f.textoDinamico) === "[ ] Comprar leche (Casa)")) {
+      mal(`tareas (${etiqueta}): la ListView no pinta la fila agregada`);
+      return;
+    }
+    const prefs = (modelo.ejecucion || {}).preferencias || {};
+    if (!prefs.tareas || prefs.tareas.texto0 !== "Comprar leche" ||
+        prefs.tareas.categoria0 !== "Casa" || prefs.tareas.hecha0 !== "no") {
+      mal(`tareas (${etiqueta}): SharedPreferences no conserva la tarea: ${JSON.stringify(prefs)}`);
+    }
+  };
+  compruebaTareas(`{"paquete":"com.hola.tareas","version":"0.1","actividad":".MainActivity","layout":"res/layout/principal.xml","pantalla":{"x":0,"y":0,"ancho":360,"alto":640},"aproximado":true,"nodos":14,"ejecucion":{"actividad":"com.hola.tareas.MainActivity","metodo":"onCreate","pasos":454,"interacciones":2,"capturas":[{"origen":"TextView.setText","id":"id/categoria","idRef":"0x7f010002","texto":"Filtro: Todas - 0 - pendientes 0"},{"origen":"usuario.escribir","id":"id/nueva","idRef":"0x7f010007","texto":"Comprar leche"},{"origen":"TextView.setText","id":"id/nueva","idRef":"0x7f010007","texto":""},{"origen":"TextView.setText","id":"id/categoria","idRef":"0x7f010002","texto":"Filtro: Todas - 1 - pendientes 1"}],"oyentes":[{"id":"id/casa","idRef":"0x7f010001"},{"id":"id/trabajo","idRef":"0x7f010009"},{"id":"id/estudio","idRef":"0x7f010004"},{"id":"id/agregar","idRef":"0x7f010000"},{"id":"id/completar","idRef":"0x7f010003"},{"id":"id/filtrar","idRef":"0x7f010005"}],"pulsaciones":["id/agregar"],"escrituras":["id/nueva/Comprar leche"],"pantallas":["com.hola.tareas.MainActivity"],"ciclo":["com.hola.tareas.MainActivity.onCreate"],"preferencias":{"tareas":{"categoria0":"Casa","cuantas":1,"hecha0":"no","texto0":"Comprar leche"}}},"raiz":{"tipo":"LinearLayout","ancho":"match_parent","alto":"match_parent","rect":{"x":0,"y":0,"ancho":360,"alto":640},"hijos":[{"tipo":"TextView","id":"id/titulo","idRef":"0x7f010008","texto":"Lista de tareas","ancho":"match_parent","alto":"wrap_content","rect":{"x":0,"y":0,"ancho":360,"alto":24}},{"tipo":"TextView","id":"id/categoria","idRef":"0x7f010002","texto":"Categoría: ","textoDinamico":"Filtro: Todas - 1 - pendientes 1","ancho":"match_parent","alto":"wrap_content","rect":{"x":0,"y":24,"ancho":360,"alto":24}},{"tipo":"EditText","id":"id/nueva","idRef":"0x7f010007","pista":"Nueva tarea","ancho":"match_parent","alto":"wrap_content","rect":{"x":0,"y":48,"ancho":360,"alto":24}},{"tipo":"LinearLayout","ancho":"match_parent","alto":"wrap_content","rect":{"x":0,"y":72,"ancho":360,"alto":48},"hijos":[{"tipo":"Button","id":"id/casa","idRef":"0x7f010001","texto":"Casa","oyente":true,"ancho":"wrap_content","alto":"wrap_content","rect":{"x":0,"y":72,"ancho":48,"alto":48}},{"tipo":"Button","id":"id/trabajo","idRef":"0x7f010009","texto":"Trabajo","oyente":true,"ancho":"wrap_content","alto":"wrap_content","rect":{"x":48,"y":72,"ancho":72,"alto":48}},{"tipo":"Button","id":"id/estudio","idRef":"0x7f010004","texto":"Estudio","oyente":true,"ancho":"wrap_content","alto":"wrap_content","rect":{"x":120,"y":72,"ancho":72,"alto":48}}]},{"tipo":"LinearLayout","ancho":"match_parent","alto":"wrap_content","rect":{"x":0,"y":120,"ancho":360,"alto":48},"hijos":[{"tipo":"Button","id":"id/agregar","idRef":"0x7f010000","texto":"Agregar","oyente":true,"ancho":"wrap_content","alto":"wrap_content","rect":{"x":0,"y":120,"ancho":72,"alto":48}},{"tipo":"Button","id":"id/completar","idRef":"0x7f010003","texto":"Completar la primera","oyente":true,"ancho":"wrap_content","alto":"wrap_content","rect":{"x":72,"y":120,"ancho":176,"alto":48}},{"tipo":"Button","id":"id/filtrar","idRef":"0x7f010005","texto":"Filtrar","oyente":true,"ancho":"wrap_content","alto":"wrap_content","rect":{"x":248,"y":120,"ancho":72,"alto":48}}]},{"tipo":"ListView","id":"id/lista","idRef":"0x7f010006","ancho":"match_parent","alto":"wrap_content","rect":{"x":0,"y":168,"ancho":360,"alto":24},"hijos":[{"tipo":"TextView","texto":"[ ] Comprar leche (Casa)","rect":{"x":0,"y":168,"ancho":360,"alto":24}}]}]}}`, "estructural");
+
+  // (b) de fixture: opcional, porque prueba.js corre sin binario. Con APKC y APK_TAREAS se repite
+  // la misma comprobación contra una apk real generada por buildProject desde esta rama.
+  if (process.env.APKC && process.env.APK_TAREAS) {
+    const argvTareasReales = previaPanel.argvDePrevia(guionTareas, process.env.APK_TAREAS);
+    const salidaTareasReal = execFileSync(process.env.APKC, argvTareasReales,
+      { encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] });
+    compruebaTareas(salidaTareasReal, "fixture");
+    console.log("tareas (fixture): comprobado con apkc preview sobre", process.env.APK_TAREAS);
+  } else {
+    console.log("tareas (fixture): sin APKC/APK_TAREAS, se omite");
+  }
+
   console.log(fallos ? `PRUEBA FALLA: ${fallos} problemas` : "prueba: todo en orden");
   process.exit(fallos ? 1 : 0);
 })();
