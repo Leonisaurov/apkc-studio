@@ -200,12 +200,40 @@ async function conductor() {
       const sessionId = m.params && m.params.sessionId;
       if (!sessionId) return;
       const tipo = String(info.type || "?");
+      const pausado = !!(m.params && m.params.waitingForDebugger);
       sesiones.set(sessionId, { tipo, red: "pendiente" });
-      // sin `Network.enable` en esa sesión, el target enganchado no emite ni un evento de red
-      execEnSesion("Network.enable", {}, sessionId).then((r) => {
-        const actual = sesiones.get(sessionId);
-        if (actual) actual.red = r && r.error ? "no: " + (r.error.message || "error") : "sí";
-      });
+      // Sin `Network.enable` en esa sesión, el target enganchado no emite ni un evento de red. Y
+      // encenderla no basta por sí solo: el target nace **pausado** (`waitForDebuggerOnStart`), de
+      // modo que su script no corre hasta `Runtime.runIfWaitingForDebugger`. El orden es el
+      // contrato: primero la red, después soltar el worker. Si se suelta antes de que responda
+      // `Network.enable`, un worker que abre su `WebSocket` en el primer tick se adelanta y su
+      // `webSocketCreated` no llega nunca (medido: 52 de 80 sockets perdidos con el orden
+      // inverso; la sonda de la sección 33 es la que lo cuenta).
+      (async () => {
+        const anotar = (r) => {
+          const actual = sesiones.get(sessionId);
+          if (!actual) return;
+          actual.red = r == null ? "no: plazo de 2000 ms"
+            : r.error ? "no: " + (r.error.message || "error") : "sí";
+        };
+        if (tipo === "service_worker") {
+          // Un service worker pausado **no contesta** `Network.enable` hasta que arranca: esperarla
+          // aquí lo dejaría congelado y la página se quedaría sin service worker (lo cazó «el
+          // service worker queda listo»). Se le manda la red, se le suelta y la respuesta se anota
+          // cuando llegue; quien abre sockets en su primer tick es un `worker`, no él.
+          execEnSesion("Network.enable", {}, sessionId).then(anotar);
+        } else {
+          // el plazo es una red de seguridad, no un margen de la carrera: la respuesta tarda 2-50
+          // ms, y un `Network.enable` que no contesta no puede dejar la página colgada
+          anotar(await Promise.race([execEnSesion("Network.enable", {}, sessionId),
+            esperar(2000).then(() => null)]));
+        }
+        // se suelta aunque la red haya fallado: dejar el target pausado colgaría la página, y la
+        // cobertura ya lo cuenta como sesión sin red
+        if (pausado && sesiones.has(sessionId)) {
+          await execEnSesion("Runtime.runIfWaitingForDebugger", {}, sessionId);
+        }
+      })();
       return;
     }
     if (m.method === "Target.detachedFromTarget") {
@@ -215,12 +243,14 @@ async function conductor() {
     }
     gates.acumularRed({ peticiones, webSockets }, m);
   });
-  // El auto-attach va **antes** de navegar y en plano: cada worker se cuelga de esta conexión y su
-  // `Network.enable` llega antes que su primer `WebSocket`. `APKC_GATE_SIN_WORKERS=1` lo apaga a
-  // propósito: es la falsificación de que sin esta pieza el gate no ve a los workers.
+  // El auto-attach va **antes** de navegar y en plano, y con `waitForDebuggerOnStart`: cada worker
+  // se cuelga de esta conexión y nace congelado hasta que su sesión tenga la red encendida. Así su
+  // primer `WebSocket` no puede adelantarse al `Network.enable` (la carrera que perdía sockets).
+  // `APKC_GATE_SIN_WORKERS=1` lo apaga a propósito: es la falsificación de que sin esta pieza el
+  // gate no ve a los workers.
   if (!GATE_SIN_WORKERS) {
     const auto = await exec("Target.setAutoAttach",
-      { autoAttach: true, waitForDebuggerOnStart: false, flatten: true });
+      { autoAttach: true, waitForDebuggerOnStart: true, flatten: true });
     if (auto && auto.error) {
       console.log("  aviso: Target.setAutoAttach falló (" + (auto.error.message || "error") +
         "): el gate solo verá la sesión de la página");
