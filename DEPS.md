@@ -187,7 +187,7 @@ relay de verdad), porque la latencia de un handshake cambia y un host puede caer
 
 **El contrato con el núcleo.** Esta página **no** implementa WISP ni TLS: el framing v1
 (`apkc/wisp.go:16-21`), el `crypto/tls` sobre el `net.Conn` (`apkc/depswisp.go:582`) y los GET sobre
-esa conexión ya autenticada (`apkc/puente_wisp.go:96-121`) viven en `apkc/`. Ya no hay una inclusión
+una conexión TLS nueva por extensión (`apkc/puente_wisp.go:98-133`) viven en `apkc/`. Ya no hay una inclusión
 condicional decidida por la página: con build tag `js && wasm`, `init()` registra `apkcWisp` y
 `apkcWispCargarCAs` en el `globalThis` del worker (`apkc/puente_wisp_js.go:1,36-68`). El contrato
 es:
@@ -209,9 +209,12 @@ el núcleo (`apkc/puente_wisp.go:72-75`). `destino` es `/deps/<grupo>/<artefacto
 los puntos del grupo convertidos en barras (`a.b.c` → `a/b/c`), que es la carpeta canónica que
 construye el núcleo (`apkc/puente_wisp.go:78-85`); el núcleo la exige igual y la página contrasta
 la ruta devuelta (`wisp.js:316-322`). El nombre del fichero lo decide el núcleo, porque sin índice no se
-sabe si es `.jar` o `.aar`. Si el worker no anuncia el núcleo, `resolverPorWisp()` falla con
-**«núcleo WISP no disponible en esta compilación»** y no abre ningún socket; después de esa
-decisión de la persona, el panel no inventa un respaldo silencioso.
+sabe si es `.jar` o `.aar`. Si no hay núcleo vivo, `resolverPorWisp()` usa
+`apkcWispEnReposo.obtener` con la misma forma de llamada: el worker dispara `apkc wisp-get` una
+sola vez, con la petición —incluidas las CAs del dispositivo— en la variable de entorno del
+intérprete, y devuelve los bytes como `ArrayBuffer` sin verterlos en la consola. Sin núcleo ni
+proxy, falla con **«núcleo WISP no disponible en esta compilación»** y no abre ningún socket;
+después de esa decisión de la persona, el panel no inventa un respaldo silencioso.
 
 **El puente real: del worker a la página.** El wasm corre dentro del worker, así que la página no
 ve sus globales: el worker anuncia `wisp-nucleo` con el contrato justo antes de `go.run(instance)`

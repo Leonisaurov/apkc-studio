@@ -208,17 +208,26 @@ export async function resolverPorWisp({ relay, coordenada, destino, hospedador, 
   if (!hospedador || typeof hospedador.escribir !== "function") {
     throw new Error("no hay OPFS donde guardar el artefacto");
   }
-  if (!nucleoDisponible(global)) {
+  const nucleoVivo = nucleoDisponible(global);
+  const reposo = !nucleoVivo && global && global.apkcWispEnReposo &&
+    typeof global.apkcWispEnReposo.obtener === "function" ? global.apkcWispEnReposo : null;
+  if (!nucleoVivo && !reposo) {
     throw new Error("núcleo WISP no disponible en esta compilación: el módulo no está construido en " +
       "esta página, así que no se abre ningún relay; Resolver sigue limitado a deps-index.json del propio origen");
   }
-  // Las CAs se cargan en el núcleo antes de abrir el relay. El bundle ya viene verificado por
-  // `prepararCAS`: aquí solo se pasa `{pem, huella}` y se exige que el núcleo lo acepte.
-  if (cas) await cargarCAsEnNucleo({ pem: cas.pem, huella: cas.huella, global });
-  const respuesta = await global.apkcWisp.obtener({
+  // Las CAs se cargan antes de abrir el relay. El bundle ya viene verificado por `prepararCAS`:
+  // con núcleo vivo se pasa `{pem, huella}` aparte; en reposo viajan en la petición de `wisp-get`,
+  // que las fija con `CargarCAsPEMFijadas` antes de tocar la red. En los dos casos la respuesta se
+  // contrasta abajo con `validarRespuestaNucleo` antes de pintarse.
+  if (cas && nucleoVivo) await cargarCAsEnNucleo({ pem: cas.pem, huella: cas.huella, global });
+  const peticion = {
     version: CONTRATO_NUCLEO, relay: String(relay).trim(), coordenada: coord,
     destino: destino || destinoDeCoordenada(coord),
-  });
+  };
+  if (reposo && cas) { peticion.pem = cas.pem; peticion.huella = cas.huella; }
+  const respuesta = nucleoVivo
+    ? await global.apkcWisp.obtener(peticion)
+    : await reposo.obtener(peticion);
   // La respuesta se contrasta antes de devolverla: la página pinta `bytes`, `sha256` y `ruta`
   // sin mirarlos, así que un núcleo falso no puede colar aquí un fichero que no sea el que dice.
   await validarRespuestaNucleo(respuesta);

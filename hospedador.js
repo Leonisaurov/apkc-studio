@@ -22,7 +22,11 @@ let errorWasmExec = null;      // el motivo por el que no se pudo cargar wasm_ex
 // El contrato del núcleo WISP es el mismo que congeló la página (wisp.js): el worker solo anuncia
 // el núcleo cuando el wasm que se está corriendo lo registró en globalThis.
 const CONTRATO_WISP = "apkc-wisp/1";
+// Marca de la única línea que `apkc wisp-get` escribe en stdout: el resto de la
+// consola del comando (incluido el cierre) va a stderr y no debe llegar al DOM.
+const MARCA_WISP_GET = "APKC_WISP_GET:";
 let nucleoWispActivo = false;
+let silenciarSalida = false;
 let ocupado = false;
 let cola = [];
 let entregarRaiz = null;
@@ -58,7 +62,10 @@ async function hacerIniciar() {
   const escribirConsola = nuevo.consola.escribir;
   nuevo.consola.escribir = (trozo) => {
     escribirConsola(trozo);
-    postMessage({ tipo: "salida", texto: String(trozo) });
+    // `wisp-get` devuelve el artefacto en base64 dentro de una línea; ese trozo
+    // se lee de `consola.volcar()` al terminar, no se pinta en la consola de la
+    // página. El buffer sigue llenándose para que el parseo funcione igual.
+    if (!silenciarSalida) postMessage({ tipo: "salida", texto: String(trozo) });
   };
 
   // el fs y el process que Go consulta: hay que sustituirlos antes de ejecutar nada
@@ -246,13 +253,20 @@ async function ejecutar(argv, env) {
   const { instance } = await WebAssembly.instantiate(bytesModule.slice(0), go.importObject);
   // El binario del fork registra apkcWisp en globalThis de este worker. La página no puede verlo:
   // se lo anuncia por mensaje para que instale el puente, y se lo retira cuando el wasm termina.
-  nucleoWispActivo = true;
-  postMessage({ tipo: "wisp-nucleo", activo: true, contrato: CONTRATO_WISP });
+  // `wisp-get` es un disparo único que lee la petición de go.env: no debe anunciarse como núcleo
+  // vivo, así que se conserva `nucleoWispActivo=false` y no se manda el mensaje de activación.
+  const anunciaNucleo = argv[0] !== "wisp-get";
+  if (anunciaNucleo) {
+    nucleoWispActivo = true;
+    postMessage({ tipo: "wisp-nucleo", activo: true, contrato: CONTRATO_WISP });
+  }
   try {
     await go.run(instance);
   } finally {
-    nucleoWispActivo = false;
-    postMessage({ tipo: "wisp-nucleo", activo: false, contrato: CONTRATO_WISP });
+    if (anunciaNucleo) {
+      nucleoWispActivo = false;
+      postMessage({ tipo: "wisp-nucleo", activo: false, contrato: CONTRATO_WISP });
+    }
   }
   return { ok: true, codigo: codigo === null ? 1 : codigo, consola: sistema.consola.volcar() };
 }
@@ -316,6 +330,42 @@ self.onmessage = async (evento) => {
       // un fallo del hospedador; codigo=-1 lo deja claro para quien lea la consola
       const conCodigo = r && r.ok === false ? { ...r, codigo: -1 } : r;
       return void postMessage({ id: m.id, tipo: "terminado", ...conCodigo });
+    }
+    if (m.tipo === "wisp-get") {
+      // La página en reposo pide un artefacto con un comando de un solo disparo.
+      // No hay mutex propio: la cola de un comando por vez es la misma que usan
+      // `ejecutar`, `montar` y el resto. La salida se silencia solo mientras corre
+      // esta tarea para que el base64 no se pinte en la consola del editor.
+      try {
+        const r = await enCola(async () => {
+          silenciarSalida = true;
+          try {
+            return await ejecutar(["wisp-get"], { APKC_WISP_REQ: JSON.stringify(m.payload || {}) });
+          } finally {
+            silenciarSalida = false;
+          }
+        });
+        if (!r || r.ok === false || r.codigo !== 0) {
+          const motivo = (r && typeof r.consola === "string" && r.consola.trim()) ||
+            (r && r.error) || "wisp-get terminó sin éxito";
+          return void postMessage({ id: m.id, tipo: "error", error: motivo });
+        }
+        const linea = String(r.consola || "").split("\n").find((l) => l.startsWith(MARCA_WISP_GET));
+        if (!linea) {
+          return void postMessage({ id: m.id, tipo: "error", error: "wisp-get no devolvió la línea con marca" });
+        }
+        const datos = JSON.parse(linea.slice(MARCA_WISP_GET.length));
+        const binario = atob(datos.bytes);
+        const bytes = new Uint8Array(binario.length);
+        for (let i = 0; i < binario.length; i++) bytes[i] = binario.charCodeAt(i);
+        const buffer = bytes.buffer;
+        return void postMessage({
+          id: m.id, tipo: "wisp",
+          respuesta: { bytes: buffer, sha256: datos.sha256, ruta: datos.ruta },
+        }, [buffer]);
+      } catch (e) {
+        return void postMessage({ id: m.id, tipo: "error", error: String((e && e.message) || e) });
+      }
     }
     if (m.tipo === "wisp") {
       if (m.metodo !== "obtener" && m.metodo !== "cargarCAs") {

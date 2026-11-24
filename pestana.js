@@ -189,6 +189,8 @@ const hospedador = (() => {
     sondear: async () => { await bajarRaiz(); return pedir({ tipo: "sondeo" }); },
     // el puente de la página usa esta misma cola: el id y el vigilante los pone `pedir`
     wispLlamar: (metodo, payload) => pedir({ tipo: "wisp", metodo, payload }),
+    // la vía de reposo: un solo disparo de `wisp-get` con la petición en go.env
+    wispEnReposo: (payload) => pedir({ tipo: "wisp-get", payload }),
     // la salida llega por trozos mientras el comando corre; `correr` la pinta sin esperar al final
     escucharSalida(fn) { alSalir = fn; },
     // Go wasm no tiene kill: se termina el worker entero y se recrea en el siguiente comando. El
