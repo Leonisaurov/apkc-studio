@@ -110,14 +110,16 @@ const hospedador = (() => {
       }
       // El núcleo WISP corre en el wasm del worker; la página solo lo ve cuando el binario lo
       // anuncia con su contrato. Un contrato distinto no instala nada: se queda sin núcleo.
+      // El `activo:false` que el worker envía al terminar cada comando NO retira el puente: el
+      // js.Func muere con go.run, pero la visibilidad del núcleo queda pegada tras el primer
+      // contrato válido. Así `nucleoDisponible` sigue siendo verdadero en reposo, y un `obtener`
+      // sin instancia viva falla cerrado en el hospedador con su motivo.
       if (e.data && e.data.tipo === "wisp-nucleo") {
-        if (e.data.activo === false) puenteWisp.desactivar();
-        else {
-          try { puenteWisp.activar(e.data); }
-          catch (error) {
-            falloSilencioso("wisp-nucleo", error);
-            puenteWisp.desactivar();
-          }
+        if (e.data.activo === false) return;
+        try { puenteWisp.activar(e.data); }
+        catch (error) {
+          falloSilencioso("wisp-nucleo", error);
+          puenteWisp.desactivar();
         }
         return;
       }

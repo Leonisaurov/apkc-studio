@@ -325,7 +325,13 @@ self.onmessage = async (evento) => {
       const funcion = nucleo && typeof nucleo[m.metodo] === "function" ? nucleo[m.metodo] :
         (m.metodo === "cargarCAs" ? globalThis.apkcWispCargarCAs : null);
       if (!nucleoWispActivo || typeof funcion !== "function") {
-        return void postMessage({ id: m.id, tipo: "error", error: "núcleo WISP no activo en el hospedador" });
+        // go.run terminó y con él el js.Func que el wasm registró: aunque la página haya dejado
+        // el puente pegado, aquí no queda instancia viva a la que llamar. Falla cerrado con el
+        // motivo, sin abrir socket desde un núcleo ya muerto.
+        const motivo = nucleoWispActivo
+          ? "núcleo WISP no activo en el hospedador"
+          : "núcleo WISP sin instancia viva: el último comando terminó";
+        return void postMessage({ id: m.id, tipo: "error", error: motivo });
       }
       try {
         const r = await funcion(m.payload);
