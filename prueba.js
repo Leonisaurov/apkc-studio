@@ -176,6 +176,32 @@ for (const [nombre, esperado] of Object.entries(appsEjemplo)) {
     for (const mala of contenido.match(/\{\{\w+\}\}/g) || []) mal(`plantilla ${nombre}: ${ruta} conserva ${mala}`);
   }
 }
+// 2e. el cronómetro es la única plantilla que se reprograma a sí misma: si se pierde el Runnable,
+//     el postDelayed o el reloj monótono, la compilación sigue verde pero el reloj se queda quieto.
+//     La compilación con oráculos la hace e2e.sh; aquí se vigila que el generador no recorte el
+//     esqueleto que hace andar el tick y que el layout y los textos sigan a la altura.
+const cronometro = a.buildProject({ ...estado, template: "cronometro", kotlin: false, libs: false,
+  native: false, assets: false, device: false });
+const actCronometro = cronometro.files[fuentesApp + "/MainActivity.java"] || "";
+const layCronometro = cronometro.files["res/layout/principal.xml"] || "";
+const textosCronometro = cronometro.files["res/values/strings.xml"] || "";
+if (!/implements View\.OnClickListener, Runnable/.test(actCronometro) ||
+    !/public void run\(\)/.test(actCronometro) ||
+    !/manejador\.postDelayed\(this, 50L\)/.test(actCronometro) ||
+    !/SystemClock\.elapsedRealtime\(\)/.test(actCronometro)) {
+  mal("la plantilla Cronómetro no encadena el Runnable con postDelayed y el reloj monótono");
+}
+for (const id of ["tiempo", "estado", "iniciar", "pausar", "vuelta", "reiniciar", "vueltas"]) {
+  if (!new RegExp('@\\+id/' + id + '"').test(layCronometro)) {
+    mal(`la plantilla Cronómetro no declara @+id/${id} en principal.xml`);
+  }
+}
+for (const nombre of ["cero", "parado", "iniciar", "pausar", "vuelta", "reiniciar"]) {
+  if (!new RegExp('name="' + nombre + '"').test(textosCronometro)) {
+    mal(`la plantilla Cronómetro no escribe el texto ${nombre}`);
+  }
+}
+
 const chatbt = a.buildProject({ ...estado, template: "chatbt", kotlin: false, libs: false,
   native: false, assets: false, device: false });
 if (!/BLUETOOTH_CONNECT/.test(chatbt.files["AndroidManifest.xml"])) {
