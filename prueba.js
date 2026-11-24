@@ -331,6 +331,30 @@ if (!/if \(vista\.getId\(\) == R\.id\.anterior\)/.test(actNotas) ||
   mal("la plantilla Notas encadena else if en vez de comparar y terminar cada rama con return");
 }
 
+// 2i. las locales de los bucles de tareas se declaran en el ámbito del método, no dentro del bloque.
+// apkc acumula las muertes de ámbito entre métodos: una local declarada dentro del `for` deja el
+// hueco sin asignar al analizar los marcos JVM y la compilación falla con "se lee el hueco N sin
+// asignar en algun camino" (medido el 2026-11-24 con apkc build --linker go --compiler go).
+const tareas = a.buildProject({ ...estado, template: "tareas", kotlin: false, libs: false,
+  native: false, assets: false, device: false });
+const actTareas = tareas.files[rutaJava];
+for (const nombre of ["clave", "dentro", "pendiente"]) {
+  const declarada = new RegExp("^        (?:String|boolean) " + nombre + ";$", "m");
+  if (!declarada.test(actTareas)) {
+    mal(`la plantilla tareas declara ${nombre} dentro de un bloque; debe estar en el ámbito del método`);
+  }
+}
+// `completar` encadena dos `if` hermanos en vez de anidarlos: el emisor mezcla las muertes de
+// ámbito de los dos bloques y deja el hueco del contador sin asignar. Vigilamos el código generado
+// con una sonda de texto: el `if (pendiente == true)` tiene que aparecer fuera del primer bloque.
+const cuerpoCompletar = actTareas.slice(actTareas.indexOf("private void completar"));
+const finCompletar = cuerpoCompletar.indexOf("private void elegirCategoria");
+const trozoCompletar = cuerpoCompletar.slice(0, finCompletar);
+if ((trozoCompletar.match(/if \(pendiente == true\)/g) || []).length !== 2 ||
+    /if \(dentro == true\)/.test(trozoCompletar)) {
+  mal("la plantilla tareas anida los if de completar; el emisor mezcla las muertes de ámbito");
+}
+
 // 3. el EOCD y los modos: un lector estricto (zipcheck.py) es el que ve lo que zipfile tolera
 const eocd = buf.readUInt16LE(buf.lastIndexOf(Buffer.from("PK\x05\x06", "latin1")) + 8);
 if (eocd !== entradas.length) mal(`el EOCD anuncia ${eocd} entradas y hay ${entradas.length}`);

@@ -1023,11 +1023,12 @@ public class MainActivity extends Activity implements View.OnClickListener {
 
     private void cargar() {
         int guardadas = prefs.getInt("cuantas", 0);
+        String clave;
         for (int i = 0; i < guardadas; i++) {
             if (cuantas >= MAXIMO) {
                 return;
             }
-            String clave = "texto" + i;
+            clave = "texto" + i;
             textos[cuantas] = prefs.getString(clave, "");
             clave = "categoria" + i;
             categorias[cuantas] = prefs.getString(clave, "Casa");
@@ -1078,8 +1079,9 @@ public class MainActivity extends Activity implements View.OnClickListener {
 
     private int contarVisibles() {
         int total = 0;
+        boolean dentro;
         for (int i = 0; i < cuantas; i++) {
-            boolean dentro = visible(i);
+            dentro = visible(i);
             if (dentro == true) {
                 total = total + 1;
             }
@@ -1089,10 +1091,12 @@ public class MainActivity extends Activity implements View.OnClickListener {
 
     private int contarPendientes() {
         int total = 0;
+        boolean dentro;
+        boolean pendiente;
         for (int i = 0; i < cuantas; i++) {
-            boolean dentro = visible(i);
+            dentro = visible(i);
             if (dentro == true) {
-                boolean pendiente = hechas[i].equals("no");
+                pendiente = hechas[i].equals("no");
                 if (pendiente == true) {
                     total = total + 1;
                 }
@@ -1105,8 +1109,9 @@ public class MainActivity extends Activity implements View.OnClickListener {
         int n = contarVisibles();
         String[] copia = new String[n];
         int siguiente = 0;
+        boolean dentro;
         for (int i = 0; i < cuantas; i++) {
-            boolean dentro = visible(i);
+            dentro = visible(i);
             if (dentro == true) {
                 copia[siguiente] = componer(i);
                 siguiente = siguiente + 1;
@@ -1156,16 +1161,17 @@ public class MainActivity extends Activity implements View.OnClickListener {
     // Marca la primera pendiente que el filtro deja ver, y no la primera de la lista completa: con
     // el filtro en Trabajo, completar la primera de Casa seria un efecto invisible.
     private void completar() {
+        boolean pendiente;
         for (int i = 0; i < cuantas; i++) {
-            boolean dentro = visible(i);
-            if (dentro == true) {
-                boolean pendiente = hechas[i].equals("no");
-                if (pendiente == true) {
-                    hechas[i] = "si";
-                    guardar(i);
-                    redibujar();
-                    return;
-                }
+            pendiente = visible(i);
+            if (pendiente == true) {
+                pendiente = hechas[i].equals("no");
+            }
+            if (pendiente == true) {
+                hechas[i] = "si";
+                guardar(i);
+                redibujar();
+                return;
             }
         }
     }
