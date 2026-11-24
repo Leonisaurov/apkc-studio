@@ -331,10 +331,11 @@ if (!/BLUETOOTH_CONNECT/.test(chatbt.files["AndroidManifest.xml"])) {
   mal("la plantilla chatbt no declara los permisos de Bluetooth en el manifiesto");
 }
 
-// 2f. Lienzo es la plantilla de la vista propia: no hay layout XML y el contenido se dibuja con
-// Canvas. Lo que la hace compilar es el reparto de métodos: onDraw delega en pintar, y los seis
-// rayos van en métodos de una sola instrucción, porque el emisor reparte registros por método y
-// seis drawLine juntos agotan la forma corta de aload/fload. Esta comprobación fija esa forma.
+// 2f. Lienzo es la plantilla de la vista propia: el contenido se dibuja con Canvas dentro de un
+// layout que solo declara esa vista como raíz (sin él, `apkc preview` no encuentra pantalla que
+// modelar y ni siquiera llega a onDraw). Lo que la hace compilar es el reparto de métodos: onDraw
+// delega en pintar, y los seis rayos van en métodos de una sola instrucción, porque el emisor reparte
+// registros por método y seis drawLine juntos agotan la forma corta de aload/fload.
 const lienzoApp = a.buildProject({ ...estado, template: "lienzo", kotlin: false, libs: false,
   native: false, assets: false, device: false });
 const lienzoJava = lienzoApp.files[fuentesApp + "/Lienzo.java"];
@@ -345,8 +346,9 @@ if (!/class Lienzo extends View/.test(lienzoJava)) {
 if (!/protected void onDraw\(Canvas lienzo\)/.test(lienzoJava)) {
   mal("la plantilla Lienzo no dibuja en onDraw");
 }
-if (!/setContentView\(lienzo\)/.test(lienzoMain)) {
-  mal("la plantilla Lienzo no pone la vista propia como contenido");
+if (!/setContentView\(R\.layout\.lienzo\)/.test(lienzoMain) ||
+    !/findViewById\(R\.id\.lienzo\)/.test(lienzoMain)) {
+  mal("la plantilla Lienzo no infla lienzo.xml ni engancha el oyente a la vista inflada");
 }
 if (!/void onDraw\(Canvas lienzo\) \{\s*super\.onDraw\(lienzo\);\s*actualizarGeometria\(\);\s*pintar\(lienzo\);\s*\}/.test(lienzoJava)) {
   mal("onDraw de Lienzo no delega en actualizarGeometria y pintar");
@@ -419,6 +421,69 @@ const trozoCompletar = cuerpoCompletar.slice(0, finCompletar);
 if ((trozoCompletar.match(/if \(pendiente == true\)/g) || []).length !== 2 ||
     /if \(dentro == true\)/.test(trozoCompletar)) {
   mal("la plantilla tareas anida los if de completar; el emisor mezcla las muertes de ámbito");
+}
+
+// 2f-bis. Contrato de emulación de Lienzo, medido con `apkc preview` sobre el apk generado arriba
+// (paquete sustituido por el de esta prueba): el intérprete ejecuta el onDraw y publica 17
+// `dibujo.operaciones` en el único nodo del modelo. Dos fronteras medidas y no disimuladas:
+// `getWidth/getHeight` y `Color.rgb` son stubs que devuelven cero, así que las figuras llegan sin
+// coordenadas y con color #00000000 y el pintor solo puede dibujar los dos textos hoy por hoy.
+const lienzoLayout = lienzoApp.files["res/layout/lienzo.xml"] || "";
+if (!new RegExp("<" + estado.package.replace(/\./g, "\\.") + "\\.Lienzo\\b").test(lienzoLayout)) {
+  mal("la plantilla Lienzo no declara su vista propia como raíz de res/layout/lienzo.xml");
+}
+if (!/android:id="@\+id\/lienzo"/.test(lienzoLayout)) {
+  mal("la raíz de lienzo.xml no lleva @+id/lienzo, que es lo que el emulador pulsa");
+}
+if (!/public Lienzo\(Context contexto, AttributeSet atributos\)/.test(lienzoJava)) {
+  mal("Lienzo no tiene el constructor (Context, AttributeSet) que exige el inflado desde XML");
+}
+const modeloLienzoMedido = {
+  pantalla: { x: 0, y: 0, ancho: 360, alto: 640 }, aproximado: true, nodos: 1,
+  layout: "res/layout/lienzo.xml",
+  ejecucion: { metodo: "onCreate", pasos: 13, oyentes: [{ id: "id/lienzo", idRef: "0x7f010000" }] },
+  raiz: { tipo: estado.package + ".Lienzo", id: "id/lienzo", idRef: "0x7f010000", oyente: true,
+    rect: { x: 0, y: 0, ancho: 360, alto: 640 },
+    dibujo: { operaciones: [
+      { operacion: "color", color: "#00000000" },
+      { operacion: "circulo", color: "#00000000", grosor: 4, radio: 30 },
+      { operacion: "circulo", color: "#00000000", grosor: 4, radio: 52 },
+      { operacion: "circulo", color: "#00000000", grosor: 4, radio: 74 },
+      { operacion: "circulo", color: "#00000000", grosor: 4, radio: 96 },
+      { operacion: "circulo", color: "#00000000", grosor: 4, radio: 118 },
+      { operacion: "circulo", color: "#00000000", grosor: 4, radio: 140 },
+      { operacion: "circulo", color: "#00000000", grosor: 4, radio: 162 },
+      { operacion: "linea", color: "#00000000", grosor: 2, x1: -108, y1: -180, x2: -180 },
+      { operacion: "linea", color: "#00000000", grosor: 2, x1: -72, y1: -180, x2: -108 },
+      { operacion: "linea", color: "#00000000", grosor: 2, x1: -36, y1: -180, x2: -36 },
+      { operacion: "linea", color: "#00000000", grosor: 2, y1: -180, y2: 180 },
+      { operacion: "linea", color: "#00000000", grosor: 2, x1: 36, y1: -180, x2: 36 },
+      { operacion: "linea", color: "#00000000", grosor: 2, x1: 72, y1: -180, x2: 108 },
+      { operacion: "circulo", color: "#00000000", grosor: 2, radio: 26 },
+      { operacion: "texto", color: "#00000000", grosor: 2, x1: 24, y1: 48, texto: "fotograma 0" },
+      { operacion: "texto", color: "#00000000", grosor: 2, x1: 24, y1: 84, texto: "toques 0" },
+    ] } },
+};
+const opsLienzo = modeloLienzoMedido.raiz.dibujo.operaciones;
+if (opsLienzo.length !== 17 || opsLienzo.filter((o) => o.operacion === "circulo").length !== 8 ||
+    opsLienzo.filter((o) => o.operacion === "linea").length !== 6) {
+  mal("el modelo de Lienzo no trae el reparto medido de 8 círculos y 6 líneas");
+}
+if (opsLienzo.filter((o) => o.operacion === "texto").map((o) => o.texto).join(",") !==
+    "fotograma 0,toques 0") {
+  mal("el onDraw de Lienzo no deja los textos del fotograma en el modelo");
+}
+if (!(modeloLienzoMedido.ejecucion.oyentes || []).some((o) => o.id === "id/lienzo")) {
+  mal("el nodo de Lienzo no se marca como oyente en el modelo");
+}
+const lienzoPintado = lienzoFalso(360, 640);
+const resultadoLienzo = vistaPrevia.pintarModelo(lienzoPintado.canvas, modeloLienzoMedido);
+if (!resultadoLienzo || resultadoLienzo.valida !== true || resultadoLienzo.operaciones < 3) {
+  mal("el pintor no consume el modelo de Lienzo: " + (resultadoLienzo && resultadoLienzo.operaciones));
+}
+const textosLienzo = lienzoPintado.llamadas.filter((c) => c.nombre === "fillText").map((c) => c.args[0]);
+if (textosLienzo.join(",") !== "fotograma 0,toques 0") {
+  mal("la huella visible del Canvas propio no llega al lienzo: " + JSON.stringify(textosLienzo));
 }
 
 // 3. el EOCD y los modos: un lector estricto (zipcheck.py) es el que ve lo que zipfile tolera

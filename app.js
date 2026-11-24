@@ -228,7 +228,7 @@ class MainActivity : Activity() {
 // ---------------------------------------------------------------- apps de ejemplo
 // Los cinco proyectos de banco/apps-ejemplo/*, copiados aquí para que se puedan crear desde el
 // selector. No son variantes de la plantilla base: cada uno es una app completa, con su actividad,
-// sus layouts (principal.xml e item.xml) y sus textos. El código generado tiene que ser ASCII puro
+// sus layouts y sus textos. El código generado tiene que ser ASCII puro
 // (lo exige prueba.js), así que los comentarios van sin tilde, los separadores de las cadenas usan
 // un guion y los acentos de res/values van en referencia numérica. Lo que la vista previa no
 // modela (Bluetooth, SharedPreferences, Handler) se genera igual: es una app real, no un dibujo.
@@ -238,12 +238,12 @@ const APPS_EJEMPLO = {
       "MainActivity.java": `package {{pkgname}};
 
 import android.app.Activity;
-import android.content.Context;
 import android.os.Bundle;
 import android.view.View;
 
-// La pantalla monta la vista propia en codigo, sin XML. Tocar la superficie avanza el fotograma:
-// es la sonda de fidelidad del emulador (Canvas, Paint, invalidate y el ciclo de dibujo).
+// La vista propia se infla desde lienzo.xml porque el emulador necesita un layout que le diga cual
+// es la raiz de la primera pantalla antes de ejecutar su onDraw. Tocar la superficie avanza el
+// fotograma: es la sonda de fidelidad del emulador (Canvas, Paint, invalidate y el ciclo de dibujo).
 public class MainActivity extends Activity implements View.OnClickListener {
     private Lienzo lienzo;
     private int toques;
@@ -251,10 +251,9 @@ public class MainActivity extends Activity implements View.OnClickListener {
     @Override
     public void onCreate(Bundle estado) {
         super.onCreate(estado);
-        Context contexto = this;
-        lienzo = new Lienzo(contexto);
+        setContentView(R.layout.lienzo);
+        lienzo = (Lienzo) findViewById(R.id.lienzo);
         lienzo.setOnClickListener(this);
-        setContentView(lienzo);
     }
 
     @Override
@@ -271,6 +270,7 @@ import android.content.Context;
 import android.graphics.Canvas;
 import android.graphics.Color;
 import android.graphics.Paint;
+import android.util.AttributeSet;
 import android.view.View;
 
 // Vista propia: todo el dibujo pasa por Canvas y Paint dentro de onDraw, sin recursos de imagen.
@@ -286,7 +286,11 @@ public class Lienzo extends View {
     private float pulso;
 
     public Lienzo(Context contexto) {
-        super(contexto);
+        this(contexto, null);
+    }
+
+    public Lienzo(Context contexto, AttributeSet atributos) {
+        super(contexto, atributos);
         pincel = new Paint();
         pincel.setAntiAlias(true);
         fotograma = 0;
@@ -387,7 +391,14 @@ public class Lienzo extends View {
 }
 `,
     },
-    layouts: {},
+    layouts: {
+      "lienzo.xml": `<?xml version="1.0" encoding="utf-8"?>
+<{{pkgname}}.Lienzo xmlns:android="http://schemas.android.com/apk/res/android"
+    android:id="@+id/lienzo"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent" />
+`,
+    },
     strings: `<resources>
     <string name="app_name">{{appname}}</string>
     <string name="siguiente">Siguiente fotograma</string>
@@ -1661,7 +1672,7 @@ function buildProject(state) {
   }
   // Las cinco apps de ejemplo del banco se generan enteras: sustituyen la actividad, los layouts y
   // los textos, y el manifiesto pasa a etiquetar desde @string/app_name como las originales. El
-  // layout main.xml de la plantilla base se retira porque estas apps usan principal.xml o ninguno.
+  // layout main.xml de la plantilla base se retira porque estas apps usan su propio layout o ninguno.
   const app = !state.kotlin ? APPS_EJEMPLO[state.template] : null;
   if (app) {
     delete files["res/layout/main.xml"];
@@ -1670,7 +1681,7 @@ function buildProject(state) {
       files[rutaFuentes + "/" + nombre] = contenido.replace(/\{\{pkgname\}\}/g, pkg);
     }
     for (const [nombre, contenido] of Object.entries(app.layouts)) {
-      files["res/layout/" + nombre] = contenido;
+      files["res/layout/" + nombre] = contenido.replace(/\{\{pkgname\}\}/g, pkg);
     }
     files["res/values/strings.xml"] = app.strings.replace(/\{\{appname\}\}/g, texto(state.name, "Mi app"));
     files["AndroidManifest.xml"] = files["AndroidManifest.xml"]
