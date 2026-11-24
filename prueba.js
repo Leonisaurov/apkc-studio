@@ -311,6 +311,26 @@ if (declPermisos < 0 || siPermisos < 0 || retornoPermisos < 0 ||
   mal("la plantilla chatbt declara los permisos después del if o del return de pedirPermisos y no compila");
 }
 
+// 2h. la plantilla Notas se compila de verdad en e2e.sh: vigila las dos formas que el emisor de
+//     `--compiler go` rechaza. Reasignar una local dentro de un `if` y leerla despues, o guardar el id
+//     de la vista en una local y encadenar tres `else if`, dejan el hueco sin asignar en el marco
+//     (`pc N (iload_2): se lee el hueco 2 sin asignar en algun camino`). El indice de borrado vive en
+//     su propio metodo con `return` y el despachador compara `getId()` sin local intermedia.
+const notas = a.buildProject({ ...estado, template: "notas", kotlin: false, libs: false,
+  native: false, assets: false, device: false });
+const actNotas = notas.files[fuentesApp + "/MainActivity.java"];
+if (!/private int indiceBorrar\(\)/.test(actNotas) || !/int cual = indiceBorrar\(\);/.test(actNotas)) {
+  mal("la plantilla Notas reasigna la local del indice de borrado dentro de un `if`");
+}
+if (/int cual = vista\.getId\(\);/.test(actNotas)) {
+  mal("la plantilla Notas guarda el id de la vista en una local");
+}
+if (!/if \(vista\.getId\(\) == R\.id\.anterior\)/.test(actNotas) ||
+    !/if \(vista\.getId\(\) == R\.id\.guardar\)/.test(actNotas) ||
+    !/^\s+borrar\(\);\n    \}/m.test(actNotas)) {
+  mal("la plantilla Notas encadena else if en vez de comparar y terminar cada rama con return");
+}
+
 // 3. el EOCD y los modos: un lector estricto (zipcheck.py) es el que ve lo que zipfile tolera
 const eocd = buf.readUInt16LE(buf.lastIndexOf(Buffer.from("PK\x05\x06", "latin1")) + 8);
 if (eocd !== entradas.length) mal(`el EOCD anuncia ${eocd} entradas y hay ${entradas.length}`);

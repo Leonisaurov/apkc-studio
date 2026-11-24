@@ -539,14 +539,21 @@ public class MainActivity extends Activity implements View.OnClickListener {
         pintarSeleccion();
     }
 
+    // El indice a borrar se calcula en un metodo propio: reasignar una local dentro de un if y
+    // leerla despues deja el hueco sin asignar en el marco que valida nuestro emisor (medido al
+    // compilar esta plantilla con apkc build --linker go --compiler go).
+    private int indiceBorrar() {
+        if (elegida >= 0) {
+            return elegida;
+        }
+        return cuantas - 1;
+    }
+
     private void borrar() {
         if (cuantas == 0) {
             return;
         }
-        int cual = elegida;
-        if (cual < 0) {
-            cual = cuantas - 1;
-        }
+        int cual = indiceBorrar();
         for (int i = cual; i < cuantas - 1; i++) {
             notas[i] = notas[i + 1];
         }
@@ -568,18 +575,25 @@ public class MainActivity extends Activity implements View.OnClickListener {
 
     @Override
     public void onClick(View vista) {
-        int cual = vista.getId();
-        if (cual == R.id.anterior) {
+        // Se compara getId() directamente y cada rama termina con return: guardar el id en una
+        // local y encadenar tres else if deja el hueco sin asignar en el marco del emisor.
+        if (vista.getId() == R.id.anterior) {
             mover(-1);
-        } else if (cual == R.id.siguiente) {
-            mover(1);
-        } else if (cual == R.id.nueva) {
-            nueva();
-        } else if (cual == R.id.guardar) {
-            guardar();
-        } else {
-            borrar();
+            return;
         }
+        if (vista.getId() == R.id.siguiente) {
+            mover(1);
+            return;
+        }
+        if (vista.getId() == R.id.nueva) {
+            nueva();
+            return;
+        }
+        if (vista.getId() == R.id.guardar) {
+            guardar();
+            return;
+        }
+        borrar();
     }
 }
 `,
