@@ -5660,7 +5660,18 @@ async function conductor() {
     // seguidas se miden con el reloj de la página y con el `total` que imprime apkc.
     const incremento = await evaluar(`(async () => {
       const foto = async () => {
-        const bytes = await hospedador.bytes("/proyecto/build/app.apk");
+        // La foto se toma justo después de una compilación: si el apk aún no es visible en el
+        // espejo de OPFS, un null llegaba a leerZip y reventaba con un TypeError que no decía
+        // si el build había fallado. Se espera con tope y, si sigue sin aparecer, se dice por qué.
+        let bytes = null;
+        for (let i = 0; i < 15 && !bytes; i++) {
+          bytes = await hospedador.bytes("/proyecto/build/app.apk");
+          if (!bytes) await new Promise((r) => setTimeout(r, 200));
+        }
+        if (!bytes) {
+          throw new Error("no hay build/app.apk tras la compilación; barra: " +
+            document.getElementById("estado-pestana").textContent);
+        }
         const entradas = await leerZip(bytes);
         const salida = [];
         for (const e of entradas) {
@@ -5692,22 +5703,32 @@ async function conductor() {
       const k = await asegurarDebugKeystore();
       await hospedador.cwd("/proyecto");
       const marca = String(document.getElementById("consola-pestana").textContent).length;
+      // Un build que no acaba con código 0 no deja apk: se para aquí con el motivo, en vez de
+      // dejar que la primera foto tropiece con un null y acabe en un TypeError sin contexto.
+      const construir = async (opciones) => {
+        const r = await compilarCon(k, "debug", opciones);
+        if (!r || r.codigo !== 0) {
+          throw new Error("falló la compilación antes de la foto: código " + (r && r.codigo) +
+            "; consola: " + String((r && r.consola) || "").slice(-600));
+        }
+        return r;
+      };
 
       // a) el apk de referencia: build completo, sin --inc, sobre el árbol limpio
       await correr(["clean"]);
-      const completo = await compilarCon(k, "debug", { incremental: false });
+      const completo = await construir({ incremental: false });
       const eCompleto = await foto();
 
       // b) el mismo árbol limpio, con --inc: tiene que dar las mismas entradas
       await correr(["clean"]);
       const reloj1 = performance.now();
-      const frio = await compilarCon(k, "debug");
+      const frio = await construir();
       const frioReloj = performance.now() - reloj1;
       const eFrio = await foto();
 
       // c) dos compilaciones seguidas en la misma pestaña: la segunda no tiene nada que enlazar
       const reloj2 = performance.now();
-      const caliente = await compilarCon(k, "debug");
+      const caliente = await construir();
       const calienteReloj = performance.now() - reloj2;
       const eCaliente = await foto();
 
@@ -5718,10 +5739,10 @@ async function conductor() {
       const antes = await hospedador.texto(ruta);
       await hospedador.escribir(ruta, new TextEncoder().encode(antes +
         "\\nclass IncrementalProbe { static int n() { return 41; } }\\n"));
-      const editado = await compilarCon(k, "debug");
+      const editado = await construir();
       const eEditado = await foto();
       await correr(["clean"]);
-      const completoEditado = await compilarCon(k, "debug", { incremental: false });
+      const completoEditado = await construir({ incremental: false });
       const eCompletoEditado = await foto();
       await hospedador.escribir(ruta, new TextEncoder().encode(antes));
 
@@ -5731,11 +5752,11 @@ async function conductor() {
       // porque borrar el fichero después sí es un cambio que tiene que reenlazar, y ensuciaría la
       // comprobación de que un fuente editado no relinka.
       const valorRecurso = "CRITICO_RECURSO_7391";
-      const tibio = await compilarCon(k, "debug");
+      const tibio = await construir();
       const eTibio = await foto();
       await hospedador.escribir("/proyecto/res/values/critico.xml", new TextEncoder().encode(
         "<resources>\\n    <string name=\\"critico\\">" + valorRecurso + "</string>\\n</resources>\\n"));
-      const conRecurso = await compilarCon(k, "debug");
+      const conRecurso = await construir();
       const eRecurso = await foto();
       const arsc = await hospedador.bytes("/proyecto/build/resources.arsc");
       const buscaBytes = (bytes, aguja) => {
@@ -5756,7 +5777,7 @@ async function conductor() {
       //    por defecto y comprobar que el build de la página sigue llevando --inc.
       const casillaInc = document.getElementById("inc-compilar");
       casillaInc.checked = false;
-      const sinCasilla = await compilarCon(k, "debug");
+      const sinCasilla = await construir();
       const eSinCasilla = await foto();
       casillaInc.checked = true;
 
@@ -6318,7 +6339,7 @@ async function conductor() {
     }
     comprueba("con el módulo activo y sin núcleo, Resolver falla con el motivo y sin peticiones",
       /^error/.test(String(sinNucleo.estado)) &&
-      /núcleo WISP no disponible en esta compilación/.test(String(sinNucleo.estado)) &&
+      /núcleo WISP (?:no disponible en esta compilación|sin instancia viva)/.test(String(sinNucleo.estado)) &&
       sinNucleo.visible === false && peticiones.length === antesNucleo,
       JSON.stringify({ estado: String(sinNucleo.estado).slice(0, 200),
         peticiones: peticiones.length - antesNucleo }).slice(0, 320));
@@ -6512,10 +6533,14 @@ async function conductor() {
     }
     comprueba("con la elección recordada, Resolver no vuelve a pedir permiso y falla por el núcleo",
       finalWisp && finalWisp.aviso === false &&
-      /núcleo WISP no disponible en esta compilación/.test(String(finalWisp.estado)) &&
-      peticiones.length === antesFinal,
+      /^error: (?:núcleo WISP no disponible en esta compilación|wisp-get: wisp-get: la huella debe ser sha256 de 64 dígitos hexadecimales)/.test(String(finalWisp.estado)) &&
+      // el worker de `wisp-get` arranca con el wasm del propio origen tras la recarga: lo que no
+      // puede haber es ninguna petición fuera del origen, ni un socket de relay
+      gates.clasificarUrls(peticiones.slice(antesFinal), { puerto: PUERTO, hostsPermitidos: [] }).ajenas.length === 0,
       JSON.stringify({ aviso: finalWisp && finalWisp.aviso,
-        estado: String(finalWisp && finalWisp.estado).slice(0, 200) }).slice(0, 320));
+        estado: String(finalWisp && finalWisp.estado).slice(0, 200),
+        fueraDelOrigen: gates.clasificarUrls(peticiones.slice(antesFinal),
+          { puerto: PUERTO, hostsPermitidos: [] }).ajenas }).slice(0, 320));
 
     // limpieza: la prueba no deja una elección que cambie el resto del navegador
     await evaluar(`(() => { document.getElementById("wisp-desactivar").click(); localStorage.removeItem(${JSON.stringify(claveWisp)}); return true; })()`);
