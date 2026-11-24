@@ -225,6 +225,32 @@ class MainActivity : Activity() {
   gitignore: "build/\n",
 };
 
+// Una sola fuente de la prosa que explica cada plantilla: el selector la muestra al pasar el
+// ratón y debajo del desplegable, y buildProject la escribe en LEEME.txt. Aquí sí van las tildes;
+// el código generado (.java y .xml) sigue siendo ASCII puro.
+const DESCRIPCIONES = {
+  hola: "Hola mundo - La actividad mínima: infla un layout con un TextView que muestra el saludo "
+    + "y sirve de punto de partida para las demás plantillas.",
+  contador: "Contador - Pulsa el botón para incrementar la cuenta; el total se pinta en pantalla "
+    + "y sale en Logcat y en la consola del emulador.",
+  ciclo: "Ciclo de vida - Un mensaje emergente anuncia onCreate al abrir la pantalla y el título "
+    + "cambia en onStart, para que veas el orden de las dos llamadas.",
+  menu: "Menú de opciones - Añade una entrada al menú de la barra superior y responde a la "
+    + "pulsación con un mensaje emergente.",
+  traducido: "Textos traducidos - La misma pantalla con cadenas en values y en values-es: el "
+    + "sistema elige el texto según el idioma del dispositivo.",
+  lienzo: "Lienzo - Vista propia que dibuja con Canvas: cada toque avanza el fotograma y onDraw "
+    + "vuelve a pintar con Paint e invalidate.",
+  notas: "Bloc de notas - Crea, edita y borra notas en una lista; el texto se guarda en "
+    + "SharedPreferences y sigue ahí al volver a abrir la app.",
+  chatbt: "Chat Bluetooth - Pide los permisos, cuenta los dispositivos vinculados y muestra una "
+    + "conversación con eco local: el mensaje entra en la lista sin abrir ningún socket.",
+  tareas: "Tareas - Añade tareas con categoría, márcalas como hechas y cambia el filtro para ver "
+    + "solo las de una categoría o las pendientes.",
+  cronometro: "Cronómetro - Encadena un Runnable con Handler y postDelayed, toma el tiempo del "
+    + "reloj monótono y anota vueltas mientras el reloj corre en pantalla.",
+};
+
 // ---------------------------------------------------------------- apps de ejemplo
 // Los cinco proyectos de banco/apps-ejemplo/*, copiados aquí para que se puedan crear desde el
 // selector. No son variantes de la plantilla base: cada uno es una app completa, con su actividad,
@@ -1702,7 +1728,8 @@ function buildProject(state) {
     + "           también lo quita del paquete.");
   if (state.native) notas.push("lib/<abi>/  con extractNativeLibs=\"false\" en el manifest, el .so viaja sin comprimir\n"
     + "           y alineado a página; con \"true\" (o sin atributo) el sistema lo descomprime al instalar.");
-  if (notas.length) files["LEEME.txt"] = notas.join("\n\n") + "\n";
+  const leeme = [DESCRIPCIONES[state.template] || DESCRIPCIONES.hola, ...notas].filter(Boolean);
+  files["LEEME.txt"] = leeme.join("\n\n") + "\n";
   return { dirs, files };
 }
 
@@ -1969,7 +1996,8 @@ function informe() {
   return md;
 }
 
-export { buildProject, makeZip, analyze, crc32, RULES, loadLog, saveLog, registrar, informe };
+export { buildProject, makeZip, analyze, crc32, RULES, loadLog, saveLog, registrar, informe,
+  DESCRIPCIONES };
 
 // Puente para las pruebas de navegador que ya existen y para la consola de desarrollo.
 // La página importa este módulo; no hay dependencia de estos globales en el código nuevo.

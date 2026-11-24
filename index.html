@@ -180,17 +180,18 @@
             <label><span data-i18n="crear.icono">Icono (opcional, PNG)</span> <input type="file" id="icono" accept="image/png"></label>
             <label><span data-i18n="crear.plantilla">Plantilla</span>
               <select id="plantilla">
-                <option value="hola" selected>Hola mundo</option>
-                <option value="contador">Contador (botón y cuenta)</option>
-                <option value="ciclo">Ciclo de vida (onCreate y onStart)</option>
-                <option value="menu">Menú de opciones</option>
-                <option value="traducido">Textos traducidos (values-es)</option>
-                <option value="lienzo">Lienzo (vista propia con Canvas)</option>
-                <option value="notas">Notas (bloc con SharedPreferences)</option>
-                <option value="chatbt">Chat Bluetooth (permisos y lista)</option>
-                <option value="tareas">Tareas (categorías y filtro)</option>
-                <option value="cronometro">Cronómetro (Handler y vueltas)</option>
+                <option value="hola" selected title="Proyecto mínimo con un saludo">Hola mundo</option>
+                <option value="contador" title="Botón que cuenta los pulsos">Contador (botón y cuenta)</option>
+                <option value="ciclo" title="Aviso en onCreate y título en onStart">Ciclo de vida (onCreate y onStart)</option>
+                <option value="menu" title="Entrada en el menú de opciones">Menú de opciones</option>
+                <option value="traducido" title="Cadenas en español y en neutro">Textos traducidos (values-es)</option>
+                <option value="lienzo" title="Dibujo propio con Canvas">Lienzo (vista propia con Canvas)</option>
+                <option value="notas" title="Notas guardadas en preferencias">Notas (bloc con SharedPreferences)</option>
+                <option value="chatbt" title="Mensajes con eco local y permisos">Chat Bluetooth (permisos y lista)</option>
+                <option value="tareas" title="Lista con categorías y filtro">Tareas (categorías y filtro)</option>
+                <option value="cronometro" title="Reloj con vueltas y Handler">Cronómetro (Handler y vueltas)</option>
               </select>
+              <small id="plantilla-descripcion"></small>
             </label>
             <label><span data-i18n="crear.api">API de compilación</span>
               <select id="api-version" class="ruta">

@@ -2,7 +2,7 @@
 // escribe el proyecto generado en OPFS y abre sus ficheros. La lógica de apkc.wasm y del editor
 // sigue en pestana.js; aquí solo se decide qué se ve y se siembra el árbol con buildProject.
 
-import { buildProject } from "./app.js";
+import { buildProject, DESCRIPCIONES } from "./app.js";
 import {
   PROYECTO, hospedador, abrir, refrescarArbol, estaSucio,
   hayDocumentosSucios, confirmarDescartes, limpiarEstadoEditor,
@@ -41,6 +41,18 @@ import {
       vistas.scrollTop = 0;
     }
   }
+
+  // La descripción de la plantilla sale de una sola fuente (app.js): el title del selector es
+  // solo una pista corta y el texto completo vive aquí y en el LEEME.txt del proyecto generado.
+  const selectorPlantilla = document.getElementById("plantilla");
+  const descripcionPlantilla = document.getElementById("plantilla-descripcion");
+  function mostrarDescripcion() {
+    if (!selectorPlantilla || !descripcionPlantilla) return;
+    descripcionPlantilla.textContent =
+      DESCRIPCIONES[selectorPlantilla.value] || DESCRIPCIONES.hola;
+  }
+  if (selectorPlantilla) selectorPlantilla.addEventListener("change", mostrarDescripcion);
+  mostrarDescripcion();
 
   for (const boton of document.querySelectorAll("[data-vista]")) {
     boton.addEventListener("click", () => {

@@ -5,7 +5,7 @@ import path from "node:path";
 import { execFileSync } from "node:child_process";
 import { X509Certificate } from "node:crypto";
 import { fileURLToPath } from "node:url";
-import { buildProject, makeZip, analyze, RULES, crc32 } from "./app.js";
+import { buildProject, makeZip, analyze, RULES, crc32, DESCRIPCIONES } from "./app.js";
 import * as pestanaMod from "./pestana.js";
 import { Historial } from "./historial.js";
 import { fusionar } from "./fusion.js";
@@ -112,8 +112,12 @@ for (const [nombre, esperado] of Object.entries(plantillasNuevas)) {
   const pr = a.buildProject({ ...estado, template: nombre, kotlin: false, libs: false,
     native: false, assets: false, device: false });
   for (const [ruta, texto] of Object.entries(pr.files)) {
-    const raros = [...new Set([...texto].filter((c) => c.charCodeAt(0) > 127))];
-    if (raros.length) mal(`plantilla ${nombre}: ${ruta} lleva ${raros.join(" ")}`);
+    // El ASCII se exige al código que compila; LEEME.txt es prosa en español y lleva tildes,
+    // como dice la comprobación 1 de este mismo fichero. Los marcadores se vigilan en todos.
+    if (/\.(java|kt|xml)$/.test(ruta)) {
+      const raros = [...new Set([...texto].filter((c) => c.charCodeAt(0) > 127))];
+      if (raros.length) mal(`plantilla ${nombre}: ${ruta} lleva ${raros.join(" ")}`);
+    }
     for (const mala of texto.match(/\{\{\w+\}\}/g) || []) mal(`plantilla ${nombre}: ${ruta} conserva ${mala}`);
     for (const re of esperado[ruta] || (ruta === rutaJava ? esperado.java : []) || []) {
       if (!re.test(texto)) mal(`plantilla ${nombre}: ${ruta} no contiene ${re}`);
@@ -232,6 +236,33 @@ for (const [nombre, esperado] of Object.entries(appsEjemplo)) {
     const raros = [...new Set([...contenido].filter((c) => c.charCodeAt(0) > 127))];
     if (raros.length) mal(`plantilla ${nombre}: ${ruta} lleva ${raros.join(" ")}`);
     for (const mala of contenido.match(/\{\{\w+\}\}/g) || []) mal(`plantilla ${nombre}: ${ruta} conserva ${mala}`);
+  }
+}
+// 2d-bis. La prosa de cada plantilla tiene una sola fuente (DESCRIPCIONES en app.js): la muestra
+// el selector, la pinta vistas.js bajo el desplegable y buildProject la escribe en LEEME.txt.
+// No se mete en comentarios Java ni en strings.xml, y el readme no puede decir undefined ni
+// arrastrar un marcador sin sustituir.
+const nombresDescritos = Object.keys(DESCRIPCIONES);
+if (nombresDescritos.length !== 10) mal(`DESCRIPCIONES describe ${nombresDescritos.length} plantillas, no diez`);
+for (const nombre of nombresDescritos) {
+  const descripcion = DESCRIPCIONES[nombre];
+  if (typeof descripcion !== "string" || !descripcion.trim()) {
+    mal(`la plantilla ${nombre} no tiene descripción`);
+    continue;
+  }
+  if (!new RegExp('value="' + nombre + '"').test(htmlPlantillas)) {
+    mal(`el selector de plantillas no ofrece la descripción de ${nombre}`);
+  }
+  const generado = a.buildProject({ ...estado, template: nombre, kotlin: false, libs: false,
+    native: false, assets: false, device: false });
+  const readme = generado.files["LEEME.txt"] || "";
+  if (!readme.includes(descripcion)) mal(`LEEME.txt no incluye la descripción de ${nombre}`);
+  if (/\bundefined\b|\{\{\w+\}\}/.test(readme)) mal(`LEEME.txt de ${nombre} lleva undefined o un marcador`);
+  for (const [ruta, contenido] of Object.entries(generado.files)) {
+    if (!/\.(java|xml|kt)$/.test(ruta)) continue;
+    if (contenido.includes(descripcion)) {
+      mal(`la descripción de ${nombre} se coló en el código generado: ${ruta}`);
+    }
   }
 }
 // 2e. el cronómetro es la única plantilla que se reprograma a sí misma: si se pierde el Runnable,
