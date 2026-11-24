@@ -3030,15 +3030,19 @@ async function decirEstadoDepuracion() {
   }
 }
 
-// `opciones.incremental === false` compila sin `--inc`. Solo lo usa la prueba que compara las dos
-// formas de build en la misma pestaña: la página siempre compila con `--inc`, porque saltarse el
-// enlace de recursos cuando `res/` no cambió deja el apk igual entrada por entrada y es el 23 % de
-// la pasada caliente en wasm (docs/plan-incremental-web.md).
+// Por defecto la página compila con `--inc`: saltarse el enlace de recursos cuando `res/` no
+// cambió deja el apk igual entrada por entrada y es el 23 % de la pasada caliente en wasm
+// (docs/plan-incremental-web.md). El checkbox `#inc-compilar` permite desactivarlo, y
+// `opciones.incremental` manda siempre para que la prueba pueda pedir un build completo sin
+// tener que tocar la casilla.
 async function compilarCon(k, tipo, opciones = {}) {
   const v4 = document.getElementById("v4-compilar").checked;
   const version = (document.getElementById("sdk-version").value || "34").trim();
   const codename = (document.getElementById("codename").value || "14").trim();
-  const inc = opciones.incremental !== false;
+  const casillaInc = document.getElementById("inc-compilar");
+  const inc = opciones.incremental === undefined
+    ? (casillaInc ? casillaInc.checked : true)
+    : opciones.incremental !== false;
   // lo que se ve en el editor es lo que se compila: el build no lee el textarea (ver
   // guardarParaCompilar). El motivo de un fallo al guardar ya lo dejó en la barra.
   const guardados = await guardarParaCompilar();

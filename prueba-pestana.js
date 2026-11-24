@@ -5567,6 +5567,15 @@ async function conductor() {
       await hospedador.limpiar("/proyecto/res/values/critico.xml");
       await correr(["clean"]);
 
+      // g) el checkbox visible manda: destildado, el siguiente build no lleva --inc y la apk
+      //    sigue siendo válida; se vuelve a marcar al terminar para dejar la página en su estado
+      //    por defecto y comprobar que el build de la página sigue llevando --inc.
+      const casillaInc = document.getElementById("inc-compilar");
+      casillaInc.checked = false;
+      const sinCasilla = await compilarCon(k, "debug");
+      const eSinCasilla = await foto();
+      casillaInc.checked = true;
+
       const nuevas = String(document.getElementById("consola-pestana").textContent).slice(marca)
         .split("\\n").map((l) => l.trim()).filter((l) => l.startsWith("$ apkc build"));
       const dex = (e) => (e.find((x) => x[0] === "classes.dex") || [])[1];
@@ -5583,6 +5592,9 @@ async function conductor() {
         enlazaTibio: enlaza(tibio.consola), enlazaRecurso: enlaza(conRecurso.consola), arscTieneRecurso,
         distintasRecurso: distintas(eTibio, eRecurso), entradasRecurso: eRecurso.length,
         codigos: [completo, frio, caliente, editado, completoEditado].map((r) => r && r.codigo),
+        codigoSinCasilla: sinCasilla && sinCasilla.codigo,
+        entradasSinCasilla: eSinCasilla.length,
+        distintasSinCasilla: distintas(eCompleto, eSinCasilla),
         totalFrio: totalApkc(frio.consola), totalCaliente: totalApkc(caliente.consola),
         totalCompleto: totalApkc(completo.consola),
         compileFrio: etapa(frio.consola, "compile go"), dexFrio: etapa(frio.consola, "dex go"),
@@ -5598,8 +5610,14 @@ async function conductor() {
     const conInc = incremento.ordenes.filter((o) => o.includes("--inc")).length;
     const sinInc = incremento.ordenes.filter((o) => !o.includes("--inc")).length;
     comprueba("la pestaña compila con --inc y la prueba sigue pudiendo pedir el build completo",
-      conInc === 5 && sinInc === 2 && incremento.codigos.every((c) => c === 0),
+      conInc === 5 && sinInc === 3 && incremento.codigos.every((c) => c === 0),
       JSON.stringify({ ordenes: incremento.ordenes, codigos: incremento.codigos }).slice(0, 320));
+    comprueba("destildar #inc-compilar quita --inc al siguiente build y la apk sigue siendo válida",
+      incremento.codigoSinCasilla === 0 && incremento.entradasSinCasilla > 5 &&
+      incremento.entradasSinCasilla === incremento.entradasCompleto &&
+      incremento.distintasSinCasilla.length === 0,
+      JSON.stringify({ codigo: incremento.codigoSinCasilla,
+        entradas: incremento.entradasSinCasilla, distintas: incremento.distintasSinCasilla }).slice(0, 240));
     comprueba("el apk con --inc es igual entrada por entrada al de un build completo",
       incremento.entradasFrio > 5 && incremento.entradasFrio === incremento.entradasCompleto &&
       incremento.distintasCompleto.length === 0,
