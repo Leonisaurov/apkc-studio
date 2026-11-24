@@ -345,13 +345,20 @@ export function menuDeModelo(modelo) {
   return resumen ? resumen.menu : null;
 }
 
-// La línea de comandos de `apkc preview` para el guion de la pestaña. Cada paso conserva su orden:
-// un clic es `--pulsar`, desplegar el menú es `--menu` y elegir un ítem, `--menu-item menu/N`, y un
-// hot swap es `--intercambiar clase/metodo(proto)=fichero.dex`. Se repite el guion entero en cada
-// invocación porque el comando no guarda la máquina; el dex vive en OPFS y se relee en cada pasada.
+// La línea de arranque de `apkc preview`: la apk, sin guion. Con sesión viva los pasos ya no se
+// repiten —el intérprete conserva la máquina—, así que esta forma solo se usa para nacer de cero.
+// El parámetro `guion` sigue en la firma por compatibilidad con quien la llamaba al arrancar; se
+// ignora a propósito para que ninguna orden pueda reenviar los clics anteriores por aquí.
 export function argvDePrevia(guion, apk) {
-  const argv = ["preview"];
-  for (const paso of Array.isArray(guion) ? guion : []) {
+  return ["preview", String(apk)];
+}
+
+// La forma de cada paso del guion, compartida por el arranque clásico (sin sesión) y por la orden
+// nueva. Un clic es `--pulsar`, desplegar el menú es `--menu`, elegir un ítem es `--menu-item menu/N`,
+// teclear es `--escribir id/texto` y el hot swap es `--intercambiar clase/metodo(proto)=fichero.dex`.
+function argvDePasos(pasos) {
+  const argv = [];
+  for (const paso of Array.isArray(pasos) ? pasos : []) {
     const tipo = paso && paso.tipo;
     if (tipo === "menu") argv.push("--menu");
     else if (tipo === "menu-item") argv.push("--menu-item", String(paso.valor));
@@ -365,8 +372,21 @@ export function argvDePrevia(guion, apk) {
       argv.push("--intercambiar", String(paso.firma) + "=" + String(paso.ruta));
     } else argv.push("--pulsar", String(paso && paso.valor));
   }
-  argv.push(String(apk));
   return argv;
+}
+
+// Una sola orden para una sesión ya viva. La apk NO viaja: el worker guardó la ruta del `preview`
+// que abrió la sesión y la usa al crear la instancia. `idSesion` es el contrato con el bucle Go:
+// la misma máquina para todos los pasos, sin repetir los anteriores.
+export function argvDeOrden(paso, idSesion) {
+  return ["preview", "--sesion", String(idSesion), ...argvDePasos([paso])];
+}
+
+// Solo para el arranque clásico sin sesión (y para las pruebas de fixture con un binario anterior
+// que no entiende `--sesion`). Nadie lo llama cuando ya hay un modelo vivo: ahí se reenviarían los
+// pasos anteriores y el timeline volvería a contarlos.
+export function argvDeGuion(pasos, apk) {
+  return ["preview", ...argvDePasos(pasos), String(apk)];
 }
 
 // El modelo de `apkc preview` trae su pantalla declarada (360×640 dp si no dice otra). El
@@ -445,6 +465,26 @@ export function oyentesDeModelo(modelo) {
       texto: nodo ? textoDeNodo(nodo) : "",
     };
   });
+}
+
+// Anclaje del hot swap sobre la ejecución, no sobre el fuente. `ejecucion.oyentes` trae cada vista
+// con su `oyenteRegistrado.oyente.clase`: esa clase es la que la máquina tiene realmente en memoria
+// y NO cambia cuando `javac` renumera las anónimas al borrar una intermedia. Se busca por `idRef`
+// (o por id), que es lo que el panel envía a `--pulsar`. Devuelve "" si el modelo no publica clase:
+// en ese caso la firma derivada del fuente es solo un recurso de la interfaz, no una prueba.
+export function claseOyenteDe(modelo, idRef) {
+  const ejecucion = modelo && typeof modelo === "object" ? modelo.ejecucion : null;
+  const buscado = String(idRef == null ? "" : idRef);
+  if (!ejecucion || !buscado || !Array.isArray(ejecucion.oyentes)) return "";
+  const oyente = ejecucion.oyentes.find((o) => o && (o.idRef === buscado || o.id === buscado));
+  if (!oyente) return "";
+  const lugares = [oyente.oyenteRegistrado, oyente.oyente, oyente];
+  for (const lugar of lugares) {
+    if (!lugar || typeof lugar !== "object") continue;
+    const clase = lugar.clase || (lugar.oyente && lugar.oyente.clase);
+    if (typeof clase === "string" && clase) return clase;
+  }
+  return "";
 }
 
 // La vista bajo un punto del canvas, en coordenadas lógicas del panel (las mismas que usa el
@@ -708,6 +748,10 @@ export function motivoFirmaInvalida(firma) {
   return "";
 }
 
+// Cada panel tiene su propia sesión viva. El contador solo distingue panels dentro de una pestaña;
+// lo que importa es que un build o una apk nueva estrene id (lo hace `reiniciarGuion`).
+let contadorSesiones = 0;
+
 // textoDeIntercambio es la línea del registro para un hot swap ya aplicado. Lleva los cuatro datos
 // que publica `ejecucion.intercambios` —clase, método, proto y si el método ya existía— porque son
 // los que distinguen «reemplacé el cuerpo» de «añadí un método».
@@ -763,6 +807,14 @@ export function crearPreviaPanel({ hospedador, proyecto, estadoPestana, editor, 
   // guarda la máquina; conservar el orden es lo que hace que un clic posterior al menú vea el mismo
   // estado que en el aparato.
   let guion = [];
+  // La sesión viva del intérprete. El id sale de un contador del panel, se entrega al worker en
+  // `argvDeOrden` y se renueva cuando cambia el apk o el build (`reiniciarGuion`): dos ejecuciones
+  // distintas no deben compartir máquina. Es un identificador local de la pestaña, no un secreto.
+  let idSesion = "previa-" + (++contadorSesiones);
+  // Instancias de WebAssembly que el worker ha creado. Lo publica el propio worker en cada
+  // `terminado` y el panel lo guarda para que la prueba pueda comprobar que un swap NO crea otra.
+  let instanciasWasm = 0;
+  let instanciasSesion = 0;
   // Lo tecleado en los EditText es estado de la EJECUCIÓN, no del documento: nunca se escribe en el
   // XML. Se guarda por idRef y viaja en el guion como `--escribir id/texto`, en el orden del tecleo.
   const textosEscritos = new Map();
@@ -1719,13 +1771,29 @@ export function crearPreviaPanel({ hospedador, proyecto, estadoPestana, editor, 
     }
   }
 
-  // La línea de comandos del guion completo, en el orden en que se pidió. `apkc preview` no guarda
-  // la máquina entre invocaciones: repetir el guion entero es lo que hace reproducible la pantalla.
-  function argvDelGuion() {
-    return argvDePrevia(guion, apkActual);
+  // Una sesión viva es la que ya publicó un modelo: el intérprete conserva su máquina y por eso
+  // basta con mandar el paso nuevo. Sin modelo todavía no hay máquina que conservar y se reproduce
+  // el guion completo, que es el único camino que existe sin `--sesion`.
+  const sesionViva = () => !!resumenEjecucion(modeloActual());
+
+  // El contador lo publica el worker en cada `terminado`. Con una sola instancia viva el swap no
+  // lo incrementa; lo guardamos aquí para que `estado()` sirva a la comprobación de chromium.
+  function recordarInstancias(r) {
+    if (r && Number.isFinite(Number(r.instanciasWasm))) instanciasWasm = Number(r.instanciasWasm);
+    if (r && Number.isFinite(Number(r.instanciasSesion))) instanciasSesion = Number(r.instanciasSesion);
   }
 
-  // Corre el guion entero y pinta el modelo que devuelva. Si la orden no se pudo entregar, deshace
+  function argvDelGuion() {
+    if (sesionViva()) {
+      // todos los llamadores añaden UN paso antes de llegar aquí; reenviar `guion` entero hacía
+      // que cuatro clics se ejecutaran ocho veces y que el swap repitiera los cuatro anteriores
+      const paso = guion[guion.length - 1];
+      return paso ? argvDeOrden(paso, idSesion) : argvDePrevia(guion, apkActual);
+    }
+    return argvDeGuion(guion, apkActual);
+  }
+
+  // Corre la orden y pinta el modelo que devuelva. Si la orden no se pudo entregar, deshace
   // el último paso para que la lista siga siendo válida y escribe el motivo en la línea del
   // emulador. Es el mismo camino para un clic, para abrir el menú, para elegir un ítem y para el
   // hot swap, que además necesita dejar su rechazo en el registro (`alFallar`).
@@ -1735,6 +1803,7 @@ export function crearPreviaPanel({ hospedador, proyecto, estadoPestana, editor, 
     try {
       await hospedador.cwd(carpeta);
       const r = await hospedador.ejecutar(argvDelGuion());
+      recordarInstancias(r);
       const modelo = modeloDeSalida(r && r.consola);
       if (!modelo) {
         guion.length = desde;
@@ -1834,6 +1903,18 @@ export function crearPreviaPanel({ hospedador, proyecto, estadoPestana, editor, 
         }
       } catch (e) {
         return rechazar("no se pudo guardar " + nombre + " en la zona de prueba: " +
+          (e && e.message ? e.message : e));
+      }
+      // El worker tiene un espejo en memoria del árbol de OPFS. `recargar` solo refresca esta ruta
+      // (y cierra los handles de su subárbol en fs-fragmento.js:579), así que se hace ANTES de la
+      // orden y no a mitad: la sesión viva no debe encontrar un handle cerrado leyendo el dex.
+      try {
+        const refrescado = await hospedador.refrescar(ruta);
+        if (refrescado && refrescado.tipo === "error") {
+          return rechazar("no se pudo refrescar " + nombre + " en la zona de prueba: " + refrescado.error);
+        }
+      } catch (e) {
+        return rechazar("no se pudo refrescar " + nombre + " en la zona de prueba: " +
           (e && e.message ? e.message : e));
       }
       const antes = guion.length;
@@ -2190,6 +2271,9 @@ export function crearPreviaPanel({ hospedador, proyecto, estadoPestana, editor, 
     cerrarCampoTexto(false);
     pulsos = [];
     guion = [];
+    // otra apk o otro build: se cierra la máquina anterior y la nueva estrena sesión. El worker
+    // libera su instancia al ver el id nuevo; cerrar aquí evita mezclar estados de dos builds.
+    idSesion = "previa-" + (++contadorSesiones);
     modeloDeClics = null;
     menuDesplegado = false;
     claveMenu = "";
@@ -2336,6 +2420,7 @@ export function crearPreviaPanel({ hospedador, proyecto, estadoPestana, editor, 
     try {
       await hospedador.cwd(carpeta);
       const r = await hospedador.ejecutar(["preview", ruta]);
+      recordarInstancias(r);
       const modelo = modeloDeSalida(r && r.consola);
       if (!modelo) {
         const lineas = String((r && (r.error || r.consola)) || "").trim().split("\n").filter(Boolean);
@@ -2405,6 +2490,7 @@ export function crearPreviaPanel({ hospedador, proyecto, estadoPestana, editor, 
     try {
       await hospedador.cwd(carpeta);
       const r = await hospedador.ejecutar(["preview", RUTA_APK_SOLTADA]);
+      recordarInstancias(r);
       const modelo = modeloDeSalida(r && r.consola);
       if (!modelo) {
         const lineas = String((r && (r.error || r.consola)) || "").trim().split("\n").filter(Boolean);
@@ -5062,12 +5148,18 @@ export function crearPreviaPanel({ hospedador, proyecto, estadoPestana, editor, 
     // el intérprete solo intercambia sobre una sesión viva; la pestaña lo usa para decidir si
     // inicia el emulador o aplica el dex directamente
     tieneSesion: () => !!resumenEjecucion(modeloActual()),
+    // el id con el que el panel habla a la sesión viva del worker; cambia con cada build/apk
+    idSesion: () => idSesion,
+    // falsación del contador: cerrar la sesión obliga a crear otra instancia en la próxima orden
+    forzarNuevaInstancia: () => (typeof hospedador.forzarNuevaInstancia === "function"
+      ? hospedador.forzarNuevaInstancia() : Promise.resolve(false)),
     // lo que el modelo publicó en `ejecucion.intercambios`, no lo que el panel pidió
     intercambios: () => (resumenEjecucion(modeloActual()) || { intercambios: [] }).intercambios,
     estado: () => ({
       ancho: caja.ancho, alto: caja.alto, arriba: caja.arriba,
       lado: cajaLado.ancho, ladoAlto: cajaLado.alto,
       visible, modo, ruta: rutaViva, pulsos: [...pulsos], editando,
+      sesion: idSesion, instanciasWasm, instanciasSesion,
       // el paso de escritura lleva su idRef para que la prueba distinga dos EditText aunque el
       // texto sea el mismo: `escribir:0x…/texto`, el mismo formato de `--escribir` del intérprete
       guion: guion.map((p) => p.tipo === "escribir"

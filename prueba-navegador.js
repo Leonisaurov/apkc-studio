@@ -785,15 +785,17 @@ const conductor = `(async () => {
           }
           // el segundo build trae el mismo OnClickListener con el incremento cambiado; la firma
           // derivada debe apuntar a la anónima para que el quinto clic ejecute el cuerpo nuevo.
-          // Se guarda el apk base (+1): el hot swap de verdad cambia el método de una app que ya
-          // estaba corriendo, no recompila la pantalla con el cuerpo nuevo desde cero.
-          const apkBaseClics = await hospedador.bytes("/proyecto/build/app.apk");
+          // NO se restituye el apk base (+1): el dex del segundo build entra en la sesión viva y
+          // el método cambia en la máquina que ya tenía cuatro clics, sin reproducción del guion.
           await escribirJavaSwap(fuenteContadorSwap(5));
           r.swapAuto.llamadas = [];
           campoAuto.value = "";
           casillaAuto.checked = true;
           document.getElementById("compilar-debug").click();
-          const antesAuto = PREVIA_PANEL.estado().guion.length;
+          const estadoAntesAuto = PREVIA_PANEL.estado();
+          const antesAuto = estadoAntesAuto.guion.length;
+          const instanciasAntesSwap = estadoAntesAuto.instanciasSesion;
+          const sesionAntesSwap = estadoAntesAuto.sesion;
           let filasAuto = [];
           for (let i = 0; i < 200; i++) {
             await new Promise((ok) => setTimeout(ok, 500));
@@ -802,17 +804,15 @@ const conductor = `(async () => {
             const codigo = (document.getElementById("ultimo-codigo").textContent || "").trim();
             if (i > 20 && codigo && /falló|error/i.test(codigo)) break;
           }
-          // el dex del build +5 ya está copiado en /previa-soltada/. Se devuelve el apk base +1 y
-          // se repite el paso de intercambio para que el guion se reevalúe con la app que estaba
-          // viva: los cuatro clics siguen dando 4 y el cuerpo +5 solo entra después de ellos.
+          // El dex del build +5 entra como UNA orden nueva en la sesión viva: los cuatro clics
+          // siguen dando 4 sin reejecutarse y el cuerpo +5 solo actúa a partir del quinto.
           let dexCincoSwap = null;
           try {
             const entradasCinco = await leerZip(await hospedador.bytes("/proyecto/build/app.apk"));
             const entradaDex = entradasCinco.find((e) => !e.dir && e.ruta === "classes.dex");
             dexCincoSwap = entradaDex ? entradaDex.datos : null;
           } catch (e) { dexCincoSwap = null; }
-          if (apkBaseClics && dexCincoSwap) {
-            await hospedador.escribir("/proyecto/build/app.apk", apkBaseClics);
+          if (dexCincoSwap) {
             await PREVIA_PANEL.intercambiarDelBuild(dexCincoSwap, campoAuto.value);
           }
           const despuesSwap = await esperarCapturaSwap("Pulsos: 4");
@@ -829,6 +829,8 @@ const conductor = `(async () => {
             derivada: campoAuto.value,
             casilla: casillaAuto.checked,
             antes: antesAuto,
+            instancias: { antes: instanciasAntesSwap, despues: estadoAuto.instanciasSesion },
+            sesion: { antes: sesionAntesSwap, despues: estadoAuto.sesion },
             guion: estadoAuto.guion,
             rutas: estadoAuto.intercambios,
             cambios: PREVIA_PANEL.intercambios(),
@@ -1410,20 +1412,46 @@ const pixelCercano = (pix, esperado) => Array.isArray(pix) && pix.length === 3 &
         comprueba(sc.autoCasilla && sc.autoFirma && sc.autoJunto,
           "el modo «compilar e intercambiar» no está junto a los botones de Compilar y a " +
           "#inc-compilar: " + JSON.stringify(sc));
-        // `paqueteSwap` vive dentro del conductor: se recupera de la firma de la clase exterior
-        // que ese mismo conductor publicó en r.swap.firma. El Contador pone el onClick en la
-        // anónima $1, así que la firma correcta no es la de MainActivity.
-        const paqueteSwapNode = String(sw.firma || "").replace(/^L/, "")
-          .replace(/\/MainActivity;$/, "");
-        const firmaDerivadaSwap = "L" + paqueteSwapNode.replace(/\./g, "/") +
-          "/MainActivity$1;/onClick(Landroid/view/View;)V";
-        comprueba(sa.derivada === firmaDerivadaSwap,
-          "la firma automática eligió la clase exterior en vez del OnClickListener anónimo: " +
-          String(sa.derivada) + " ≠ " + firmaDerivadaSwap);
+        // El anclaje NO es el ordinal $N del fuente: javac renumera las anónimas cuando se borra
+        // una intermedia. Se toma la clase real del oyente que la ejecución registró para
+        // id/pulsar (`ejecucion.oyentes` → `oyenteRegistrado.oyente.clase`).
+        const moduloPreviaSwap = await import("/previa-panel.js");
+        const modeloFirmaSwap = (await import("/vista-previa.js")).modeloActual();
+        const claseOyenteSwap = moduloPreviaSwap.claseOyenteDe(modeloFirmaSwap,
+          sa.idRef || "id/pulsar");
+        let firmaDerivadaSwap = "";
+        if (claseOyenteSwap) {
+          const conLOyente = claseOyenteSwap.startsWith("L") ? claseOyenteSwap : "L" + claseOyenteSwap;
+          firmaDerivadaSwap = conLOyente.replace(/;$/, "") + ";/onClick(Landroid/view/View;)V";
+          comprueba(sa.derivada === firmaDerivadaSwap,
+            "la firma derivada no usa la clase real del oyente anclado por idRef: " +
+            String(sa.derivada) + " ≠ " + firmaDerivadaSwap);
+        } else {
+          // LÍMITE DECLARADO: el binario aún no publica la clase en `ejecucion.oyentes`, así que la
+          // interfaz cae a la derivación desde fuente ($1). Esta rama NO falsa el anclaje; la suite
+          // Go del frente A lo hace con TestDeltaBorraElOyenteIntermedioSinRenumerar.
+          const paqueteSwapNode = String(sw.firma || "").replace(/^L/, "")
+            .replace(/\/MainActivity;$/, "");
+          firmaDerivadaSwap = "L" + paqueteSwapNode.replace(/\./g, "/") +
+            "/MainActivity$1;/onClick(Landroid/view/View;)V";
+          comprueba(sa.derivada === firmaDerivadaSwap,
+            "la firma automática eligió la clase exterior en vez del OnClickListener anónimo " +
+            "(límite: sin clase en la ejecución): " + String(sa.derivada) + " ≠ " + firmaDerivadaSwap);
+        }
         const timelineEsperado = ["Pulsos: 0", "Pulsos: 1", "Pulsos: 2", "Pulsos: 3",
           "Pulsos: 4", "Pulsos: 4", "Pulsos: 9"];
         comprueba(JSON.stringify(sa.timeline) === JSON.stringify(timelineEsperado),
           "el contador del hot swap no va 0,1,2,3,4,4,9: " + JSON.stringify(sa.timeline));
+        // Una sola instancia wasm viva antes y después del swap: el dex nuevo entra en la máquina
+        // existente, no en otra. Para falsarlo, el disparador concreto es
+        // `PREVIA_PANEL.forzarNuevaInstancia()` antes de la orden: cierra la sesión y la siguiente
+        // orden eleva `instanciasSesion` a 2, que es el caso que esta aserción debe rechazar.
+        comprueba(sa.instancias && sa.instancias.antes === 1 && sa.instancias.despues === 1,
+          "el hot swap creó otra instancia wasm en vez de reutilizar la viva: " +
+          JSON.stringify(sa.instancias));
+        comprueba(sa.sesion && sa.sesion.antes === sa.sesion.despues,
+          "el intercambio cambió el id de sesión y por eso se repitió el guion: " +
+          JSON.stringify(sa.sesion));
         comprueba(Array.isArray(sa.llamadas) && sa.llamadas.some((argv) =>
           Array.isArray(argv) && argv.some((p, i) => String(p) === "--intercambiar" &&
             String(argv[i + 1] || "").indexOf(sa.derivada + "=") === 0)),

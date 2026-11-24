@@ -1425,17 +1425,70 @@ const rectEscrito = vistaPrevia.rectsEscalados(escritoEnModelo, 100, 100)
 if (!rectEscrito || rectEscrito.texto !== "Ana") {
   mal("el texto tecleado no llega al rect que pinta el canvas");
 }
-const argvTexto = previaPanel.argvDePrevia([
+const pasosTexto = [
   { tipo: "pulsar", valor: "id/enviar" },
   { tipo: "escribir", idRef: "0x7f010001", valor: "Ana" },
   { tipo: "escribir", idRef: "0x7f010002", valor: "Peña/Os" },
   { tipo: "escribir", idRef: "0x7f010003", valor: "" },
   { tipo: "menu" },
-], "build/app.apk");
-if (argvTexto.join(" ") !==
-    "preview --pulsar id/enviar --escribir 0x7f010001/Ana --escribir 0x7f010002/Peña/Os " +
-    "--escribir 0x7f010003/ --menu build/app.apk") {
-  mal("argvDePrevia no entrega --escribir en orden: " + JSON.stringify(argvTexto));
+];
+if (JSON.stringify(previaPanel.argvDePrevia(pasosTexto, "build/app.apk")) !==
+    JSON.stringify(["preview", "build/app.apk"])) {
+  mal("argvDePrevia no es solo el arranque: " + JSON.stringify(previaPanel.argvDePrevia(pasosTexto, "build/app.apk")));
+}
+const esperadosTexto = [
+  ["preview", "--sesion", "s1", "--pulsar", "id/enviar"],
+  ["preview", "--sesion", "s1", "--escribir", "0x7f010001/Ana"],
+  ["preview", "--sesion", "s1", "--escribir", "0x7f010002/Peña/Os"],
+  ["preview", "--sesion", "s1", "--escribir", "0x7f010003/"],
+  ["preview", "--sesion", "s1", "--menu"],
+];
+pasosTexto.forEach((paso, i) => {
+  const argv = previaPanel.argvDeOrden(paso, "s1");
+  if (JSON.stringify(argv) !== JSON.stringify(esperadosTexto[i])) {
+    mal("argvDeOrden no entrega solo la orden nueva " + i + ": " + JSON.stringify(argv));
+  }
+});
+if (JSON.stringify(previaPanel.argvDeOrden({ tipo: "pulsar", valor: "id/pulsar" }, "s1")) !==
+    JSON.stringify(["preview", "--sesion", "s1", "--pulsar", "id/pulsar"])) {
+  mal("argvDeOrden no respeta el contrato preview --sesion <id> --pulsar");
+}
+if (JSON.stringify(previaPanel.argvDeGuion(pasosTexto, "build/app.apk").slice(0, 3)) !==
+    JSON.stringify(["preview", "--pulsar", "id/enviar"])) {
+  mal("argvDeGuion dejó de conservar el guion clásico para el arranque sin sesión");
+}
+// El hot swap no puede levantar otra máquina: el contador se sube solo donde se instancia y la
+// orden viva se entrega por la cola del worker, no reenviando el guion desde la página.
+const fuenteHospedador = fs.readFileSync(path.join(__dirname, "hospedador.js"), "utf8");
+if ((fuenteHospedador.match(/instanciasWasm \+= 1/g) || []).length !== 2) {
+  mal("el contador de instancias wasm no se incrementa solo al crear la instancia");
+}
+if (!/if \(idSesion\) return usarSesion/.test(fuenteHospedador) ||
+    !/siguiente: \(\) =>/.test(fuenteHospedador) ||
+    !/consola: sistema\.consola\.volcar\(\),\s*instanciasWasm/.test(fuenteHospedador)) {
+  mal("el worker no entrega el modelo de la orden viva sin que go.run retorne");
+}
+if (!/postMessage\(\{ tipo: "wisp-nucleo", activo, contrato: CONTRATO_WISP \}\)/.test(fuenteHospedador) ||
+    !/forzar-nueva-instancia/.test(fuenteHospedador) ||
+    !/go\._resolveExitPromise\(\)/.test(fuenteHospedador)) {
+  mal("el worker no cierra la sesión en un solo sitio ni ofrece el disparador del contador");
+}
+if (!/export function reiniciarContadorDeSesion/.test(fuenteHospedador) ||
+    !/cerrarSesion\(\{ forzar: true \}\)/.test(fuenteHospedador) ||
+    !/cerradaAProposito/.test(fuenteHospedador)) {
+  mal("la falsación no conserva el contador de la sesión: daría 1 en vez de 2");
+}
+const fuentePestanaSesion = fs.readFileSync(path.join(__dirname, "pestana.js"), "utf8");
+if (!/e\.data\.tipo === "apkc:fin-orden"/.test(fuentePestanaSesion) ||
+    !/postMessage\(\{ tipo: "fin-orden"/.test(fuentePestanaSesion)) {
+  mal("la página no reenvía al worker el fin de orden publicado por el bucle Go");
+}
+if (!/claseOyenteDe\(modelo, idRef\)/.test(fuentePestanaSesion) ||
+    !/function actualizarFirmaAutomatica\(dex = null, modeloDado = null\)/.test(fuentePestanaSesion)) {
+  mal("la firma que viaja no usa el anclaje por idRef del modelo");
+}
+if (!/sesionViva\(\)/.test(fuentePreviaEstado) || !/argvDeOrden\(paso, idSesion\)/.test(fuentePreviaEstado)) {
+  mal("el panel no elige la orden nueva cuando hay sesión viva");
 }
 if (!/createElement\("input"\)/.test(fuentePreviaEstado) || !/--escribir/.test(fuentePreviaEstado)) {
   mal("previa-panel.js no monta un campo real ni entrega --escribir al intérprete");
@@ -2744,16 +2797,50 @@ const actContadorSwap = [
 ].join("\n");
 const rutaContadorSwap = "/proyecto/src/com/hola/contador/MainActivity.java";
 const firmaListenerSwap = "Lcom/hola/contador/MainActivity$1;/onClick(Landroid/view/View;)V";
+// Esta forma `$1` es solo la derivación desde el fuente, para rellenar el campo sin modelo.
 if (pestanaMod.firmaPorDefectoDe(actContadorSwap, rutaContadorSwap) !== firmaListenerSwap) {
   mal("la firma automática eligió la clase exterior en vez del OnClickListener anónimo: " +
     pestanaMod.firmaPorDefectoDe(actContadorSwap, rutaContadorSwap));
 }
-// javac numera también las anónimas que no son listener: con un Runnable delante es $2.
+// LÍMITE DECLARADO: el ordinal `$N` que `firmaPorDefectoDe` saca del fuente NO es un anclaje. Si se
+// borra una anónima intermedia, `javac` renumera las demás y el dex nuevo puede no traer la clase con
+// ese nombre. El anclaje verdadero lo publica la ejecución: `ejecucion.oyentes` lleva
+// `oyenteRegistrado.oyente.clase` por idRef (previewinterprete.go:616-622). La falsación con una
+// anónima intermedia borrada es `TestDeltaBorraElOyenteIntermedioSinRenumerar`, en la suite Go del
+// frente A; esta suite node solo comprueba que la interfaz lee la clase real cuando está disponible.
+const modeloAnclado = {
+  ejecucion: {
+    oyentes: [
+      { id: "id/runnable", idRef: "0x7f010001",
+        oyenteRegistrado: { oyente: { clase: "Lcom/hola/contador/MainActivity$1;" } } },
+      { id: "id/pulsar", idRef: "0x7f010000",
+        oyenteRegistrado: { oyente: { clase: "Lcom/hola/contador/MainActivity$2;" } } },
+    ],
+  },
+};
+if (previaPanel.claseOyenteDe(modeloAnclado, "id/pulsar") !== "Lcom/hola/contador/MainActivity$2;") {
+  mal("el anclaje por idRef no lee la clase real del oyente registrado");
+}
+if (previaPanel.claseOyenteDe(modeloAnclado, "id/runnable") !== "Lcom/hola/contador/MainActivity$1;") {
+  mal("el anclaje por idRef confunde dos anónimas del mismo modelo");
+}
+if (previaPanel.claseOyenteDe(modeloAnclado, "0x7f010000") !== "Lcom/hola/contador/MainActivity$2;") {
+  mal("el anclaje no acepta el idRef que el panel envía a --pulsar");
+}
+if (previaPanel.claseOyenteDe(modeloAnclado, "id/ausente") !== "") {
+  mal("el anclaje inventa una clase para un idRef que el modelo no registró");
+}
+if (previaPanel.claseOyenteDe(
+      { ejecucion: { oyentes: [{ id: "id/pulsar", idRef: "0x7f010000" }] } }, "id/pulsar") !== "") {
+  mal("el anclaje finge una clase cuando el modelo no publica oyenteRegistrado");
+}
+// La derivación desde fuente sigue siendo un recurso de la interfaz cuando no hay modelo: cuenta
+// las anónimas anteriores al listener, pero no se presenta como contrato del intercambio.
 const conRunnableSwap = actContadorSwap.replace("        total =",
   "        new Runnable() { public void run() {} }.run();\n        total =");
 if (pestanaMod.firmaPorDefectoDe(conRunnableSwap, rutaContadorSwap) !==
     firmaListenerSwap.replace("$1;", "$2;")) {
-  mal("la firma automática no cuenta las anónimas anteriores al listener");
+  mal("la derivación desde fuente no cuenta las anónimas anteriores al listener");
 }
 // Las plantillas sin anónima declaran la interfaz en la propia actividad.
 const oyenteDirectoSwap = "package com.hola.lienzo;\npublic class MainActivity " +
@@ -2785,7 +2872,22 @@ if (pestanaMod.firmaPorDefectoDe(oyenteDirectoSwap, "/proyecto/src/MainActivity.
         firmaListenerSwap) {
       mal("la firma automática no conserva el método cuando el dex sí trae la anónima");
     }
+    // El anclaje por idRef GANA en producción: aunque el fuente siga diciendo $1, el modelo
+    // publica la clase real $2 y es esa la que tiene que viajar en `--intercambiar`.
+    campoFirma.value = "";
+    const modeloAncladoProduccion = {
+      ejecucion: {
+        pulsaciones: ["id/pulsar"],
+        oyentes: [{ id: "id/pulsar", idRef: "0x7f010000",
+          oyenteRegistrado: { oyente: { clase: "Lcom/hola/contador/MainActivity$2;" } } }],
+      },
+    };
+    pestanaMod.actualizarFirmaAutomatica(null, modeloAncladoProduccion);
+    if (campoFirma.value !== "Lcom/hola/contador/MainActivity$2;/onClick(Landroid/view/View;)V") {
+      mal("la firma que viaja no usa la clase anclada por idRef: " + campoFirma.value);
+    }
     // una firma escrita a mano gana: ni el cambio de pestaña ni el dex la pisan
+    campoFirma.value = "Lcom/manual/Otra;/metodo()V";
     pestanaMod.actualizarFirmaAutomatica(dexConAnonima);
     if (pestanaMod.firmaDeHotswap() !== campoFirma.value ||
         campoFirma.value !== "Lcom/manual/Otra;/metodo()V") {
@@ -5622,11 +5724,18 @@ public final class R {
         !resumenMenu.consola.some((l) => l.origen === "Toast" && l.texto === "Menu pulsado")) {
       mal(`menú (estructural): el Toast del ítem no llega al resumen: ${JSON.stringify(resumenMenu && resumenMenu.consola)}`);
     }
-    const argvMenu = previaPanel.argvDePrevia([
-      { tipo: "menu" }, { tipo: "menu-item", valor: "menu/0" },
-    ], "build/app.apk");
-    if (argvMenu.join(" ") !== "preview --menu --menu-item menu/0 build/app.apk") {
-      mal("menú (estructural): argvDePrevia no entrega --menu y --menu-item: " + JSON.stringify(argvMenu));
+    const argvAbrir = previaPanel.argvDeOrden({ tipo: "menu" }, "s1");
+    const argvItem = previaPanel.argvDeOrden({ tipo: "menu-item", valor: "menu/0" }, "s1");
+    if (JSON.stringify(argvAbrir) !== JSON.stringify(["preview", "--sesion", "s1", "--menu"]) ||
+        JSON.stringify(argvItem) !==
+          JSON.stringify(["preview", "--sesion", "s1", "--menu-item", "menu/0"])) {
+      mal("menú (estructural): argvDeOrden no entrega --menu y --menu-item solos: " +
+        JSON.stringify([argvAbrir, argvItem]));
+    }
+    if (JSON.stringify(previaPanel.argvDeGuion(
+        [{ tipo: "menu" }, { tipo: "menu-item", valor: "menu/0" }], "build/app.apk")) !==
+        JSON.stringify(["preview", "--menu", "--menu-item", "menu/0", "build/app.apk"])) {
+      mal("menú (estructural): el arranque clásico perdió el guion completo");
     }
   }
 
@@ -5686,11 +5795,17 @@ public final class R {
     { tipo: "escribir", idRef: "id/nueva", valor: "Comprar leche" },
     { tipo: "pulsar", valor: "id/agregar" },
   ];
-  const argvTareas = previaPanel.argvDePrevia(guionTareas, "build/app.apk");
-  if (argvTareas.join(" ") !==
-      "preview --escribir id/nueva/Comprar leche --pulsar id/agregar build/app.apk") {
-    mal("tareas (estructural): argvDePrevia no entrega --escribir y --pulsar: " +
+  const argvTareas = guionTareas.map((paso) => previaPanel.argvDeOrden(paso, "s1"));
+  if (JSON.stringify(argvTareas) !== JSON.stringify([
+      ["preview", "--sesion", "s1", "--escribir", "id/nueva/Comprar leche"],
+      ["preview", "--sesion", "s1", "--pulsar", "id/agregar"]])) {
+    mal("tareas (estructural): argvDeOrden no entrega --escribir y --pulsar solos: " +
       JSON.stringify(argvTareas));
+  }
+  if (JSON.stringify(previaPanel.argvDeGuion(guionTareas, "build/app.apk")) !==
+      JSON.stringify(["preview", "--escribir", "id/nueva/Comprar leche",
+        "--pulsar", "id/agregar", "build/app.apk"])) {
+    mal("tareas (estructural): el arranque clásico perdió los dos pasos");
   }
   const compruebaTareas = (salida, etiqueta) => {
     const modelo = vistaPrevia.modeloDeSalida(salida);
@@ -5731,7 +5846,8 @@ public final class R {
   // (b) de fixture: opcional, porque prueba.js corre sin binario. Con APKC y APK_TAREAS se repite
   // la misma comprobación contra una apk real generada por buildProject desde esta rama.
   if (process.env.APKC && process.env.APK_TAREAS) {
-    const argvTareasReales = previaPanel.argvDePrevia(guionTareas, process.env.APK_TAREAS);
+    // El binario de esta fixture es anterior al contrato `--sesion`: se usa el guion clásico.
+    const argvTareasReales = previaPanel.argvDeGuion(guionTareas, process.env.APK_TAREAS);
     const salidaTareasReal = execFileSync(process.env.APKC, argvTareasReales,
       { encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] });
     compruebaTareas(salidaTareasReal, "fixture");

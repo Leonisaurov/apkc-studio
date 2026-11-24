@@ -27,6 +27,18 @@ const CONTRATO_WISP = "apkc-wisp/1";
 const MARCA_WISP_GET = "APKC_WISP_GET:";
 let nucleoWispActivo = false;
 let silenciarSalida = false;
+// Una sola instancia de Go viva para la sesión del emulador. El contador SOLO se sube donde se
+// crea la instancia (WebAssembly.instantiate): es la prueba de que un swap no levanta otra máquina.
+let instanciasWasm = 0;
+// Instancias creadas para el id de sesión actual. Se pone a cero solo cuando cambia el build/apk;
+// cerrar a propósito (falsación) conserva la cuenta para que la segunda instancia se vea como 2.
+let instanciasSesion = 0;
+let cerradaAProposito = null; // id de la sesión cerrada por la falsación, no por cambio de build
+let sesion = null;            // { id, go, corriendo, codigo }
+let ordenes = [];             // órdenes nuevas para el bucle Go, una por invocación
+const finOrdenes = new Map(); // id de orden → { resuelve }; lo llena `ejecutar`, lo vacía `fin-orden`
+let siguienteOrden = 0;
+let ultimoPreview = null;     // argv del `preview` que abrió la sesión: de aquí sale la apk
 let ocupado = false;
 let cola = [];
 let entregarRaiz = null;
@@ -140,23 +152,131 @@ function descolocar() {
     .then(() => { ocupado = false; descolocar(); });
 }
 
-async function ejecutar(argv, env) {
-  const go = new Go();
-  go.argv = ["apkc", ...argv];
-  go.env = { HOME: "/home/usuario", ANDROID_HOME: "/android", JAVA_HOME: "/jvm", ...(env || {}) };
-  let codigo = null;
-  // run() espera _exitPromise y quien lo resuelve es la implementación POR DEFECTO de this.exit:
-  // sustituir go.exit sin resolverla deja la promesa sin terminar (el mismo error que en el shim)
-  go.exit = (c) => {
-    codigo = c;
-    // descartar los temporizadores pendientes, como en el shim: reanidar un programa que ya
-    // salio lanza "Go program has already exited" dentro del worker
-    if (go._scheduledTimeouts) {
-      for (const id of go._scheduledTimeouts.values()) clearTimeout(id);
-      go._scheduledTimeouts.clear();
+// --- la sesión viva del emulador --------------------------------------------------------------
+// Contrato con el bucle Go de `apkc preview --sesion <apk>`:
+//   · recibe la apk y el id en `go.argv` al crear la instancia (una sola vez);
+//   · pregunta por trabajo con `js.Global().Get("apkcSesion").Call("siguiente")`, que devuelve un
+//     JSON `{id, argv}` con la orden NUEVA, o "" si no hay ninguna;
+//   · al terminar esa orden publica, desde este mismo worker,
+//     `js.Global().Call("postMessage", map[string]any{"tipo":"apkc:fin-orden","id":id,"codigo":code})`.
+// Un `postMessage` del worker llega a la página, no al worker: `pestana.js` lo reenvía aquí como
+// `{tipo:"fin-orden",...}`. Así `consola.volcar()` entrega el modelo sin que `go.run` retorne.
+
+function argumentoDe(argv, bandera) {
+  if (!Array.isArray(argv)) return null;
+  const i = argv.indexOf(bandera);
+  return i >= 0 && i + 1 < argv.length ? String(argv[i + 1]) : null;
+}
+
+// El contador de la sesión se pone a cero SOLO cuando cambia el id (otro build u otra apk). Un
+// cierre a propósito del MISMO id es la falsación: debe conservar la cuenta para que la próxima
+// instancia se vea como 2. Pura para poder falsarla en node sin levantar el worker.
+export function reiniciarContadorDeSesion({ mismoId, cerradaAProposito, id } = {}) {
+  return !mismoId && cerradaAProposito !== id;
+}
+
+function limpiarTimeouts(go) {
+  if (go && go._scheduledTimeouts) {
+    for (const id of go._scheduledTimeouts.values()) clearTimeout(id);
+    go._scheduledTimeouts.clear();
+  }
+}
+
+function anunciarNucleo(activo) {
+  nucleoWispActivo = activo;
+  postMessage({ tipo: "wisp-nucleo", activo, contrato: CONTRATO_WISP });
+}
+
+function fallarOrdenes(motivo) {
+  for (const [id, pendiente] of finOrdenes) {
+    pendiente.resuelve({ ok: false, error: motivo, codigo: -1,
+      consola: sistema ? sistema.consola.volcar() : "", instanciasWasm });
+  }
+  finOrdenes.clear();
+}
+
+// Arranca la sesión si no hay una con este id, encola la orden nueva y espera su `fin-orden`.
+// El apk NO viaja en la orden: sale del `preview` anterior que guardó `ultimoPreview`.
+async function usarSesion(id, argv) {
+  const i = argv.indexOf("--sesion");
+  const orden = { id: ++siguienteOrden, argv: argv.slice(i + 2) };
+  ordenes.push(orden);
+  if (!sesion || sesion.id !== id) {
+    const mismoId = !!sesion && sesion.id === id;
+    if (sesion) await cerrarSesion();
+    if (reiniciarContadorDeSesion({ mismoId, cerradaAProposito, id })) instanciasSesion = 0;
+    cerradaAProposito = null;
+    if (!ultimoPreview || ultimoPreview[0] !== "preview") {
+      ordenes.length = 0;
+      throw new Error("la sesión necesita un preview anterior con la apk: abre una apk o compila primero");
     }
-    go._resolveExitPromise();
-  };
+    const go = new Go();
+    go.argv = ["apkc", "preview", "--sesion", id, ...ultimoPreview.slice(1)];
+    go.env = {
+      HOME: "/home/usuario", ANDROID_HOME: "/android", JAVA_HOME: "/jvm",
+      APKC_SESION_ID: id,
+    };
+    go.exit = (c) => {
+      // Resolver _exitPromise aquí mataría la máquina en la primera orden: la sesión vive hasta
+      // cerrarSesion(). Se guarda el código y se limpian temporizadores, como hace el shim.
+      if (sesion && sesion.go === go) sesion.codigo = c;
+      limpiarTimeouts(go);
+    };
+    // `bytesModule` ya está cargado: `ejecutar` lo baja antes de llamar aquí.
+    const { instance } = await WebAssembly.instantiate(bytesModule.slice(0), go.importObject);
+    instanciasWasm += 1;
+    instanciasSesion += 1;
+    globalThis.apkcSesion = {
+      id,
+      // El bucle Go pregunta por trabajo; "" significa «sigue esperando».
+      siguiente: () => (ordenes.length ? JSON.stringify(ordenes.shift()) : ""),
+    };
+    anunciarNucleo(true);
+    const viva = { id, go, corriendo: null, codigo: null };
+    sesion = viva;
+    viva.corriendo = go.run(instance).then(
+      () => {
+        if (sesion === viva) { sesion = null; fallarOrdenes("la sesión wasm terminó sin cerrarse"); }
+      },
+      (e) => {
+        if (sesion === viva) {
+          sesion = null;
+          fallarOrdenes("la sesión wasm falló: " + String((e && e.message) || e));
+        }
+      },
+    );
+  }
+  return new Promise((resuelve) => { finOrdenes.set(orden.id, { resuelve }); });
+}
+
+// Cierre explícito: es el ÚNICO sitio que resuelve `_exitPromise` de la sesión. Devuelve si había
+// una sesión viva; `forzarNuevaInstancia` se apoya en él para falsar el contador.
+async function cerrarSesion({ forzar = false } = {}) {
+  const viva = sesion;
+  if (!viva) return false;
+  // La falsación cierra la sesión sin cambiar de build: se recuerda el id para NO reiniciar el
+  // contador en `usarSesion`. Un cierre normal sí lo reinicia en la próxima orden.
+  if (forzar) cerradaAProposito = viva.id;
+  sesion = null;
+  ordenes.length = 0;
+  try { delete globalThis.apkcSesion; } catch (e) { globalThis.apkcSesion = undefined; }
+  fallarOrdenes("la sesión se cerró antes de terminar la orden");
+  limpiarTimeouts(viva.go);
+  try { viva.go._resolveExitPromise(); } catch (e) { /* ya estaba resuelta */ }
+  try { await viva.corriendo; } catch (e) { /* la sesión ya estaba rota */ }
+  anunciarNucleo(false);
+  return true;
+}
+
+async function ejecutar(argv, env, idSesion) {
+  // Un `preview` clásico (sin `--sesion`) abre o sustituye la máquina: cierra la sesión anterior y
+  // recuerda su argv para que la primera orden viva sepa qué apk tiene que interpretar.
+  if (Array.isArray(argv) && argv[0] === "preview" && !idSesion) {
+    // Solo un preview clásico sustituye la máquina. Una orden con `--sesion` DEBE conservarla:
+    // cerrar aquí convertiría cada clic en un arranque nuevo y el timeline volvería a empezar.
+    if (sesion) await cerrarSesion();
+    ultimoPreview = argv.slice();
+  }
 
   if (!bytesModule) {
     // El manifiesto fija tamaño y SHA-256. Se intenta la copia normal (healthy), después la red
@@ -248,9 +368,30 @@ async function ejecutar(argv, env) {
       postMessage({ tipo: "aviso", texto: "apkc.wasm se reconstruyó por trozos: la copia guardada estaba incompleta." });
     }
   }
-  // la instancia se crea CADA VEZ: un binario de Go en wasm no puede volver a correrse sobre la
-  // misma instancia después de salir, así que lo que se guarda son los bytes, no la instancia
+  // Con id de sesión NO se crea una instancia nueva por orden: se reutiliza la viva y solo se
+  // entrega el paso nuevo. Los bytes ya están cargados aquí arriba.
+  if (idSesion) return usarSesion(idSesion, argv);
+
+  // Sin sesión, la instancia se crea CADA VEZ: un binario de Go en wasm no puede volver a correrse
+  // sobre la misma instancia después de salir, así que lo que se guarda son los bytes.
+  const go = new Go();
+  go.argv = ["apkc", ...argv];
+  go.env = { HOME: "/home/usuario", ANDROID_HOME: "/android", JAVA_HOME: "/jvm", ...(env || {}) };
+  let codigo = null;
+  // run() espera _exitPromise y quien lo resuelve es la implementación POR DEFECTO de this.exit:
+  // sustituir go.exit sin resolverla deja la promesa sin terminar (el mismo error que en el shim)
+  go.exit = (c) => {
+    codigo = c;
+    // descartar los temporizadores pendientes, como en el shim: reanidar un programa que ya
+    // salio lanza "Go program has already exited" dentro del worker
+    if (go._scheduledTimeouts) {
+      for (const id of go._scheduledTimeouts.values()) clearTimeout(id);
+      go._scheduledTimeouts.clear();
+    }
+    go._resolveExitPromise();
+  };
   const { instance } = await WebAssembly.instantiate(bytesModule.slice(0), go.importObject);
+  instanciasWasm += 1;
   // El binario del fork registra apkcWisp en globalThis de este worker. La página no puede verlo:
   // se lo anuncia por mensaje para que instale el puente, y se lo retira cuando el wasm termina.
   // `wisp-get` es un disparo único que lee la petición de go.env: no debe anunciarse como núcleo
@@ -263,12 +404,15 @@ async function ejecutar(argv, env) {
   try {
     await go.run(instance);
   } finally {
-    if (anunciaNucleo) {
+    // un build mientras la sesión del emulador está viva no puede apagar su núcleo WISP: el
+    // js.Func de la sesión sigue vivo aunque este comando clásico ya haya terminado.
+    if (anunciaNucleo && !sesion) {
       nucleoWispActivo = false;
       postMessage({ tipo: "wisp-nucleo", activo: false, contrato: CONTRATO_WISP });
     }
   }
-  return { ok: true, codigo: codigo === null ? 1 : codigo, consola: sistema.consola.volcar() };
+  return { ok: true, codigo: codigo === null ? 1 : codigo,
+    consola: sistema.consola.volcar(), instanciasWasm };
 }
 
 self.onmessage = async (evento) => {
@@ -324,8 +468,35 @@ self.onmessage = async (evento) => {
     if (m.tipo === "arbol") {
       return void postMessage({ id: m.id, tipo: "arbol", nodos: sistema.lista(), aislada: crossOriginIsolated });
     }
+    // El bucle Go publica `apkc:fin-orden` por postMessage; la página lo reenvía aquí. NO pasa por
+    // la cola: solo despierta la promesa de la orden que ya estaba esperando su modelo.
+    if (m.tipo === "fin-orden") {
+      const clave = finOrdenes.has(m.id) ? m.id : finOrdenes.keys().next().value;
+      const pendiente = clave === undefined ? null : finOrdenes.get(clave);
+      if (pendiente) {
+        finOrdenes.delete(clave);
+        pendiente.resuelve({
+          ok: true,
+          codigo: Number.isFinite(Number(m.codigo)) ? Number(m.codigo) : 0,
+          consola: sistema.consola.volcar(),
+          instanciasWasm, instanciasSesion,
+        });
+      }
+      return void postMessage({ id: m.id, tipo: "fin-orden-recibido" });
+    }
+    if (m.tipo === "cerrar-sesion") {
+      const cerrada = await cerrarSesion();
+      return void postMessage({ id: m.id, tipo: "sesion-cerrada", cerrada, instanciasWasm, instanciasSesion });
+    }
+    if (m.tipo === "forzar-nueva-instancia") {
+      // disparador de la falsación: cerrar a propósito obliga a la próxima orden a crear otra
+      // instancia SIN reiniciar el contador, así que pasa de 1 a 2 (el caso negativo a rechazar).
+      const cerrada = await cerrarSesion({ forzar: true });
+      return void postMessage({ id: m.id, tipo: "instancia-forzada", cerrada, instanciasWasm, instanciasSesion });
+    }
     if (m.tipo === "ejecutar") {
-      const r = await enCola(() => ejecutar(m.argv, m.env));
+      const idSesion = argumentoDe(m.argv, "--sesion");
+      const r = await enCola(() => ejecutar(m.argv, m.env, idSesion));
       // el resultado de la cola puede ser {ok:false,error}: eso es terminación con fallo, no
       // un fallo del hospedador; codigo=-1 lo deja claro para quien lea la consola
       const conCodigo = r && r.ok === false ? { ...r, codigo: -1 } : r;
@@ -405,6 +576,8 @@ self.onmessage = async (evento) => {
         id: m.id, tipo: "sondeo",
         haySistema: !!sistema, tipoGo: typeof globalThis.Go, aislada: crossOriginIsolated,
         errorWasmExec, bytesWasm: bytesModule ? bytesModule.length : 0,
+        instanciasWasm, instanciasSesion,
+        sesionActiva: !!sesion, idSesion: sesion ? sesion.id : null,
         // El puente de la página se activa SOLO por el contrato anunciado por el wasm, nunca por
         // `tipoGo` ni por `bytesWasm`: esos dos solo dicen que el cargador está vivo.
         contrato: nucleo && nucleo.version ? String(nucleo.version) : null,

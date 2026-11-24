@@ -8,8 +8,8 @@ import { CONSOLA, pintarConsola, consolaHtml, textoHtml, enlazarSalidas,
   mostrarCarga, ocultarCarga, conCarga } from "./consola.js";
 import { leerZip, normalizarEntradas, zipDelArbol, paqueteDelManifiesto, nombreDeZip,
   ajustesDelManifiesto, conAjustes, inflarConTope } from "./proyecto.js";
-import { modeloDeSalida, pintarVistaPrevia, mensajeVistaPrevia } from "./vista-previa.js";
-import { crearPreviaPanel } from "./previa-panel.js";
+import { modeloDeSalida, pintarVistaPrevia, mensajeVistaPrevia, modeloActual } from "./vista-previa.js";
+import { crearPreviaPanel, claseOyenteDe } from "./previa-panel.js";
 import { crearPanelDeps } from "./deps.js";
 import { guardarUltimaApk, EVENTO_ULTIMA_APK } from "./ultima-apk.js";
 import { CONTRATO_NUCLEO } from "./wisp.js";
@@ -108,6 +108,17 @@ const hospedador = (() => {
         CONSOLA.escribir(String(e.data.texto || "") + "\n");
         return;
       }
+      // El bucle Go publica el fin de cada orden con postMessage desde el worker. Un postMessage
+      // del worker llega a la página, no al propio worker: se lo devolvemos como `fin-orden` para
+      // que `consola.volcar()` entregue el modelo sin esperar a que `go.run` retorne.
+      if (e.data && e.data.tipo === "apkc:fin-orden") {
+        try {
+          asegurar().postMessage({ tipo: "fin-orden", id: e.data.id, codigo: e.data.codigo });
+        } catch (error) {
+          falloSilencioso("apkc:fin-orden", error);
+        }
+        return;
+      }
       // El núcleo WISP corre en el wasm del worker; la página solo lo ve cuando el binario lo
       // anuncia con su contrato. Un contrato distinto no instala nada: se queda sin núcleo.
       // El `activo:false` que el worker envía al terminar cada comando NO retira el puente: el
@@ -193,6 +204,12 @@ const hospedador = (() => {
     wispEnReposo: (payload) => pedir({ tipo: "wisp-get", payload }),
     // la salida llega por trozos mientras el comando corre; `correr` la pinta sin esperar al final
     escucharSalida(fn) { alSalir = fn; },
+    // La sesión del emulador vive en el worker. Cerrarla es la única forma de resolver `_exitPromise`;
+    // el siguiente `preview` con `--sesion` crea una instancia nueva (disparador del contador = 2).
+    cerrarSesion: async () => { await bajarRaiz(); return pedir({ tipo: "cerrar-sesion" }); },
+    forzarNuevaInstancia: async () => { await bajarRaiz(); return pedir({ tipo: "forzar-nueva-instancia" }); },
+    instanciasWasm: async () => { await bajarRaiz(); const r = await pedir({ tipo: "sondeo" }); return r.instanciasWasm; },
+    instanciasSesion: async () => { await bajarRaiz(); const r = await pedir({ tipo: "sondeo" }); return r.instanciasSesion; },
     // Go wasm no tiene kill: se termina el worker entero y se recrea en el siguiente comando. El
     // fs vive en OPFS, así que lo escrito hasta aquí no se pierde; el build puede quedar a medias.
     cancelar() { return detener(); },
@@ -3125,7 +3142,7 @@ function firmaPorDefectoDe(texto, ruta = "", dex = null) {
 // El campo se rellena solo mientras siga mostrando el valor automático anterior; una firma
 // escrita a mano no se pisa al cambiar de pestaña.
 let firmaAutomaticaAnterior = "";
-function actualizarFirmaAutomatica(dex = null) {
+function actualizarFirmaAutomatica(dex = null, modeloDado = null) {
   const campo = document.getElementById("hotswap-firma");
   if (!campo) return;
   const doc = DOCUMENTOS.activa ? documentoDe(DOCUMENTOS.activa) : null;
@@ -3135,7 +3152,21 @@ function actualizarFirmaAutomatica(dex = null) {
   if (!texto && doc && DOCUMENTOS.activa === doc.ruta) {
     try { texto = EDITOR.texto(); } catch (e) { texto = ""; }
   }
-  const firma = texto ? firmaPorDefectoDe(texto, doc.ruta, dex) : "";
+  let firma = texto ? firmaPorDefectoDe(texto, doc.ruta, dex) : "";
+  // Anclaje en producción: la clase REAL que la ejecución registró para el último id pulsado gana
+  // sobre el ordinal `$N` derivado del fuente, porque javac renumera al borrar una anónima
+  // intermedia. Sin clase publicada se conserva la derivación del fuente (límite declarado).
+  if (firma) {
+    const modelo = modeloDado || (typeof modeloActual === "function" ? modeloActual() : null);
+    const ejecucion = modelo && typeof modelo === "object" ? modelo.ejecucion : null;
+    const pulsos = ejecucion && Array.isArray(ejecucion.pulsaciones) ? ejecucion.pulsaciones : [];
+    const idRef = pulsos.length ? String(pulsos[pulsos.length - 1]) : "";
+    const clase = idRef ? claseOyenteDe(modelo, idRef) : "";
+    if (clase) {
+      const conL = clase.startsWith("L") ? clase : "L" + clase;
+      firma = conL.replace(/;$/, "") + ";/onClick(Landroid/view/View;)V";
+    }
+  }
   if (!firma) return;
   const actual = campo.value.trim();
   if (actual && actual !== firmaAutomaticaAnterior) return;
