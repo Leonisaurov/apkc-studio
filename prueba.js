@@ -18,6 +18,7 @@ import * as xmlEditor from "./xml-editor.js";
 import * as vistaXml from "./vista-xml.js";
 import * as layoutEditor from "./layout-editor.js";
 import * as depsMod from "./deps.js";
+import * as coordMod from "./deps-coordenada.js";
 import * as wispMod from "./wisp.js";
 import { bufferDelManifiesto } from "./ajustes.js";
 import { crearFs } from "./fs-fragmento.js";
@@ -728,6 +729,18 @@ if (!botonesVista.includes("vista")) mal("nav.actividad no tiene el botón de la
 if (!/class="pestana-vista"[^>]*data-vista="vista"|data-vista="vista"[^>]*class="pestana-vista"/.test(html)) {
   mal("la pestaña .pestana-vista de la vista previa no está en index.html");
 }
+// Dependencias es una vista de primer nivel, con botón en las dos barras y sección hermana; no
+// una pestaña del panel inferior de Compilar.
+if (botonesVista.filter((v) => v === "deps").length !== 2) {
+  mal("la vista de dependencias no tiene sus dos botones data-vista=deps: " + botonesVista.join(","));
+}
+if (!/<section id="deps" class="vista[^"]*">/.test(html)) {
+  mal("index.html no tiene la sección de primer nivel #deps");
+}
+const fuenteVistas = fs.readFileSync(path.join(__dirname, "vistas.js"), "utf8");
+if (!/NOMBRES\s*=\s*\{[^}]*deps:\s*"Dependencias"/.test(fuenteVistas)) {
+  mal("vistas.js no registra el nombre «Dependencias» para la vista deps");
+}
 for (const m of html.matchAll(/<input[^>]*name="([^"]+)"/g))
   if (!new RegExp(`"(f\\.get|f\\.has)\\(\"${m[1]}\"`).test(js) && !js.includes(`"${m[1]}"`))
     mal(`el formulario tiene ${m[1]} y estado() no lo lee`);
@@ -756,8 +769,11 @@ if (!/mostrarPanel\("compilar"\)/.test(manejadorCompilar) ||
 // Las pestañas del panel inferior siguen el orden de uso; los ids y nombres de vista no cambian.
 const ordenPanel = [...html.matchAll(/<button class="panel-tab[^"]*"[^>]*data-panel="([^"]+)"/g)]
   .map((m) => m[1]).join(",");
-if (ordenPanel !== "salida,compilar,diagnostico,historial,firmar,deps") {
+if (ordenPanel !== "salida,compilar,diagnostico,historial,firmar") {
   mal("el orden de las pestañas del panel no es el esperado: " + ordenPanel);
+}
+if (/data-panel="deps"/.test(html) || /mostrarPanel\("deps"\)/.test(pestana)) {
+  mal("dependencias sigue enganchada al panel inferior de Compilar");
 }
 
 // 6b. la vista previa: el modelo de `apkc preview` y el pintor. Las funciones de modelo son puras
@@ -4028,13 +4044,18 @@ public final class R {
     }
 
     // ids contrato de la sección, y la pestaña propia separada de Compilar/Diagnóstico/Historial
-    for (const id of ["deps-coordenada", "deps-resolver", "deps-estado", "deps-resultado",
-      "deps-nombre", "deps-bytes", "deps-hash", "deps-licencia", "deps-fecha", "deps-ruta", "deps-indice",
-      "deps-ficheros", "deps-soltar", "deps-progreso", "deps-importar-estado", "deps-importado",
-      "deps-importado-ficheros", "deps-importado-bytes", "deps-importado-destino",
-      "deps-importado-descriptor"]) {
+    for (const id of ["deps-coordenada", "deps-coordenada-info", "deps-resolver", "deps-estado",
+      "deps-resultado", "deps-nombre", "deps-bytes", "deps-hash", "deps-licencia", "deps-fecha",
+      "deps-ruta", "deps-indice", "deps-origen", "deps-instalacion", "deps-ficheros", "deps-soltar",
+      "deps-progreso", "deps-importar-estado", "deps-importado", "deps-importado-ficheros",
+      "deps-importado-bytes", "deps-importado-destino", "deps-importado-descriptor",
+      "deps-importado-origen", "deps-importado-instalacion"]) {
       if (!ids.has(id)) mal("index.html no tiene el id de dependencias #" + id);
     }
+    // los ids de dependencias son únicos: mover el bloque no puede dejar dos fichas con el mismo id
+    const idsDeps = [...html.matchAll(/id="(deps-[^"]+)"/g)].map((m) => m[1]);
+    const repetidos = idsDeps.filter((id, i) => idsDeps.indexOf(id) !== i);
+    if (repetidos.length) mal("ids de dependencias duplicados: " + repetidos.join(", "));
     // la fecha del artefacto se pinta junto a la licencia, y no se inventa si el índice no la trae
     const pintarDeps = fuenteDeps.slice(fuenteDeps.indexOf("const pintar = (r) =>"),
       fuenteDeps.indexOf("const resolver = async"));
@@ -4042,8 +4063,19 @@ public final class R {
         !/fecha\.textContent = r\.fecha \|\| "sin declarar"/.test(pintarDeps)) {
       mal("el panel de dependencias no pinta la fecha del artefacto junto a la licencia");
     }
-    if (!/data-panel="deps"/.test(html) || !/id="panel-deps"/.test(html)) {
-      mal("la sección de dependencias no tiene su pestaña data-panel=deps");
+    if (!/id="panel-deps" class="deps-cuerpo"/.test(html)) {
+      mal("el bloque de dependencias no se movió a la sección #deps");
+    }
+    const desdeDeps = html.indexOf('<section id="deps"');
+    const hastaDeps = html.indexOf("</section>", desdeDeps);
+    const bloqueDeps = desdeDeps >= 0 && hastaDeps > desdeDeps ? html.slice(desdeDeps, hastaDeps) : "";
+    for (const id of ["deps-coordenada", "deps-wisp", "deps-resultado", "deps-ficheros"]) {
+      if (!bloqueDeps.includes('id="' + id + '"')) {
+        mal("la sección #deps no contiene #" + id);
+      }
+    }
+    if (bloqueDeps.includes('id="wisp-aviso"')) {
+      mal("el diálogo #wisp-aviso tiene que quedar fuera de la sección #deps");
     }
     // deps.js viaja en el shell del service worker o la recarga sin red se queda sin módulo
     if (!fs.readFileSync(path.join(__dirname, "sw.js"), "utf8").includes('"./deps.js"')) {
@@ -4053,6 +4085,55 @@ public final class R {
     const sw = fs.readFileSync(path.join(__dirname, "sw.js"), "utf8");
     if (!sw.includes("/^\\/deps-index\\.json$/") || !sw.includes("/^\\/deps\\//")) {
       mal("sw.js no deja el índice y los artefactos fuera de su caché (SOLO_RED)");
+    }
+
+    // El parser puro: la forma de `deps.json` de apkc-deps y la validación estrecha del núcleo
+    // WISP son dos cosas distintas; un clasificador o un BOM no se recortan en silencio.
+    const coordValida = coordMod.parsearCoordenada("com.google.code.gson:gson:2.10.1");
+    if (!coordValida.ok || coordValida.coord !== "com.google.code.gson:gson:2.10.1" ||
+        !coordValida.wisp.ok) {
+      mal("el parser rechaza una coordenada simple o la declara mala para WISP: " +
+        JSON.stringify(coordValida));
+    }
+    const rangoFijado = coordMod.parsearCoordenada("com.example:prueba:[1.2.3]");
+    if (!rangoFijado.ok || rangoFijado.coord !== "com.example:prueba:1.2.3" ||
+        !/fijado/.test(rangoFijado.avisos.join(" "))) {
+      mal("un rango [x] no se colapsa a x como en apkc-deps: " + JSON.stringify(rangoFijado));
+    }
+    const rangoIguales = coordMod.parsearCoordenada("com.example:prueba:[1.2.3,1.2.3]");
+    if (!rangoIguales.ok || rangoIguales.version !== "1.2.3") {
+      mal("un rango [x,x] no se colapsa a x: " + JSON.stringify(rangoIguales));
+    }
+    const conClasificador = coordMod.parsearCoordenada("com.example:prueba:1.0:sources");
+    if (!conClasificador.ok || conClasificador.clasificador !== "sources" ||
+        conClasificador.wisp.ok || !/no se recorta/.test(conClasificador.wisp.motivo)) {
+      mal("el clasificador no se conserva para el índice o se recorta para WISP: " +
+        JSON.stringify(conClasificador));
+    }
+    const conBom = coordMod.parsearCoordenada("com.example:prueba");
+    if (conBom.ok || !/BOM/.test(String(conBom.error))) {
+      mal("dos tramos se aceptan sin BOM o el motivo no lo explica: " + JSON.stringify(conBom));
+    }
+    const conBomPermitido = coordMod.parsearCoordenada("com.example:prueba", { permitirBom: true });
+    if (!conBomPermitido.ok || !/BOM/.test(conBomPermitido.avisos.join(" "))) {
+      mal("con un BOM que fija la versión, dos tramos se rechazan: " + JSON.stringify(conBomPermitido));
+    }
+    const conBomUnicode = coordMod.parsearCoordenada("\ufeffcom.example:prueba:1.0");
+    if (!conBomUnicode.ok || !/BOM Unicode/.test(conBomUnicode.avisos.join(" "))) {
+      mal("un BOM Unicode no se explica: " + JSON.stringify(conBomUnicode));
+    }
+    for (const texto of ["", "com.example", "com.example:prueba:", "g:a:v:cls:otro",
+      "g:a:(,1.0],[1.2,)", "../g:a:1.0", "g:a:1 0", "g:a:.."]) {
+      if (coordMod.parsearCoordenada(texto).ok) mal("el parser acepta la coordenada inválida «" + texto + "»");
+    }
+    const multi = coordMod.parsearCoordenada("g:a:(,1.0],[1.2,)");
+    if (!/multi-rango/.test(String(multi.error)) || !/declararlos sueltos/.test(String(multi.error))) {
+      mal("el multi-rango no dice el mismo motivo que apkc-deps: " + multi.error);
+    }
+    const rangoAbierto = coordMod.parsearCoordenada("g:a:[1.0,)");
+    if (!rangoAbierto.ok || !/maven-metadata/.test(rangoAbierto.avisos.join(" ")) ||
+        rangoAbierto.wisp.ok) {
+      mal("un rango de un tramo no se marca como no resoluble aquí: " + JSON.stringify(rangoAbierto));
     }
 
     // el workflow es quien descarga de Maven; el índice tiene que salir con hash y tamaño
@@ -4443,11 +4524,12 @@ public final class R {
       addEventListener() {}, appendChild(hijo) { this.children.push(hijo); },
     }, extra || {});
     const porId = {};
-    for (const id of ["deps-coordenada", "deps-resolver", "deps-estado", "deps-resultado",
-      "deps-nombre", "deps-bytes", "deps-hash", "deps-ruta", "deps-indice", "deps-licencia",
-      "deps-fecha", "deps-ficheros", "deps-soltar", "deps-progreso", "deps-importar-estado",
-      "deps-importado", "deps-importado-ficheros", "deps-importado-bytes",
-      "deps-importado-destino", "deps-importado-descriptor"]) {
+    for (const id of ["deps-coordenada", "deps-coordenada-info", "deps-resolver", "deps-estado",
+      "deps-resultado", "deps-nombre", "deps-bytes", "deps-hash", "deps-ruta", "deps-indice",
+      "deps-licencia", "deps-fecha", "deps-origen", "deps-instalacion", "deps-ficheros",
+      "deps-soltar", "deps-progreso", "deps-importar-estado", "deps-importado",
+      "deps-importado-ficheros", "deps-importado-bytes", "deps-importado-destino",
+      "deps-importado-descriptor", "deps-importado-origen", "deps-importado-instalacion"]) {
       porId[id] = nodo();
     }
     for (const id of ["wisp-estado", "wisp-activar", "wisp-desactivar", "wisp-selector",
@@ -4548,6 +4630,79 @@ public final class R {
       }
       if (!/^error/.test(String(porId["deps-estado"].textContent))) {
         mal("el fallo del núcleo no se pinta como error en el panel");
+      }
+
+      // (d) procedencia de la vía local: índice del propio origen y instalación en OPFS
+      porId["deps-coordenada"].value = "com.example:prueba:1.0";
+      const bytesDep = new Uint8Array([80, 75, 3, 4, 7]);
+      const hashDep = await depsMod.sha256Hex(bytesDep);
+      const indiceLocal = {
+        version: 1, generado: "2026-11-22", artefactos: [{
+          coordenada: "com.example:prueba:1.0", grupo: "com.example", artefacto: "prueba",
+          version: "1.0", extension: "jar",
+          fichero: "deps/com.example/prueba/1.0/prueba-1.0.jar",
+          bytes: bytesDep.length, sha256: hashDep, licencia: "Apache-2.0", fecha: "2026-11-22",
+        }],
+      };
+      const panelExito = depsMod.crearPanelDeps({ hospedador: hospedadorFalso, wisp: null });
+      globalThis.fetchOriginal = globalThis.fetch;
+      globalThis.fetch = async (url) => String(url).includes("deps-index.json")
+        ? { ok: true, status: 200, headers: { get: () => "application/json" },
+            text: async () => JSON.stringify(indiceLocal) }
+        : { ok: true, status: 200, headers: { get: () => "application/octet-stream" },
+            arrayBuffer: async () => bytesDep.buffer };
+      try { await panelExito.resolver(); } finally { globalThis.fetch = globalThis.fetchOriginal; }
+      if (!/^listo/.test(String(porId["deps-estado"].textContent)) ||
+          porId["deps-origen"].textContent !== "índice local del propio origen" ||
+          porId["deps-instalacion"].textContent !== "instalado en OPFS" ||
+          porId["deps-licencia"].textContent !== "Apache-2.0" ||
+          porId["deps-hash"].textContent !== hashDep) {
+        mal("la ficha local no dice procedencia, licencia, hash e instalación: " +
+          JSON.stringify({ estado: porId["deps-estado"].textContent,
+            origen: porId["deps-origen"].textContent, instalacion: porId["deps-instalacion"].textContent,
+            licencia: porId["deps-licencia"].textContent, hash: porId["deps-hash"].textContent }));
+      }
+
+      // (e) procedencia por relay: el núcleo (falso) escribe en OPFS y no hay petición de página
+      const nucleoAnterior = globalThis.apkcWisp;
+      globalThis.apkcWisp = {
+        version: wispMod.CONTRATO_NUCLEO,
+        obtener: async () => ({ bytes: bytesDep, sha256: hashDep,
+          ruta: "/deps/com.example/prueba/1.0/prueba-1.0.jar" }),
+      };
+      porId["deps-coordenada"].value = "com.example:prueba:1.0";
+      const panelRelay = depsMod.crearPanelDeps({
+        hospedador: hospedadorFalso,
+        wisp: { asegurarDecision: async () => true, relayActual: () => "wss://wisp.local/wisp/" },
+      });
+      let peticionesRelay = 0;
+      globalThis.fetchOriginal = globalThis.fetch;
+      globalThis.fetch = async () => { peticionesRelay++; throw new Error("no se debe pedir nada"); };
+      try { await panelRelay.resolver(); } finally {
+        globalThis.fetch = globalThis.fetchOriginal;
+        if (nucleoAnterior === undefined) delete globalThis.apkcWisp;
+        else globalThis.apkcWisp = nucleoAnterior;
+      }
+      if (peticionesRelay !== 0 || !/^listo/.test(String(porId["deps-estado"].textContent)) ||
+          porId["deps-origen"].textContent !== "relay wisp.local (WISP)" ||
+          porId["deps-instalacion"].textContent !== "escrito en OPFS por el núcleo WISP") {
+        mal("la ficha del relay no dice procedencia o se pidió algo fuera del núcleo: " +
+          JSON.stringify({ estado: porId["deps-estado"].textContent,
+            origen: porId["deps-origen"].textContent,
+            instalacion: porId["deps-instalacion"].textContent, peticionesRelay }));
+      }
+
+      // (f) un clasificador no se recorta para que encaje en los tres tramos del núcleo
+      porId["deps-coordenada"].value = "com.example:prueba:1.0:sources";
+      const panelClasificador = depsMod.crearPanelDeps({
+        hospedador: hospedadorFalso,
+        wisp: { asegurarDecision: async () => true, relayActual: () => "wss://wisp.local/wisp/" },
+      });
+      try { await panelClasificador.resolver(); } catch (e) { mal("Resolver lanzó en vez de avisar: " + e); }
+      if (!/no se recorta/.test(String(porId["deps-estado"].textContent)) ||
+          !/no se recorta/.test(String(porId["deps-coordenada-info"].textContent))) {
+        mal("un clasificador se recortó o no se explicó en la ficha: " +
+          porId["deps-coordenada-info"].textContent);
       }
     } finally {
       globalThis.document = anteriorDocumento;

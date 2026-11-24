@@ -1,6 +1,6 @@
-// El marco de la página: dos vistas (crear y editor), y el botón que escribe el proyecto
-// generado en OPFS y abre sus ficheros. La lógica de apkc.wasm y del editor sigue en pestana.js;
-// aquí solo se decide qué se ve y se siembra el árbol con buildProject.
+// El marco de la página: cuatro vistas (crear, editor, pantalla y dependencias), y el botón que
+// escribe el proyecto generado en OPFS y abre sus ficheros. La lógica de apkc.wasm y del editor
+// sigue en pestana.js; aquí solo se decide qué se ve y se siembra el árbol con buildProject.
 
 import { buildProject } from "./app.js";
 import {
@@ -10,8 +10,9 @@ import {
 } from "./pestana.js";
 
 (() => {
-  // tres vistas: Inicio, Editor y Pantalla (la vista previa del apk a página completa)
-  const NOMBRES = { crear: "Inicio", pestana: "Editor", vista: "Pantalla" };
+  // cuatro vistas: Inicio, Editor, Pantalla (la vista previa a página completa) y Dependencias.
+  // `mostrar()` conmuta por id, así que basta con registrar el nombre y poner la sección hermana.
+  const NOMBRES = { crear: "Inicio", pestana: "Editor", vista: "Pantalla", deps: "Dependencias" };
 
   function mostrar(vista) {
     if (!document.getElementById(vista)) vista = "crear";

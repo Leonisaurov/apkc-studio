@@ -965,8 +965,10 @@ const pixelCercano = (pix, esperado) => Array.isArray(pix) && pix.length === 3 &
     comprueba(v.lang === "es" && /Saltar/.test(v.salto) && v.principal === -1,
       "falta el enlace de salto o el destino con foco programable: " +
         JSON.stringify({ lang: v.lang, salto: v.salto, principal: v.principal }));
-    comprueba(v.vistas.join(",") === "Inicio,Editor,Pantalla", "las pestañas no son las tres medidas: " + v.vistas);
-    comprueba(v.actividad.join(",") === "crear,pestana,vista", "la barra de actividad no tiene las tres vistas: " + v.actividad);
+    comprueba(v.vistas.join(",") === "Inicio,Editor,Pantalla,Dependencias",
+      "las pestañas no son las cuatro medidas: " + v.vistas);
+    comprueba(v.actividad.join(",") === "crear,pestana,vista,deps",
+      "la barra de actividad no tiene las cuatro vistas: " + v.actividad);
     comprueba(v.tituloTrasNombre === "Prueba", "el nombre no llegó a la barra de título: " + v.tituloTrasNombre);
     comprueba(v.paqueteLateral === "com.prueba.app", "el package no llegó al explorador: " + v.paqueteLateral);
     comprueba(v.editorVisible, "la pestaña Editor no se abrió");

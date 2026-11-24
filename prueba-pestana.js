@@ -297,7 +297,7 @@ async function conductor() {
       JSON.stringify(aislamiento));
   }
 
-  // 0b. la tercera vista, antes de compilar nada: se abre, marca `data-vista` y deja el canvas
+  // 0b. la vista de Pantalla, antes de compilar nada: se abre, marca `data-vista` y deja el canvas
   // vacío con un mensaje. Es lo que ve quien entra sin apk y no puede parecer un fallo. Puede
   // llegar antes de que el parser haya creado la sección (esta es la primera lectura del DOM de
   // la prueba), así que se reintenta en vez de asumir que la página ya está entera.
@@ -321,8 +321,8 @@ async function conductor() {
     if (!previaVacia) await esperar(250);
   }
   if (!previaVacia) throw new Error("la vista previa no llegó al DOM en 10 s");
-  comprueba("la barra de actividad tiene tres vistas y la de Pantalla se abre",
-    previaVacia.botones === 3 && previaVacia.activa === true && previaVacia.cuerpo === "vista",
+  comprueba("la barra de actividad tiene cuatro vistas y la de Pantalla se abre",
+    previaVacia.botones === 4 && previaVacia.activa === true && previaVacia.cuerpo === "vista",
     JSON.stringify(previaVacia));
   comprueba("sin apk la vista previa queda vacía con un mensaje y un canvas de solo lectura",
     /[Cc]ompila/.test(String(previaVacia.estado)) && previaVacia.rol === "img" && previaVacia.arrastrable === false,
@@ -6050,20 +6050,22 @@ async function conductor() {
     comprueba("la carga y las compilaciones no leen el paquete de dependencias",
       antesDeps === 0, antesDeps + " peticiones al índice o a /deps/ antes de esta sección");
 
-    // abrir la pestaña tampoco pide nada: el panel solo engancha el botón
+    // abrir la vista tampoco pide nada: el módulo solo engancha el botón de Resolver
     const antesAbrir = peticiones.length;
     const abierta = await evaluar(`(() => {
-      mostrarPanel("deps");
+      document.querySelector('nav.actividad [data-vista="deps"]').click();
       return {
-        activa: document.getElementById("panel-deps").classList.contains("activa"),
+        activa: document.getElementById("deps").classList.contains("activa"),
+        cuerpo: document.body.dataset.vista,
+        sinPanel: document.querySelector('[data-panel="deps"]') === null,
         estado: document.getElementById("deps-estado").textContent,
         plegado: document.getElementById("deps-resultado").hidden,
         coordenada: document.getElementById("deps-coordenada").value,
       };
     })()`);
-    comprueba("la pestaña Dependencias se abre vacía y sin pedir nada",
-      abierta.activa === true && abierta.plegado === true &&
-      /sin resolver/.test(String(abierta.estado)) &&
+    comprueba("la vista Dependencias se abre vacía y sin pedir nada",
+      abierta.activa === true && abierta.cuerpo === "deps" && abierta.sinPanel === true &&
+      abierta.plegado === true && /sin resolver/.test(String(abierta.estado)) &&
       abierta.coordenada === "com.google.code.gson:gson:2.10.1" &&
       peticiones.length === antesAbrir,
       JSON.stringify(abierta) + " | " + (peticiones.length - antesAbrir) + " peticiones al abrir");
@@ -6119,6 +6121,8 @@ async function conductor() {
         fecha: document.getElementById("deps-fecha").textContent,
         ruta: document.getElementById("deps-ruta").textContent,
         indice: document.getElementById("deps-indice").textContent,
+        procedencia: document.getElementById("deps-origen").textContent,
+        instalacion: document.getElementById("deps-instalacion").textContent,
         visible: !document.getElementById("deps-resultado").hidden,
       }))()`);
       if (/^(listo|error)/.test(String(resuelto.estado))) break;
@@ -6146,8 +6150,10 @@ async function conductor() {
       /2052 bytes/.test(String(resuelto.bytes)) && resuelto.hash === hashDepFalso &&
       resuelto.licencia === "Apache-2.0" && /2026-11-22/.test(String(resuelto.fecha)) &&
       resuelto.ruta === "/deps/com.example/prueba/1.0/prueba-1.0.jar" &&
-      /2026-11-22/.test(String(resuelto.indice)),
-      JSON.stringify(resuelto).slice(0, 360));
+      /2026-11-22/.test(String(resuelto.indice)) &&
+      resuelto.procedencia === "índice local del propio origen" &&
+      resuelto.instalacion === "instalado en OPFS",
+      JSON.stringify(resuelto).slice(0, 420));
 
     // no basta con lo que pinta la página: los bytes de OPFS tienen que ser el artefacto
     const enOpfs = await evaluar(`(async () => {
@@ -6221,6 +6227,9 @@ async function conductor() {
       !u.startsWith("http://127.0.0.1:" + PUERTO) && !/^(?:data|blob):/.test(u));
     comprueba("la sección de dependencias no pide nada fuera del origen",
       ajenasDeps.length === 0, ajenasDeps.slice(0, 3).join(", ") || "cero peticiones ajenas");
+    // las secciones siguientes siguen conduciendo el editor; la vista de dependencias es un sitio
+    // propio, no una pestaña del panel, así que hay que volver explícitamente a ella
+    await evaluar(`document.querySelector('nav.actividad [data-vista="pestana"]').click()`);
   }
 
   // 31. el módulo WISP: el aviso, la elección, el selector de relays y el cable al núcleo. Aquí no
@@ -6237,7 +6246,7 @@ async function conductor() {
     }));
     const relaysAntes = relaysVistos().size;
 
-    // el botón del panel abre el mismo aviso, con «recordar» siempre desmarcado al abrir
+    // el botón de la sección de dependencias abre el mismo aviso, con «recordar» desmarcado
     await evaluar(`(() => {
       document.getElementById("wisp-recordar").checked = true;
       document.getElementById("wisp-activar").click();

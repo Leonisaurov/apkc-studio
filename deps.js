@@ -18,6 +18,7 @@
 
 import { leerZip } from "./proyecto.js";
 import { crearPanelWisp, destinoDeCoordenada, hostDeRelay, resolverPorWisp } from "./wisp.js";
+import { parsearCoordenada } from "./deps-coordenada.js";
 
 export const RUTA_INDICE = "./deps-index.json";
 const VERSION_INDICE = 1;
@@ -435,6 +436,12 @@ export function crearPanelDeps({ hospedador, conBloqueo, alImportar, wisp } = {}
   const origen = document.getElementById("deps-indice");
   const licencia = document.getElementById("deps-licencia");
   const fecha = document.getElementById("deps-fecha");
+  const procedencia = document.getElementById("deps-origen");
+  const instalacion = document.getElementById("deps-instalacion");
+  const infoCoordenada = document.getElementById("deps-coordenada-info");
+  const infoInicial = infoCoordenada ? infoCoordenada.textContent : "";
+  const origenImportado = document.getElementById("deps-importado-origen");
+  const instalacionImportada = document.getElementById("deps-importado-instalacion");
   const seleccion = document.getElementById("deps-ficheros");
   const zonaSoltar = document.getElementById("deps-soltar");
   const progreso = document.getElementById("deps-progreso");
@@ -460,6 +467,8 @@ export function crearPanelDeps({ hospedador, conBloqueo, alImportar, wisp } = {}
     if (hash) hash.textContent = r.hash;
     if (ruta) ruta.textContent = r.ruta;
     if (origen) origen.textContent = "índice: " + (r.indice || "sin fecha");
+    if (procedencia) procedencia.textContent = "índice local del propio origen";
+    if (instalacion) instalacion.textContent = "instalado en OPFS";
     // La licencia y la fecha solo se pintan si el índice las trae; un índice viejo sin ellas no
     // inventa texto. La fecha es la del índice (cuándo se indexó ese artefacto).
     if (licencia) licencia.textContent = r.licencia || "sin declarar";
@@ -474,7 +483,10 @@ export function crearPanelDeps({ hospedador, conBloqueo, alImportar, wisp } = {}
     if (bytes) bytes.textContent = textoDeBytes(r.bytes.length) + " (" + r.bytes.length + " bytes)";
     if (hash) hash.textContent = r.sha256 || "sin sha256 del núcleo";
     if (ruta) ruta.textContent = r.ruta || "";
-    if (origen) origen.textContent = "relay " + hostDeRelay(relay);
+    if (origen) origen.textContent = "índice: sin índice (vía relay)";
+    if (procedencia) procedencia.textContent = "relay " + hostDeRelay(relay) + " (WISP)";
+    if (instalacion) instalacion.textContent = r.ruta
+      ? "escrito en OPFS por el núcleo WISP" : "sin confirmar en OPFS";
     if (licencia) licencia.textContent = "sin declarar (vía relay, sin índice)";
     if (fecha) fecha.textContent = new Date().toISOString();
     caja.hidden = false;
@@ -486,13 +498,24 @@ export function crearPanelDeps({ hospedador, conBloqueo, alImportar, wisp } = {}
     entrada.disabled = true;
     caja.hidden = true;
     try {
+      // El parser es puro: ni lee ficheros ni decide la red. Explica en la ficha lo que acepta
+      // `apkc-deps` (rangos de un valor, clasificador, BOM) y valida aparte lo que admite el núcleo.
+      const analisis = parsearCoordenada(entrada.value, { permitirBom: true });
+      const notas = analisis.avisos.slice();
+      if (analisis.ok && !analisis.wisp.ok) notas.push("WISP: " + analisis.wisp.motivo);
+      if (infoCoordenada) infoCoordenada.textContent = notas.length ? notas.join(" ") : infoInicial;
+      if (!analisis.ok) throw new Error(analisis.error);
+      const coord = analisis.coord;
       // La puerta: sin decisión, primero el aviso (sin red). Si la persona cancela, el módulo
       // queda apagado y esta misma pulsación sigue por el índice del propio origen, que es el modo
       // por defecto: la página no se queda sin poder resolver nada.
       const usarWisp = modulo ? await modulo.asegurarDecision() : false;
       if (usarWisp) {
+        // Si el núcleo no está en esta compilación, `resolverPorWisp` falla cerrado antes de abrir
+        // un socket. Aquí tampoco hay respaldo silencioso: una coordenada con clasificador o sin
+        // versión no se recorta para que "encaje" en los tres tramos del núcleo.
+        if (!analisis.wisp.ok) throw new Error(analisis.wisp.motivo);
         const relay = modulo.relayActual();
-        const coord = entrada.value.trim();
         const cas = typeof modulo.casActual === "function" ? modulo.casActual() : null;
         decir("módulo WISP: pidiendo «" + coord + "» por " + hostDeRelay(relay) +
           (cas ? " con las CAs del dispositivo (" + cas.huella.slice(0, 16) + "…)" : " sin bundle de CAs") + "…");
@@ -503,8 +526,8 @@ export function crearPanelDeps({ hospedador, conBloqueo, alImportar, wisp } = {}
         decir("listo: «" + coord + "» traído por el relay " + hostDeRelay(relay) +
           " y escrito en " + r.ruta, "bien");
       } else {
-        decir("buscando «" + entrada.value.trim() + "» en el índice…");
-        const r = await resolverDependencia({ coord: entrada.value, hospedador, conBloqueo });
+        decir("buscando «" + coord + "» en el índice…");
+        const r = await resolverDependencia({ coord, hospedador, conBloqueo });
         pintar(r);
         decir("listo: importado desde el propio origen a " + r.ruta, "bien");
       }
@@ -577,6 +600,9 @@ export function crearPanelDeps({ hospedador, conBloqueo, alImportar, wisp } = {}
         importadoDestino.textContent = muestra;
       }
       if (importadoDescriptor) importadoDescriptor.textContent = r.descriptor;
+      if (origenImportado) origenImportado.textContent = "importación local, sin red";
+      if (instalacionImportada) instalacionImportada.textContent =
+        "instalado en OPFS (" + r.ficheros + " fichero(s), sin descargas)";
       if (importado) importado.hidden = false;
       // la página refresca el árbol y avisa a las demás ventanas; si no hay enganche (prueba de
       // node o panel suelto) el importe ya está en OPFS y no se pierde nada

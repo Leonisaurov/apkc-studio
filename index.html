@@ -121,6 +121,9 @@
       <button data-vista="vista" type="button" title="Pantalla" aria-label="Pantalla">
         <svg viewBox="0 0 24 24" aria-hidden="true"><rect x="7" y="3" width="10" height="18" rx="2"/><path d="M11 18h2"/></svg>
       </button>
+      <button data-vista="deps" type="button" title="Dependencias" aria-label="Dependencias">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3l8 4.5v9L12 21l-8-4.5v-9z"/><path d="M4 7.5l8 4.5 8-4.5M12 12v9"/></svg>
+      </button>
     </nav>
 
     <aside class="lateral" aria-label="Explorador del proyecto">
@@ -157,6 +160,7 @@
         <button class="pestana-vista activa" data-vista="crear" type="button">Inicio</button>
         <button class="pestana-vista" data-vista="pestana" type="button">Editor</button>
         <button class="pestana-vista" data-vista="vista" type="button">Pantalla</button>
+        <button class="pestana-vista" data-vista="deps" type="button">Dependencias</button>
         <span class="pestanas-der"><span id="estado-pestana-cab" class="tenue"></span></span>
       </div>
 
@@ -779,7 +783,6 @@
               <button class="panel-tab" type="button" role="tab" aria-selected="false" data-panel="diagnostico">Diagnóstico</button>
               <button class="panel-tab" type="button" role="tab" aria-selected="false" data-panel="historial">Historial</button>
               <button class="panel-tab" type="button" role="tab" aria-selected="false" data-panel="firmar">Firmar apk o .aab</button>
-              <button class="panel-tab" type="button" role="tab" aria-selected="false" data-panel="deps">Dependencias</button>
               <span class="espacio"></span>
               <span id="estado-pestana" class="nota"></span>
               <button id="cerrar-panel" class="icono-boton" type="button" title="Cerrar el panel" aria-label="Cerrar el panel">
@@ -941,86 +944,6 @@
                   </div>
                   <p class="nota" id="estado-linaje">sin linaje</p>
                 </details>
-              </div>
-
-              <div id="panel-deps" class="panel-vista" role="tabpanel">
-                <p class="nota"><strong>Dependencias Maven</strong>: el botón <strong>Resolver</strong>
-                  importa a OPFS un artefacto que ya está publicado en el propio origen, guiándose por
-                  <code>deps-index.json</code>. Ese índice y los <code>.jar</code>/<code>.aar</code> los
-                  genera y firma el workflow <code>deps-maven</code> de GitHub Actions, que descarga de
-                  Maven en el runner y publica tamaños y SHA-256. La página no habla con Maven ni con
-                  ningún tercero: carga inicial y compilación no piden nada, y solo este botón lee el
-                  índice y el fichero, ambos del mismo origen. Si el índice no existe todavía, se dice.</p>
-                <div class="panel-form">
-                  <label>coordenada Maven
-                    <input type="text" id="deps-coordenada" value="com.google.code.gson:gson:2.10.1"
-                           autocomplete="off" spellcheck="false" class="ruta">
-                  </label>
-                  <div class="acciones">
-                    <button id="deps-resolver" class="primario" type="button">Resolver</button>
-                  </div>
-                  <p class="nota" id="deps-estado" role="status" aria-live="polite">sin resolver todavía</p>
-                </div>
-                <div id="deps-wisp" class="deps-wisp">
-                  <h3 class="deps-subtitulo">Relays WISP (módulo opcional)</h3>
-                  <p class="nota" id="wisp-estado" role="status" aria-live="polite">módulo desactivado:
-                    Resolver solo lee <code>deps-index.json</code> del propio origen y no hace ninguna
-                    petición fuera de él.</p>
-                  <div class="acciones">
-                    <button id="wisp-activar" type="button">Activar el módulo WISP…</button>
-                    <button id="wisp-desactivar" type="button" hidden>Desactivar</button>
-                  </div>
-                  <div id="wisp-selector" hidden>
-                    <label>relay conocido <select id="wisp-relay"></select></label>
-                    <label>URL personalizada (tu WISP local)
-                      <input type="text" id="wisp-url" placeholder="wss://mi-wisp.local/wisp/"
-                             autocomplete="off" spellcheck="false" class="ruta"></label>
-                    <p class="nota" id="wisp-url-estado">vacío: se usa el relay elegido en la lista</p>
-                    <label>certificados de confianza (PEM local, opcional)
-                      <input type="file" id="wisp-cas" accept=".pem,.crt,application/x-pem-file,text/plain">
-                    </label>
-                    <label>huella SHA-256 esperada (opcional)
-                      <input type="text" id="wisp-cas-huella" placeholder="64 dígitos hex; vacío = la del fichero"
-                             autocomplete="off" spellcheck="false" class="ruta">
-                    </label>
-                    <p class="nota" id="wisp-cas-estado" role="status" aria-live="polite">sin CAs: el
-                      bundle se lee de tu dispositivo y se pasa al núcleo; nunca se descarga por el
-                      relay.</p>
-                    <p class="nota">Relays de terceros, sin auditar; la latencia es la de un
-                      handshake de prueba y cambia. La URL de un WISP propio tiene que acabar en «/».</p>
-                  </div>
-                </div>
-                <dl id="deps-resultado" class="deps-datos" hidden>
-                  <dt>artefacto</dt><dd id="deps-nombre"></dd>
-                  <dt>tamaño</dt><dd id="deps-bytes"></dd>
-                  <dt>sha256</dt><dd id="deps-hash" class="deps-hash"></dd>
-                  <dt>licencia</dt><dd id="deps-licencia"></dd>
-                  <dt>fecha</dt><dd id="deps-fecha"></dd>
-                  <dt>en OPFS</dt><dd id="deps-ruta" class="deps-ruta"></dd>
-                  <dt>origen</dt><dd id="deps-indice"></dd>
-                </dl>
-
-                <h3 class="deps-subtitulo">Importar desde disco</h3>
-                <p class="nota"><strong>Sin red</strong>: elige <code>.jar</code>/<code>.aar</code> o
-                  suelta un <code>.zip</code> con <code>jar/</code>, <code>lib/&lt;abi&gt;/</code> y
-                  <code>res/__deps/</code>. Un <code>.aar</code> se abre aquí mismo: su
-                  <code>classes.jar</code> y sus <code>libs/*.jar</code> van a <code>jar/</code>, sus
-                  <code>.so</code> a <code>lib/&lt;abi&gt;/</code> y sus recursos a
-                  <code>res/__deps/&lt;isla&gt;/</code>. Nada se descarga: los bytes salen del disco y
-                  se escriben en el proyecto del navegador (OPFS).</p>
-                <div id="deps-soltar" class="deps-soltar">
-                  <label>ficheros <input type="file" id="deps-ficheros" multiple
-                    accept=".jar,.aar,.zip,application/java-archive,application/zip"></label>
-                  <p class="nota">o suelta aquí el <code>.zip</code> con las tres carpetas</p>
-                </div>
-                <progress id="deps-progreso" max="1" value="0" hidden></progress>
-                <p class="nota" id="deps-importar-estado" role="status" aria-live="polite">sin importar todavía</p>
-                <dl id="deps-importado" class="deps-datos" hidden>
-                  <dt>ficheros</dt><dd id="deps-importado-ficheros"></dd>
-                  <dt>tamaño</dt><dd id="deps-importado-bytes"></dd>
-                  <dt>en OPFS</dt><dd id="deps-importado-destino" class="deps-ruta"></dd>
-                  <dt>registro</dt><dd id="deps-importado-descriptor" class="deps-ruta"></dd>
-                </dl>
               </div>
             </div>
           </div>
@@ -1225,6 +1148,103 @@
                 </section>
               </div>
             </div>
+          </div>
+        </section>
+
+        <section id="deps" class="vista vista-deps">
+          <div class="bienvenida">
+            <h1>Dependencias</h1>
+            <p class="sub">Escribe <code>grupo:artefacto:versión</code>, con
+              <code>:clasificador</code> opcional: el mismo campo <code>coord</code> que entiende
+              <code>apkc-deps</code>. La ficha dice de dónde salen los bytes y si ya están en OPFS.
+              Nada se pide al cargar ni al compilar.</p>
+          </div>
+
+          <div id="panel-deps" class="deps-cuerpo" role="region" aria-label="Herramientas de dependencias">
+            <p class="nota"><strong>Dependencias Maven</strong>: el botón <strong>Resolver</strong>
+              importa a OPFS un artefacto que ya está publicado en el propio origen, guiándose por
+              <code>deps-index.json</code>. Ese índice y los <code>.jar</code>/<code>.aar</code> los
+              genera y firma el workflow <code>deps-maven</code> de GitHub Actions, que descarga de
+              Maven en el runner y publica tamaños y SHA-256. La página no habla con Maven ni con
+              ningún tercero: carga inicial y compilación no piden nada, y solo este botón lee el
+              índice y el fichero, ambos del mismo origen. Si el índice no existe todavía, se dice.</p>
+            <div class="panel-form">
+              <label>coordenada Maven
+                <input type="text" id="deps-coordenada" value="com.google.code.gson:gson:2.10.1"
+                       autocomplete="off" spellcheck="false" class="ruta">
+              </label>
+              <div class="acciones">
+                <button id="deps-resolver" class="primario" type="button">Resolver</button>
+              </div>
+              <p class="nota" id="deps-coordenada-info" role="status" aria-live="polite">Formato:
+                <code>grupo:artefacto:versión[:clasificador]</code>. Dos tramos solo si un BOM fija
+                la versión; los rangos de un solo valor (<code>[2.10.1]</code>) se fijan a ese valor.</p>
+              <p class="nota" id="deps-estado" role="status" aria-live="polite">sin resolver todavía</p>
+            </div>
+            <div id="deps-wisp" class="deps-wisp">
+              <h3 class="deps-subtitulo">Relays WISP (módulo opcional)</h3>
+              <p class="nota" id="wisp-estado" role="status" aria-live="polite">módulo desactivado:
+                Resolver solo lee <code>deps-index.json</code> del propio origen y no hace ninguna
+                petición fuera de él.</p>
+              <div class="acciones">
+                <button id="wisp-activar" type="button">Activar el módulo WISP…</button>
+                <button id="wisp-desactivar" type="button" hidden>Desactivar</button>
+              </div>
+              <div id="wisp-selector" hidden>
+                <label>relay conocido <select id="wisp-relay"></select></label>
+                <label>URL personalizada (tu WISP local)
+                  <input type="text" id="wisp-url" placeholder="wss://mi-wisp.local/wisp/"
+                         autocomplete="off" spellcheck="false" class="ruta"></label>
+                <p class="nota" id="wisp-url-estado">vacío: se usa el relay elegido en la lista</p>
+                <label>certificados de confianza (PEM local, opcional)
+                  <input type="file" id="wisp-cas" accept=".pem,.crt,application/x-pem-file,text/plain">
+                </label>
+                <label>huella SHA-256 esperada (opcional)
+                  <input type="text" id="wisp-cas-huella" placeholder="64 dígitos hex; vacío = la del fichero"
+                         autocomplete="off" spellcheck="false" class="ruta">
+                </label>
+                <p class="nota" id="wisp-cas-estado" role="status" aria-live="polite">sin CAs: el
+                  bundle se lee de tu dispositivo y se pasa al núcleo; nunca se descarga por el
+                  relay.</p>
+                <p class="nota">Relays de terceros, sin auditar; la latencia es la de un
+                  handshake de prueba y cambia. La URL de un WISP propio tiene que acabar en «/».</p>
+              </div>
+            </div>
+            <dl id="deps-resultado" class="deps-datos" hidden>
+              <dt>artefacto</dt><dd id="deps-nombre"></dd>
+              <dt>tamaño</dt><dd id="deps-bytes"></dd>
+              <dt>sha256</dt><dd id="deps-hash" class="deps-hash"></dd>
+              <dt>licencia</dt><dd id="deps-licencia"></dd>
+              <dt>fecha</dt><dd id="deps-fecha"></dd>
+              <dt>en OPFS</dt><dd id="deps-ruta" class="deps-ruta"></dd>
+              <dt>origen</dt><dd id="deps-indice"></dd>
+              <dt>procedencia</dt><dd id="deps-origen"></dd>
+              <dt>instalación</dt><dd id="deps-instalacion"></dd>
+            </dl>
+
+            <h3 class="deps-subtitulo">Importar desde disco</h3>
+            <p class="nota"><strong>Sin red</strong>: elige <code>.jar</code>/<code>.aar</code> o
+              suelta un <code>.zip</code> con <code>jar/</code>, <code>lib/&lt;abi&gt;/</code> y
+              <code>res/__deps/</code>. Un <code>.aar</code> se abre aquí mismo: su
+              <code>classes.jar</code> y sus <code>libs/*.jar</code> van a <code>jar/</code>, sus
+              <code>.so</code> a <code>lib/&lt;abi&gt;/</code> y sus recursos a
+              <code>res/__deps/&lt;isla&gt;/</code>. Nada se descarga: los bytes salen del disco y
+              se escriben en el proyecto del navegador (OPFS).</p>
+            <div id="deps-soltar" class="deps-soltar">
+              <label>ficheros <input type="file" id="deps-ficheros" multiple
+                accept=".jar,.aar,.zip,application/java-archive,application/zip"></label>
+              <p class="nota">o suelta aquí el <code>.zip</code> con las tres carpetas</p>
+            </div>
+            <progress id="deps-progreso" max="1" value="0" hidden></progress>
+            <p class="nota" id="deps-importar-estado" role="status" aria-live="polite">sin importar todavía</p>
+            <dl id="deps-importado" class="deps-datos" hidden>
+              <dt>ficheros</dt><dd id="deps-importado-ficheros"></dd>
+              <dt>tamaño</dt><dd id="deps-importado-bytes"></dd>
+              <dt>en OPFS</dt><dd id="deps-importado-destino" class="deps-ruta"></dd>
+              <dt>registro</dt><dd id="deps-importado-descriptor" class="deps-ruta"></dd>
+              <dt>procedencia</dt><dd id="deps-importado-origen">importación local, sin red</dd>
+              <dt>instalación</dt><dd id="deps-importado-instalacion"></dd>
+            </dl>
           </div>
         </section>
 
