@@ -110,6 +110,49 @@ const hosts = gates.hostsDeRelays(leidos.relays);
       ? "ajena (bien)" : "local (mal)"));
 }
 
+// --- gate de red: toda sesión cuenta ------------------------------------------------------------
+// El registro del gate se llena con los mensajes de CDP de la sesión de la página **y** de la de
+// cada worker. Un evento de un worker llega con su `sessionId`; filtrar por sesión —lo que hacía
+// el gate cuando la conexión solo enganchaba `page`— deja el `wss://` del worker fuera de las dos
+// listas y el gate lo da por bueno. Aquí se prueba la regla con mensajes de mentira.
+{
+  const registro = { peticiones: [], webSockets: [] };
+  const eventos = [
+    { method: "Network.requestWillBeSent",
+      params: { request: { url: "http://127.0.0.1:" + PUERTO + "/index.html" } } },
+    { method: "Network.webSocketCreated",
+      params: { url: "blob:http://127.0.0.1:" + PUERTO + "/descarga" } },
+    { method: "Network.webSocketCreated", params: { url: "wss://relay-ajeno.example/wisp/" },
+      sessionId: "sesion-de-worker" },
+    { method: "Network.requestWillBeSent",
+      params: { request: { url: "http://127.0.0.1:" + PUERTO + "/apkc.wasm" } },
+      sessionId: "sesion-de-worker" },
+    { method: "Runtime.consoleAPICalled", params: {} },
+    { method: "Network.webSocketCreated", params: {} }, // sin URL: no suma y no revienta
+  ];
+  let sumados = 0;
+  for (const evento of eventos) if (gates.acumularRed(registro, evento)) sumados++;
+  comprueba("gate de red: los eventos de la sesión de un worker entran en el mismo registro",
+    sumados === 4 && registro.peticiones.length === 2 && registro.webSockets.length === 2,
+    sumados + " sumados, " + registro.peticiones.length + " peticiones, " +
+      registro.webSockets.length + " websockets");
+
+  const { ajenas: delWorker } = gates.clasificarUrls(registro.webSockets, { puerto: PUERTO });
+  comprueba("gate de red: el wss:// abierto en un worker se clasifica como ajeno",
+    delWorker.length === 1 && delWorker[0] === "wss://relay-ajeno.example/wisp/",
+    delWorker.join(", ") || "no se vio ningún wss:// ajeno");
+
+  // falsificación 4: la regla vieja, la que solo miraba los mensajes de la sesión de la página
+  const soloPagina = { peticiones: [], webSockets: [] };
+  for (const evento of eventos) if (!evento.sessionId) gates.acumularRed(soloPagina, evento);
+  const { ajenas: conSoloPagina } = gates.clasificarUrls(soloPagina.webSockets, { puerto: PUERTO });
+  comprueba("falsificación 4: mirando solo la sesión de la página, el wss:// del worker escapa",
+    conSoloPagina.length === 0 && soloPagina.webSockets.length === 1,
+    soloPagina.webSockets.length + " websocket(s) vistos y " + conSoloPagina.length + " ajenos");
+  console.log("  salida falsificación 4: solo la sesión de la página -> PASA (mal: el wss:// del " +
+    "worker no se vio)");
+}
+
 // --- gate del modo externo ----------------------------------------------------------------------
 {
   // la lista versionada pasa sus exigencias

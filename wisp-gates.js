@@ -4,7 +4,9 @@
 //   (1) Gate por defecto: el módulo está apagado y la pestaña no puede sacar ni una petición ni
 //       abrir un WebSocket fuera de su propio origen (`http://127.0.0.1:<puerto>` y los `data:` y
 //       `blob:` cuyo origen incrustado —si lo llevan— también es el local). Un `wss://` cuenta como
-//       ajeno y hace fallar el gate, aunque vaya dentro de un `data:` o un `blob:`.
+//       ajeno y hace fallar el gate, aunque vaya dentro de un `data:` o un `blob:`, y también si lo
+//       abre un worker: `urlDeEvento`/`acumularRed` no filtran por sesión porque el tráfico de un
+//       worker es tráfico de la pestaña.
 //   (2) Gate del modo externo: con `APKC_WISP_EXTERNO=1`, el módulo está encendido y cableado. Se
 //       valida `wisp-relays.json` (seis relays verificados, con latencia y protocolo v1), se hace
 //       solo el handshake inicial (CONTINUE con `streamID=0`, sin pedir artefactos) a cada relay y
@@ -89,6 +91,36 @@ export function clasificarUrls(urls, { puerto, hostsPermitidos = [] } = {}) {
     ajenas.push(texto);
   }
   return { locales, ajenas };
+}
+
+// Qué eventos de red de CDP suman al gate y con qué URL. Un evento llega con la **sesión del
+// target que lo produjo** (`sessionId`): la de la página o la de un worker. Aquí no se filtra por
+// sesión a propósito: un `wss://` creado dentro de un worker es tráfico ajeno igual que uno de la
+// página, y el gate que solo miraba `page` lo dejaba pasar. Devuelve `null` para lo que no cuenta.
+export function urlDeEvento(mensaje) {
+  const metodo = mensaje && mensaje.method;
+  const params = (mensaje && mensaje.params) || {};
+  if (metodo === "Network.requestWillBeSent") {
+    const url = params.request && params.request.url;
+    return url == null ? null : String(url);
+  }
+  if (metodo === "Network.webSocketCreated") {
+    return params.url == null ? null : String(params.url);
+  }
+  return null;
+}
+
+// Vuelca un mensaje de CDP en el registro del gate, sea de la sesión de la página o de la de un
+// worker: `peticiones` para el HTTP y `webSockets` para las aperturas, que es donde cae un `wss://`
+// (no aparece en `requestWillBeSent`). Devuelve `true` si el mensaje contaba.
+export function acumularRed(registro, mensaje) {
+  const url = urlDeEvento(mensaje);
+  if (url === null) return false;
+  const destino = (mensaje && mensaje.method) === "Network.webSocketCreated" ? registro.webSockets
+    : registro.peticiones;
+  if (!destino) return false;
+  destino.push(url);
+  return true;
 }
 
 // Los hosts de la lista, sin repetir. Es la lista blanca del modo externo: si una conexión sale

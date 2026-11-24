@@ -14,6 +14,9 @@ import * as gates from "./wisp-gates.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const CHROME = process.env.CHROME_BIN || "chromium-browser";
+// Apaga el auto-attach de targets a propósito: es la falsificación de que un worker con su propio
+// `WebSocket` se escapa al gate cuando la conexión solo mira la sesión de la página.
+const GATE_SIN_WORKERS = process.env.APKC_GATE_SIN_WORKERS === "1";
 
 const TMP = process.env.PREFIX ? process.env.PREFIX + "/tmp" : "/tmp";
 const WASM = process.env.APKC_WASM || "";
@@ -146,6 +149,13 @@ async function conductor() {
     colas.set(n, res);
     ws.send(JSON.stringify({ id: n, method, params: params || {} }));
   });
+  // Igual que `exec`, pero dirigido a la sesión de un target enganchado con `flatten`: los
+  // mensajes de un worker viajan por esta misma conexión y se identifican con `sessionId`.
+  const execEnSesion = (method, params, sessionId) => new Promise((res) => {
+    const n = ++id;
+    colas.set(n, res);
+    ws.send(JSON.stringify({ id: n, method, params: params || {}, sessionId }));
+  });
   const evaluarSinPlazo = async (expression) => {
     const r = await exec("Runtime.evaluate", { expression, awaitPromise: true, returnByValue: true });
     const ex = r.result && r.result.exceptionDetails;
@@ -164,23 +174,71 @@ async function conductor() {
   // defecto cuenta los dos, porque un relay abierto en la pestaña es tráfico ajeno aunque no sea
   // una petición HTTP.
   const webSockets = [];
+  // Qué sesiones CDP cubre el gate: la de la página y la de cada worker. `target()` elige el target
+  // `page` y `Network.enable` en esa sesión **no ve lo que hace un worker**, así que un `WebSocket`
+  // creado dentro de un worker escapaba al gate sin dejar rastro.
+  const sesiones = new Map(); // sessionId -> { tipo, red }
+  const cobertura = () => {
+    // solo cuentan las sesiones donde el `Network.enable` respondió sin error: una sesión
+    // enganchada sin red no ve nada
+    const conRed = [...sesiones.values()].filter((v) => v.red === "sí");
+    const tipos = {};
+    for (const v of conRed) tipos[v.tipo] = (tipos[v.tipo] || 0) + 1;
+    const detalle = Object.keys(tipos).map((k) => tipos[k] + " " + k).join(", ") || "ninguna";
+    const sinRed = [...sesiones.values()].filter((v) => v.red !== "sí")
+      .map((v) => v.tipo + ": " + v.red).join(", ");
+    return {
+      sesiones: detalle,
+      workersConRed: conRed.filter((v) => /worker/.test(v.tipo)).length,
+      sinRed,
+    };
+  };
   ws.addEventListener("message", (ev) => {
     const m = JSON.parse(ev.data);
-    if (m.method === "Network.requestWillBeSent") peticiones.push(m.params.request.url);
-    else if (m.method === "Network.webSocketCreated") webSockets.push(m.params.url);
+    if (m.method === "Target.attachedToTarget") {
+      const info = (m.params && m.params.targetInfo) || {};
+      const sessionId = m.params && m.params.sessionId;
+      if (!sessionId) return;
+      const tipo = String(info.type || "?");
+      sesiones.set(sessionId, { tipo, red: "pendiente" });
+      // sin `Network.enable` en esa sesión, el target enganchado no emite ni un evento de red
+      execEnSesion("Network.enable", {}, sessionId).then((r) => {
+        const actual = sesiones.get(sessionId);
+        if (actual) actual.red = r && r.error ? "no: " + (r.error.message || "error") : "sí";
+      });
+      return;
+    }
+    if (m.method === "Target.detachedFromTarget") {
+      const sessionId = m.params && m.params.sessionId;
+      if (sessionId) sesiones.delete(sessionId);
+      return;
+    }
+    gates.acumularRed({ peticiones, webSockets }, m);
   });
-  await exec("Network.enable");
+  // El auto-attach va **antes** de navegar y en plano: cada worker se cuelga de esta conexión y su
+  // `Network.enable` llega antes que su primer `WebSocket`. `APKC_GATE_SIN_WORKERS=1` lo apaga a
+  // propósito: es la falsificación de que sin esta pieza el gate no ve a los workers.
+  if (!GATE_SIN_WORKERS) {
+    const auto = await exec("Target.setAutoAttach",
+      { autoAttach: true, waitForDebuggerOnStart: false, flatten: true });
+    if (auto && auto.error) {
+      console.log("  aviso: Target.setAutoAttach falló (" + (auto.error.message || "error") +
+        "): el gate solo verá la sesión de la página");
+    }
+  }
+  const redPagina = await exec("Network.enable");
+  sesiones.set("", { tipo: "page", red: redPagina && redPagina.error ? "no" : "sí" });
   await exec("Runtime.enable");
   for (let i = 0; i < 60; i++) {
     try { if (await evaluar("!!document.getElementById('codigo') && typeof correr === 'function'")) break; } catch (e) { /* */ }
     await esperar(300);
   }
-  return { exec, evaluar, ws, peticiones, webSockets };
+  return { exec, evaluar, ws, peticiones, webSockets, cobertura };
 }
 
 // --- la prueba ----------------------------------------------------------------------------
 (async () => {
-  const { evaluar, exec, ws, peticiones, webSockets } = await conductor();
+  const { evaluar, exec, ws, peticiones, webSockets, cobertura } = await conductor();
   const fuera = path.join(TMP, "pestana-apk");
   fs.mkdirSync(fuera, { recursive: true });
   const descargas = path.join(TMP, "pestana-descargas");
@@ -5841,12 +5899,21 @@ async function conductor() {
       await esperar(500);
     }
     const delResolver = peticiones.slice(antesResolver);
-    const rutasResolver = delResolver.map((u) => { try { return new URL(u).pathname; } catch (e) { return u; } });
+    // El motor de Go se carga desde el worker (`hospedador.js` pide el manifiesto y los bytes del
+    // wasm) y eso ahora también entra en el registro, porque el gate mira todas las sesiones. No es
+    // una lectura de Resolver: se descarta ese camino y se mide lo que leyó Resolver. Cualquier
+    // otra URL —también una ajena— sigue contando.
+    const rutasDelMotor = ["/wasm-manifest.json", "/apkc.wasm", "/apkc.wasm.gz", "/wasm_exec.js"];
+    // un recurso pedido por la página y por un worker aparece una vez por sesión: se miran las URLs
+    const unicasResolver = [...new Set(delResolver)].filter((u) => {
+      try { return !rutasDelMotor.includes(new URL(u).pathname); } catch (e) { return true; }
+    });
+    const rutasResolver = unicasResolver.map((u) => { try { return new URL(u).pathname; } catch (e) { return u; } });
     comprueba("Resolver lee solo el índice y su fichero, los dos del mismo origen",
-      delResolver.length === 2 &&
+      unicasResolver.length === 2 &&
       rutasResolver[0] === "/deps-index.json" &&
       rutasResolver[1] === "/deps/com.example/prueba/1.0/prueba-1.0.jar" &&
-      delResolver.every((u) => u.startsWith("http://127.0.0.1:" + PUERTO)),
+      unicasResolver.every((u) => u.startsWith("http://127.0.0.1:" + PUERTO)),
       rutasResolver.join(", ") || "sin peticiones");
     comprueba("el artefacto importado muestra nombre, tamaño, hash, licencia y fecha del índice",
       resuelto && resuelto.visible === true && resuelto.nombre === "prueba-1.0.jar" &&
@@ -5936,10 +6003,13 @@ async function conductor() {
   {
     const claveWisp = "apkc-studio/wisp";
     const antesWisp = peticiones.length;
-    const contarRelays = () => peticiones.filter((u) => {
+    // El registro del gate suma todas las sesiones CDP (página, workers y service worker), así que
+    // el mismo recurso puede aparecer una vez por sesión. Para contar «cuántas veces se pide
+    // /wisp-relays.json» se miran las URLs distintas, no los eventos.
+    const relaysVistos = () => new Set(peticiones.filter((u) => {
       try { return new URL(u).pathname === "/wisp-relays.json"; } catch (e) { return false; }
-    }).length;
-    const relaysAntes = contarRelays();
+    }));
+    const relaysAntes = relaysVistos().size;
 
     // el botón del panel abre el mismo aviso, con «recordar» siempre desmarcado al abrir
     await evaluar(`(() => {
@@ -5985,9 +6055,9 @@ async function conductor() {
       JSON.stringify({ opciones: activo && activo.opciones.slice(0, 2), guardado: activo && activo.guardado,
         estado: String(activo && activo.estado).slice(0, 140) }).slice(0, 360));
     comprueba("la lista de relays es una sola petición y del propio origen",
-      contarRelays() - relaysAntes === 1 &&
+      relaysVistos().size - relaysAntes === 1 &&
       peticiones.slice(antesWisp).every((u) => u.startsWith("http://127.0.0.1:" + PUERTO)),
-      (contarRelays() - relaysAntes) + " peticiones a /wisp-relays.json");
+      (relaysVistos().size - relaysAntes) + " peticiones a /wisp-relays.json");
 
     // con el módulo activo y sin núcleo, Resolver lo dice y no abre ningún relay
     const antesNucleo = peticiones.length;
@@ -6261,6 +6331,63 @@ async function conductor() {
     }
   }
 
+  // 33. el gate de red también mira los workers. La conexión se enganchaba al target `page` y el
+  //     `Network.enable` iba solo a esa sesión: un `WebSocket` creado dentro de un worker no
+  //     aparecía en ninguna de las dos listas y se escapaba al gate. Aquí se crea un worker que
+  //     abre un `wss://` a un host que no existe (`.invalid`, RFC 6761: no hay red detrás) y se
+  //     exige que el gate por defecto lo vea. Con `APKC_GATE_SIN_WORKERS=1` no se enciende el
+  //     auto-attach y esta misma sonda se escapa: es la falsificación de la comprobación.
+  {
+    const hostSonda = "sonda-ajena-del-gate.invalid";
+    const urlSonda = "wss://" + hostSonda + "/relay";
+    const antesSonda = webSockets.length;
+    // El worker espera un instante antes de abrir el socket: su sesión se engancha al nacer y
+    // necesita que le llegue el `Network.enable`. Con el auto-attach apagado ningún retardo sirve,
+    // porque esa sesión no está enganchada a esta conexión. El socket se cierra en cuanto se crea
+    // —`webSocketCreated` sale antes del handshake— para no resolver siquiera el nombre.
+    const guion = "let sonda = null;\n" +
+      "setTimeout(() => {\n" +
+      "  sonda = new WebSocket(" + JSON.stringify(urlSonda) + ");\n" +
+      "  sonda.addEventListener(\"error\", () => {});\n" +
+      "  sonda.close();\n" +
+      "  postMessage(\"abierto\");\n" +
+      "}, 400);\n";
+    const lanzado = await evaluar(`(() => {
+      try {
+        const url = URL.createObjectURL(new Blob([${JSON.stringify(guion)}], { type: "text/javascript" }));
+        const w = new Worker(url);
+        window.__sondaGate = { w, url };
+        w.onerror = () => {};
+        return { creado: true };
+      } catch (e) { return { creado: false, error: String(e) }; }
+    })()`);
+    let vistas = [];
+    for (let i = 0; i < 40; i++) {
+      vistas = webSockets.slice(antesSonda).filter((u) => String(u).indexOf(hostSonda) !== -1);
+      if (vistas.length) break;
+      await esperar(250);
+    }
+    const { ajenas: ajenasSonda } = gates.clasificarUrls(vistas, { puerto: PUERTO, hostsPermitidos: [] });
+    comprueba("gate de red: el WebSocket abierto en un worker se ve en su sesión y cuenta como ajeno",
+      !!lanzado && lanzado.creado === true && vistas.length > 0 && ajenasSonda.length === vistas.length,
+      !lanzado || lanzado.creado !== true ?
+        "no se pudo crear el worker: " + ((lanzado && lanzado.error) || "?") :
+        vistas.length ? vistas.length + " visto(s): " + ajenasSonda.slice(0, 2).join(", ") :
+          "no se vio ningún WebSocket del worker: " + urlSonda + " escapó al gate" +
+            (GATE_SIN_WORKERS ? " (auto-attach apagado a propósito)" : ""));
+    await evaluar(`(() => {
+      const s = window.__sondaGate;
+      if (s) { try { s.w.terminate(); } catch (e) { /* ya muerto */ } URL.revokeObjectURL(s.url); }
+      delete window.__sondaGate;
+      return true;
+    })()`);
+    // la sonda es deliberada: ya demostró lo que tenía que demostrar y se retira del registro para
+    // que el gate final siga contando solo lo que pidió la pestaña
+    for (let i = webSockets.length - 1; i >= antesSonda; i--) {
+      if (String(webSockets[i]).indexOf(hostSonda) !== -1) webSockets.splice(i, 1);
+    }
+  }
+
   // requisito del proyecto, escrito como comprobación: la pestaña no puede pedir nada fuera de
   // su origen. Ni un CDN de un runtime de terceros, ni telemetría, ni una fuente. En el modo
   // externo la lista blanca son los hosts de `wisp-relays.json`; por defecto va vacía y cualquier
@@ -6284,6 +6411,13 @@ async function conductor() {
   comprueba("gate por defecto: cero WebSocket fuera del origen declarado",
     wsAjenas.length === 0, wsAjenas.length ? "wss:// ajenos: " + wsAjenas.slice(0, 3).join(", ") :
       webSockets.length + " websockets, todos locales");
+  // La cobertura es parte del gate: si la conexión no enganchó ni un worker, el gate vuelve a
+  // mirar solo la sesión de la página y el hueco que cerró la sección 33 vuelve a estar abierto.
+  const cubierto = cobertura();
+  comprueba("gate de red: la conexión cubre la página y al menos un worker",
+    cubierto.workersConRed >= 1,
+    "sesiones con Network.enable: " + cubierto.sesiones +
+      (cubierto.sinRed ? " · sin red: " + cubierto.sinRed : ""));
 
   ws.close();
   console.log("\n" + hechos + " comprobaciones bien, " + fallos + " mal");
