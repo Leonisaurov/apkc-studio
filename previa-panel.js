@@ -1141,12 +1141,17 @@ export function crearPreviaPanel({ hospedador, proyecto, estadoPestana, editor, 
       // el resultado se guarda en las claves propias de cada superficie. El borde solo decide qué
       // arista se pega; el alto deja de ser `auto` para que el tirador sur tenga efecto.
       const caja = cajaAcoplada(estado.borde, f.ancho(), altoLibreFlotante(nombre), medidas);
+      // cajaAcoplada devuelve números para el borde elegido y "auto" para los otros tres. Asignar
+      // el número directo al CSSOM lo descarta (un length sin unidad no es válido salvo cero), así que
+      // el top/bottom anterior seguía ahí y la capa no se pegaba al borde aunque el estado dijera
+      // otra cosa. Solo los números llevan px; "auto" se deja como está.
+      const bordeCss = (valor) => (typeof valor === "number" ? valor + "px" : valor);
       contenedor.style.width = caja.ancho + "px";
       contenedor.style.height = caja.alto + "px";
-      contenedor.style.top = caja.arriba;
-      contenedor.style.bottom = caja.abajo;
-      contenedor.style.left = caja.izquierda;
-      contenedor.style.right = caja.derecha;
+      contenedor.style.top = bordeCss(caja.arriba);
+      contenedor.style.bottom = bordeCss(caja.abajo);
+      contenedor.style.left = bordeCss(caja.izquierda);
+      contenedor.style.right = bordeCss(caja.derecha);
     } else if (estado.modo === MODO_MINIMIZADO) {
       // la pastilla va abajo a la derecha: el título sigue a la vista y el emulador queda libre
       contenedor.style.width = "auto";

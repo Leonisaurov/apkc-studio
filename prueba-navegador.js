@@ -647,7 +647,10 @@ const conductor = `(async () => {
       const campoAuto = document.getElementById("hotswap-firma");
       if (casillaAuto && campoAuto && typeof abrir === "function") {
         document.querySelector('.pestana-vista[data-vista="pestana"]').click();
-        await abrir("/proyecto/src/" + paqueteSwap.replace(/\./g, "/") + "/MainActivity.java");
+        // El conductor es un template literal: el punto hay que escaparlo dos veces o llega al
+        // navegador como /./g y sustituye TODOS los caracteres del paquete, dejando una ruta
+        // /proyecto/src//////////////MainActivity.java que no abre ningún documento.
+        await abrir("/proyecto/src/" + paqueteSwap.replace(/\\./g, "/") + "/MainActivity.java");
         campoAuto.value = "";
         casillaAuto.checked = true;
         document.getElementById("compilar-debug").click();
@@ -696,16 +699,20 @@ const conductor = `(async () => {
     const canvas = document.getElementById("previa-lateral-canvas");
     const puntero = (n) => (n ? getComputedStyle(n).pointerEvents : "falta");
     const visible = !!(inspector && !inspector.hidden && inspector.getClientRects().length);
-    // el punto se busca donde el inspector se solapa con el canvas: es donde el clic del modelo
-    // caía en la pestaña y no en el teléfono
-    const caja = inspector ? inspector.getBoundingClientRect() : null;
+    // El punto se busca en la franja de pestañas, no en la cabecera: la sonda CDP mostró que la
+    // cabecera ocupa los primeros 29 px de la capa y su botón #previa-inspector-minimizar captura
+    // el clic a 14 px del borde, mientras que desde la franja de pestañas en adelante
+    // elementFromPoint devuelve #previa-lateral-canvas. Lo que se comprueba es que la lámina de
+    // lectura (pestañas y paneles) deja pasar el clic al teléfono, no que lo haga un botón real.
     const cajaCanvas = canvas ? canvas.getBoundingClientRect() : null;
+    const franja = secciones ? secciones.getBoundingClientRect() : null;
     let el = null;
-    if (caja && cajaCanvas) {
-      const x = (Math.max(caja.left, cajaCanvas.left) + Math.min(caja.right, cajaCanvas.right)) / 2;
-      const arriba = Math.max(caja.top, cajaCanvas.top);
-      const abajo = Math.min(caja.bottom, cajaCanvas.bottom);
-      if (abajo > arriba) el = document.elementFromPoint(x, arriba + Math.min(14, (abajo - arriba) / 2));
+    if (franja && cajaCanvas) {
+      const x = (Math.max(franja.left, cajaCanvas.left) + Math.min(franja.right, cajaCanvas.right)) / 2;
+      const y = (Math.max(franja.top, cajaCanvas.top) + Math.min(franja.bottom, cajaCanvas.bottom)) / 2;
+      if (x > Math.max(franja.left, cajaCanvas.left) && y > Math.max(franja.top, cajaCanvas.top)) {
+        el = document.elementFromPoint(x, y);
+      }
     }
     const modo = inspector ? inspector.dataset.modo : "";
     if (inspector) inspector.dataset.modo = "acoplado";
