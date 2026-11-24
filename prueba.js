@@ -1124,6 +1124,30 @@ const modeloDibujo = {
   if (!pulsar) mal("el texto del botón no se pinta en mayúsculas como en textAllCaps");
 }
 
+// 6b-ter-bis. las plantillas `chatbt` y `tareas` también declaran `android:hint` sobre un EditText
+// sin fondo: cada una ha de pintar UN subrayado, no dos, y su pista no puede confundirse con texto.
+for (const [nombre, id, pista] of [
+  ["chatbt", "id/entrada", "Mensaje para el equipo"],
+  ["tareas", "id/nueva", "Nueva tarea"],
+]) {
+  const modelo = {
+    pantalla: { x: 0, y: 0, ancho: 100, alto: 100 }, aproximado: true, nodos: 2,
+    raiz: { tipo: "LinearLayout", rect: { x: 0, y: 0, ancho: 100, alto: 100 }, hijos: [
+      { tipo: "EditText", id, idRef: "0x7f010002", pista, texto: "",
+        rect: { x: 0, y: 48, ancho: 100, alto: 24 } },
+    ] },
+  };
+  if (vistaPrevia.textoDeNodo(modelo.raiz.hijos[0]) !== "") {
+    mal(nombre + ": textoDeNodo confunde la pista con el texto del EditText");
+  }
+  const lienzo = lienzoFalso(100, 100);
+  vistaPrevia.pintarModelo(lienzo.canvas, modelo, { ancho: 100, alto: 100 });
+  const trazos = lienzo.llamadas.filter((c) => c.nombre === "moveTo" && c.args.join(",") === "0,71.5");
+  if (trazos.length !== 1) mal(nombre + ": el EditText pinta " + trazos.length + " subrayados");
+  const pistas = lienzo.llamadas.filter((c) => c.nombre === "fillText" && c.args[0] === pista);
+  if (pistas.length !== 1) mal(nombre + ": la pista se pinta " + pistas.length + " veces");
+}
+
 // 6b-quater. el estado vacío y la línea del emulador son uno solo: el panel (`previa-panel.js`) los
 // importa de aquí, así que las dos superficies —la vista dividida y Pantalla— dicen lo mismo del
 // mismo modelo y ninguna llama «vista previa» al canvas que ejecuta la app.
@@ -1275,6 +1299,49 @@ if (conDinamico.length !== 2 || conDinamico[1].texto !== "Pulsos: 1") {
   mal("rectsEscalados no usa textoDinamico: " + JSON.stringify(conDinamico.map((r) => r.texto)));
 }
 
+// 6c-ter. la pista del EditText viaja aparte del texto: `apkc preview` publica `pista` con `texto`
+// vacío, el rect la propaga y el pintor la dibuja atenuada sobre el fondo blanco del tema con un
+// subrayado inferior de 1dp. Nunca se convierte en `texto`, y el clip del marco sigue recortando.
+{
+  const nodo = { tipo: "EditText", id: "id/editor", idRef: "0x7f010002", pista: "Escribe una nota",
+    texto: "", rect: { x: 0, y: 48, ancho: 100, alto: 24 } };
+  const modelo = { pantalla: { x: 0, y: 0, ancho: 100, alto: 100 }, aproximado: true, nodos: 2,
+    raiz: { tipo: "LinearLayout", rect: { x: 0, y: 0, ancho: 100, alto: 100 }, hijos: [nodo] } };
+  const rects = vistaPrevia.rectsEscalados(modelo, 100, 100);
+  if (rects.length !== 2 || rects[1].pista !== "Escribe una nota" || rects[1].texto !== "") {
+    mal("rectsEscalados no propaga la pista sin mezclarla con el texto: " +
+      JSON.stringify(rects.map((r) => [r.texto, r.pista])));
+  }
+  if (vistaPrevia.textoDeNodo(nodo) !== "") mal("textoDeNodo confunde la pista con el texto");
+  const { canvas, llamadas } = lienzoFalso(100, 100);
+  vistaPrevia.pintarModelo(canvas, modelo, { ancho: 100, alto: 100 });
+  const pista = llamadas.findIndex((c) => c.nombre === "fillText" && c.args[0] === "Escribe una nota");
+  if (pista < 0) mal("el pintor no dibuja la pista del EditText vacío");
+  else {
+    const y = llamadas[pista].args[2];
+    if (!(y >= 48 && y <= 72)) mal("la pista no se pinta en la fila del EditText: y=" + y);
+    const alfa = estiloAntes(llamadas, pista, "globalAlpha");
+    if (!(alfa > 0 && alfa < 1)) mal("la pista no se pinta atenuada: " + alfa);
+  }
+  const relleno = llamadas.findIndex((c, i) => c.nombre === "fillRect" &&
+    c.args.join(",") === "0,48,100,24" && estiloAntes(llamadas, i, "fillStyle") === "#ffffff");
+  if (relleno < 0) mal("el EditText sin fondo no pinta el blanco del tema");
+  if (llamadas.some((c) => c.nombre === "roundRect")) mal("el EditText pinta el gris del botón");
+  const subrayado = llamadas.findIndex((c) => c.nombre === "moveTo" && c.args.join(",") === "0,71.5");
+  if (subrayado < 0) mal("el EditText no pinta el subrayado inferior de 1dp");
+  else {
+    if (estiloAntes(llamadas, subrayado, "strokeStyle") !== "#30323a") {
+      mal("el subrayado no usa el color de texto del tema: " + estiloAntes(llamadas, subrayado, "strokeStyle"));
+    }
+    if (estiloAntes(llamadas, subrayado, "lineWidth") !== 1) {
+      mal("el subrayado no mide 1dp escalada: " + estiloAntes(llamadas, subrayado, "lineWidth"));
+    }
+  }
+  if (llamadas.filter((c) => c.nombre === "clip").length < 2) {
+    mal("el clip del marco ya no recorta los nodos");
+  }
+}
+
 // 6c-bis. la entrada de texto del emulador: los tipos que admiten teclado son los mismos que
 //         `admiteTecleo` del intérprete, el toque elige el EditText más profundo y el texto tecleado
 //         viaja en el guion como `--escribir id/texto`, sin tocar el XML del editor.
@@ -1372,6 +1439,16 @@ if (argvTexto.join(" ") !==
 }
 if (!/createElement\("input"\)/.test(fuentePreviaEstado) || !/--escribir/.test(fuentePreviaEstado)) {
   mal("previa-panel.js no monta un campo real ni entrega --escribir al intérprete");
+}
+// El campo real no puede dejar su texto duplicado en el canvas: con foco se suprime `textoDinamico`
+// solo en la copia escalada, y al abrir y al cerrar se repinta para entrar y salir de ese estado.
+if (!/if \(focoTexto && escalado\)[\s\S]{0,320}?delete nodo\.textoDinamico/.test(fuentePreviaEstado) ||
+    !/if \(!apagado\) pintarRender\(\);/.test(fuentePreviaEstado)) {
+  mal("previa-panel.js no aparta el textoDinamico del EditText enfocado ni lo devuelve al cerrar");
+}
+const abrirCampo = (fuentePreviaEstado.match(/function abrirCampoTexto\([\s\S]*?\n  \}/) || [])[0] || "";
+if (!/pintarRender\(\);/.test(abrirCampo)) {
+  mal("previa-panel.js no repinta al abrir el campo, así que el texto viejo sigue bajo el input");
 }
 
 // 6d. la vista dividida: ancho del separador, ruta del layout y bloque `ejecucion`. Son funciones

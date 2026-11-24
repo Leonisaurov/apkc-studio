@@ -2798,6 +2798,10 @@ export function crearPreviaPanel({ hospedador, proyecto, estadoPestana, editor, 
     campoTexto.hidden = true;
     focoTexto = null;
     if (activo) campoTexto.blur();
+    // Sin foco ya no se suprime `textoDinamico`: repintar devuelve al canvas lo tecleado. Solo si
+    // la pantalla sigue encendida, porque `pintarRender()` cierra el campo al apagar y no debe
+    // reentrar aquí.
+    if (!apagado) pintarRender();
   }
 
   // Entrega el texto final al intérprete repitiendo el guion completo. Solo se fusiona con el último
@@ -2849,6 +2853,9 @@ export function crearPreviaPanel({ hospedador, proyecto, estadoPestana, editor, 
     if (typeof campoTexto.setSelectionRange === "function") {
       campoTexto.setSelectionRange(0, campoTexto.value.length);
     }
+    // Repintar ya: con el foco puesto, `modeloDelEmulador` oculta el `textoDinamico` de este nodo
+    // para que el canvas no pinte debajo del `<input>` el mismo texto que muestra el campo.
+    pintarRender();
   }
 
   function montarCampoTexto() {
@@ -3091,7 +3098,19 @@ export function crearPreviaPanel({ hospedador, proyecto, estadoPestana, editor, 
   function modeloDelEmulador() {
     const modelo = modeloActual();
     if (!modelo) return null;
-    return modeloParaEmulador(modelo, pantalla.ancho, pantalla.alto);
+    const escalado = modeloParaEmulador(modelo, pantalla.ancho, pantalla.alto);
+    // Mientras el `<input>` tiene el foco, el `textoDinamico` del nodo enfocado se vería dos veces:
+    // una en el canvas y otra dentro del campo. Se quita SOLO en esta copia escalada (en memoria),
+    // nunca en el modelo de la ejecución: al cerrar el campo el siguiente pintado lo vuelve a leer
+    // de ahí. Sin Editor.cambiar() ni OPFS.
+    if (focoTexto && escalado) {
+      for (const { nodo } of nodosAplanados(escalado)) {
+        if (nodo && nodo.idRef === focoTexto.idRef && esEditableTexto(nodo.tipo)) {
+          delete nodo.textoDinamico;
+        }
+      }
+    }
+    return escalado;
   }
 
   function pintarRender(motivo) {

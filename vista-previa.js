@@ -22,6 +22,12 @@ const NODOS_MAXIMOS = 512;
 // `Widget.Material.Button` sale #d6d7d7. Son del tema de la APP, no del editor: el lienzo
 // representa la pantalla del teléfono aunque quien lo mire esté en tema oscuro.
 const TEMA_APARATO = { fondo: "#ffffff", texto: "#30323a", boton: "#d6d7d7" };
+// Los tipos que admiten teclado: los mismos de `admiteTecleo` en apkc preview y de
+// `TIPOS_CON_TECLADO` en previa-panel.js. Se repiten aquí para no crear un import circular (ese
+// módulo ya importa este); solo sirven para dar al EditText su fondo y su subrayado.
+const TIPOS_CON_TECLADO = new Set([
+  "EditText", "AutoCompleteTextView", "MultiAutoCompleteTextView", "TextInputEditText",
+]);
 // Widget.Material.Button (android.jar 34) declara minWidth=88dp; el minHeight declarado es 48dp,
 // pero el gris que ART pinta en el aparato mide 40dp: en la captura de Contador.apk en Droidloom
 // (1920×1080, density 213) el relleno va de y=408 a y=460, es decir 52 px × 160/213 ≈ 39dp.
@@ -253,6 +259,9 @@ export function rectsEscalados(modelo, ancho, alto) {
       idRef: String(nodo.idRef || ""),
       oyente: nodo.oyente === true,
       texto: textoDeNodo(nodo),
+      // La pista (`android:hint`) es del layout, no de la ejecución: viaja aparte de `texto` para
+      // que `textoDeNodo` siga sin confundirla con lo que la app escribió.
+      pista: typeof nodo.pista === "string" ? nodo.pista : "",
       // colores y letra del layout o, si no los declara, los del tema medido del aparato
       fondo: apariencia.fondo,
       colorTexto: apariencia.colorTexto,
@@ -561,6 +570,21 @@ export function pintarModelo(canvas, modelo, medir) {
       ctx.fillRect(r.x, r.y, r.ancho, r.alto);
     } else if (r.boton) {
       pintarFondoBoton(ctx, r, marcoRect.escala);
+    } else if (TIPOS_CON_TECLADO.has(r.tipo)) {
+      // Un EditText sin fondo declarado deja ver el blanco del tema, nunca el gris del botón, y
+      // lleva un subrayado inferior de 1dp escalada: es lo que lo distingue de un TextView en ART.
+      ctx.fillStyle = TEMA_APARATO.fondo;
+      ctx.fillRect(r.x, r.y, r.ancho, r.alto);
+      // HIPÓTESIS (sin medición propia): el color del subrayado es el del texto del tema. No se ha
+      // medido en el aparato el tono exacto del EditText de Theme.DeviceDefault.Light, así que se
+      // reutiliza `colorTexto`/`texto` del tema en vez de inventar un literal nuevo.
+      const grosorSubrayado = Math.max(1, marcoRect.escala);
+      ctx.strokeStyle = r.colorTexto || TEMA_APARATO.texto;
+      ctx.lineWidth = grosorSubrayado;
+      ctx.beginPath();
+      ctx.moveTo(r.x, r.y + r.alto - grosorSubrayado / 2);
+      ctx.lineTo(r.x + r.ancho, r.y + r.alto - grosorSubrayado / 2);
+      ctx.stroke();
     }
     // ART no pone ningún borde alrededor de las vistas que tienen oyente: antes se dibujaba aquí
     // un píxel de acento que en el aparato no existe. La lista de vistas que responden sigue en el
@@ -597,7 +621,12 @@ export function pintarModelo(canvas, modelo, medir) {
     // (`Button · id/pulsar`); sobre un botón parecía un diálogo pegado y el usuario pidió quitarlo.
     // El tipo y el id no se pierden: siguen en el modelo, en `rectsEscalados`, en el `resumen` que
     // devuelve `pintarModelo` y en `data-nodos` del canvas (no se pinta nada de eso).
-    if (r.texto && r.alto >= 8) {
+    // Si no hay texto pero el nodo trae pista (`android:hint`), se pinta la pista atenuada: es
+    // como ART muestra el hint de un EditText vacío. No se convierte en `texto`: el modelo y
+    // `textoDeNodo` siguen distinguiendo lo que declaró el layout de lo que escribió la app.
+    // El `save`/`restore` de este nodo deja el alfa limpio para los demás.
+    const visibleTexto = r.texto || r.pista;
+    if (visibleTexto && r.alto >= 8) {
       // `tamTexto`/`estilo` del modelo (sp≈dp) escalados con la pantalla: un TextView sin
       // estilo usa los 14sp del tema; el de la plantilla Contador trae Large (22sp).
       const escalaTexto = marcoRect.escala;
@@ -607,11 +636,13 @@ export function pintarModelo(canvas, modelo, medir) {
       ctx.fillStyle = r.colorTexto || TEMA_APARATO.texto;
       ctx.textBaseline = "middle";
       ctx.textAlign = r.boton ? "center" : "left";
+      if (!r.texto && r.pista) ctx.globalAlpha = 0.5;
       // TextAppearance.Material.Button pone textAllCaps: en el aparato «Pulsar» se lee PULSAR.
-      const visible = r.mayusculas ? r.texto.toUpperCase() : r.texto;
+      const visible = r.mayusculas ? visibleTexto.toUpperCase() : visibleTexto;
       const hueco = Math.max(0, r.ancho - (r.relleno.izq + r.relleno.der) * escalaTexto);
       const xTexto = r.boton ? r.x + r.ancho / 2 : r.x + r.relleno.izq * escalaTexto;
       ctx.fillText(visible, xTexto, r.y + r.alto / 2, hueco);
+      ctx.globalAlpha = 1;
       ctx.textAlign = "left";
       ctx.textBaseline = "top";
     }
