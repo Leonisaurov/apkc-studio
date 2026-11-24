@@ -289,8 +289,17 @@ function recorte(valor) {
   return String(valor == null ? "" : valor).slice(0, 80);
 }
 
-// Prepara el payload que espera el núcleo: `{ pem, huella }` con el sha256 del bundle tal cual,
-// como `HuellaCAsPEM` en Go. Rechaza extensión, nombre con esquema, tamaño, codificación y PEM.
+// El BOM UTF-8 (`EF BB BF`) no es contenido del PEM: es una marca del editor que no viaja al
+// núcleo. Se decodifica con `ignoreBOM: true` para que el decodificador no lo borre a escondidas y
+// se quita exactamente un U+FEFF al principio. Un segundo BOM, o un U+FEFF en medio, es un byte
+// fuera de bloque y se rechaza: el BOM no puede colar nada que no esté dentro de un `CERTIFICATE`.
+const BOM_UTF8 = 0xfeff;
+
+// Prepara el payload que espera el núcleo: `{ pem, huella }` con el sha256 del PEM **entregado**,
+// como `HuellaCAsPEM` en Go. La huella se calcula sobre los bytes de `pem` (sin BOM), no sobre el
+// fichero crudo: `apkcWispCargarCAs` compara su huella con el PEM que recibe y una huella tomada
+// del fichero crudo no coincidiría con el texto que se le pasa. Rechaza extensión, nombre con
+// esquema, tamaño, codificación y PEM.
 export async function prepararCAS({ nombre, bytes, huellaEsperada } = {}) {
   const problemaNombre = nombreCASValido(nombre);
   if (problemaNombre) throw new Error(problemaNombre);
@@ -301,16 +310,26 @@ export async function prepararCAS({ nombre, bytes, huellaEsperada } = {}) {
       "lee del dispositivo y no se acepta uno más grande");
   }
   let texto;
-  try { texto = new TextDecoder("utf-8", { fatal: true }).decode(datos); }
+  try { texto = new TextDecoder("utf-8", { fatal: true, ignoreBOM: true }).decode(datos); }
   catch (e) { throw new Error("el fichero de CAs no es texto UTF-8: " + nombre); }
+  if (texto.charCodeAt(0) === BOM_UTF8) texto = texto.slice(1);
+  // `\s` de JavaScript cuenta U+FEFF como espacio, así que un BOM de más pasaría el validador y
+  // llegaría al núcleo, cuyo `bytes.TrimSpace` de Go no lo traga. Se rechaza aquí, explícito.
+  if (texto.includes("\ufeff")) {
+    throw new Error("el fichero de CAs lleva un BOM (U+FEFF) fuera del principio: son bytes fuera " +
+      "de un bloque CERTIFICATE (" + nombre + ")");
+  }
   const problemaPEM = validarCAsPEM(texto);
   if (problemaPEM) throw new Error(problemaPEM + " (" + nombre + ")");
   const esperada = normalizarHuella(huellaEsperada);
-  const huella = await huellaSHA256(datos);
+  const bytesPEM = new TextEncoder().encode(texto);
+  const huella = await huellaSHA256(bytesPEM);
   if (esperada && esperada !== huella) {
     throw new Error("la huella del bundle de CAs no coincide: esperada " + esperada + ", real " + huella);
   }
-  return { pem: texto, huella, nombre: String(nombre), bytes: datos.length };
+  // `bytes` es el tamaño del PEM entregado, no el del fichero: con BOM no coinciden, y quien lo
+  // pinta («CAs aceptadas: N bytes») debe hablar de lo que viaja al núcleo.
+  return { pem: texto, huella, nombre: String(nombre), bytes: bytesPEM.length };
 }
 
 // El puente con el núcleo, congelado en DEPS.md: `globalThis.apkcWispCargarCAs({ pem, huella })`.
@@ -323,6 +342,16 @@ export function nucleoAceptaCAs(global = globalThis) {
 export async function cargarCAsEnNucleo({ pem, huella, global = globalThis } = {}) {
   const texto = String(pem == null ? "" : pem);
   if (!texto.trim()) throw new Error("no hay bundle de CAs que cargar en el núcleo");
+  // Invariante del contrato: la huella que ve el núcleo es el sha256 exacto del PEM que se le
+  // entrega (`sha256(pem) === huella`). Si un llamador trae una huella del fichero crudo —con BOM—
+  // o de otro texto, se corta aquí en vez de fijar en el núcleo una huella que no valida nada.
+  const huellaPedida = normalizarHuella(huella);
+  if (!huellaPedida) throw new Error("el bundle de CAs no lleva huella sha256 que entregar al núcleo");
+  const huellaReal = await huellaSHA256(new TextEncoder().encode(texto));
+  if (huellaPedida !== huellaReal) {
+    throw new Error("la huella entregada al núcleo no es el sha256 del PEM que se entrega: " +
+      "huella " + huellaPedida + ", real " + huellaReal);
+  }
   if (!nucleoDisponible(global)) {
     throw new Error("núcleo WISP no disponible en esta compilación: las CAs no se pueden cargar ni " +
       "se abre ningún relay; Resolver sigue limitado a deps-index.json del propio origen");

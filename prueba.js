@@ -3590,6 +3590,76 @@ public final class R {
       mal("resolverPorWisp no carga las CAs antes de usar el relay: " + ordenCA.join(","));
     }
 
+    // El BOM UTF-8 marca el fichero, no el PEM: la huella se calcula sobre el texto que se entrega
+    // al núcleo, así que `sha256(pem) === huella` siempre. Falsificación que dejó la auditoría de
+    // CAs: con la huella tomada del fichero crudo (70 bytes) y el PEM entregado (67), el núcleo
+    // recibiría un par que no valida nada.
+    const conBOM = new Uint8Array([0xef, 0xbb, 0xbf, ...bytesCA]);
+    const preparadoBOM = await wispMod.prepararCAS({ nombre: "ca.pem", bytes: conBOM });
+    const huellaPEMEntregado = await depsMod.sha256Hex(new TextEncoder().encode(preparadoBOM.pem));
+    const huellaFicheroCrudo = await depsMod.sha256Hex(conBOM);
+    console.log("  BOM: bytes=" + conBOM.length + " pemBytes=" + preparadoBOM.bytes +
+      " sha256(pem)=" + preparadoBOM.huella.slice(0, 12) +
+      " sha256(fichero)=" + huellaFicheroCrudo.slice(0, 12));
+    if (preparadoBOM.pem !== pemCA) {
+      mal("el BOM (U+FEFF) llega al PEM que se entrega al núcleo");
+    }
+    if (preparadoBOM.bytes !== bytesCA.length) {
+      mal("prepararCAS cuenta los bytes del fichero y no los del PEM entregado: " + preparadoBOM.bytes +
+        " frente a " + bytesCA.length);
+    }
+    if (preparadoBOM.huella !== huellaPEMEntregado) {
+      mal("sha256(pem) no es la huella del bundle: " + preparadoBOM.huella + " frente a " + huellaPEMEntregado);
+    }
+    if (huellaPEMEntregado === huellaFicheroCrudo) {
+      mal("la falsificación por el fichero crudo no diverge: la prueba no prueba nada");
+    }
+    // y el núcleo recibe exactamente ese par, coherente
+    let payloadBOM = null;
+    const globalBOM = {
+      apkcWisp: { version: "apkc-wisp/1", obtener: async () => ({}) },
+      apkcWispCargarCAs: async (peticion) => { payloadBOM = peticion; return { ok: true }; },
+    };
+    await wispMod.cargarCAsEnNucleo({
+      pem: preparadoBOM.pem, huella: preparadoBOM.huella, global: globalBOM,
+    });
+    if (!payloadBOM || payloadBOM.pem !== preparadoBOM.pem || payloadBOM.huella !== preparadoBOM.huella) {
+      mal("apkcWispCargarCAs no recibe el par {pem, huella} del bundle con BOM: " +
+        JSON.stringify(payloadBOM).slice(0, 160));
+    }
+    if (await depsMod.sha256Hex(new TextEncoder().encode(payloadBOM.pem)) !== payloadBOM.huella) {
+      mal("el núcleo recibe una huella que no es el sha256 del PEM entregado");
+    }
+    // el puente corta el par incoherente: la huella del fichero crudo no vale con el PEM sin BOM
+    let parIncoherente = "";
+    try {
+      await wispMod.cargarCAsEnNucleo({
+        pem: preparadoBOM.pem, huella: huellaFicheroCrudo, global: globalBOM,
+      });
+    } catch (e) { parIncoherente = String(e && e.message ? e.message : e); }
+    if (!/no es el sha256 del PEM/.test(parIncoherente)) {
+      mal("cargarCAsEnNucleo acepta una huella que no es el sha256 del PEM: " + parIncoherente);
+    }
+    // el BOM no añade bytes fuera de bloque: un segundo BOM o basura detrás siguen rechazados
+    for (const [etiqueta, bytesMalos] of [
+      ["un BOM doble", new Uint8Array([0xef, 0xbb, 0xbf, ...conBOM])],
+      ["un BOM con basura detrás", new Uint8Array([...conBOM, ...new TextEncoder().encode("basura")])],
+    ]) {
+      let rechazo = "";
+      try { await wispMod.prepararCAS({ nombre: "ca.pem", bytes: bytesMalos }); }
+      catch (e) { rechazo = String(e && e.message ? e.message : e); }
+      if (!/fuera de un bloque|CERTIFICATE/.test(rechazo)) {
+        mal("prepararCAS acepta " + etiqueta + ": " + rechazo);
+      }
+    }
+    // la huella esperada se compara con la del PEM entregado, no con la del fichero
+    const fijadoBOM = await wispMod.prepararCAS({
+      nombre: "ca.pem", bytes: conBOM, huellaEsperada: huellaPEMEntregado,
+    });
+    if (fijadoBOM.huella !== preparadoBOM.huella) {
+      mal("prepararCAS no acepta como esperada la huella del PEM entregado");
+    }
+
     // el aviso dice las cuatro cosas que importan, y las dice el HTML que se pinta, no una copia
     const desdeAviso = html.indexOf('id="wisp-aviso"');
     const hastaAviso = desdeAviso < 0 ? -1 : html.indexOf("</dialog>", desdeAviso);
