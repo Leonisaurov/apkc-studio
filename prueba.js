@@ -4535,6 +4535,64 @@ public final class R {
     }
   }
 
+  // 6z. la plantilla «hola» no solo compila: se emula. Fija el contrato de su modelo medido con
+  //     `apkc preview` sobre la apk generada en esta rama (nodos/ids/texto). La base no lleva botón
+  //     ni android:id: un TextView dice «Hello World!» y el onCreate solo hace setContentView, así
+  //     que no hay nada que pulsar (el intérprete lo dice con rc 2) pero sí pantalla y pasos.
+  const hola = a.buildProject({ name: "Hola apkc", package: "com.hola.apkcstudio", minsdk: "21",
+    targetsdk: "34", hello: "Hello World!", template: "hola", button: false, kotlin: false,
+    libs: false, native: false, assets: false, device: false });
+  const layoutHola = hola.files["res/layout/main.xml"] || "";
+  const actividadHola = hola.files["src/com/hola/apkcstudio/MainActivity.java"] || "";
+  const textviewsHola = layoutHola.match(/<TextView\b/g) || [];
+  if (textviewsHola.length !== 1) mal(`hola: ${textviewsHola.length} TextView en el layout, esperado 1`);
+  if (!/android:text="Hello World!"/.test(layoutHola)) mal("hola: el layout no muestra «Hello World!»");
+  if (/android:id=/.test(layoutHola)) mal("hola: la plantilla base no debe declarar ids en el layout");
+  if (/setOnClickListener|findViewById/.test(actividadHola)) mal("hola: la actividad base no debe registrar oyentes");
+
+  const modeloHola = vistaPrevia.modeloDeSalida(
+    '{"paquete":"com.hola.apkcstudio","version":"0.1","actividad":".MainActivity",' +
+    '"layout":"res/layout/main.xml","pantalla":{"x":0,"y":0,"ancho":360,"alto":640},' +
+    '"aproximado":true,"nodos":2,"ejecucion":{"actividad":"com.hola.apkcstudio.MainActivity",' +
+    '"metodo":"onCreate","pasos":6,"pantallas":["com.hola.apkcstudio.MainActivity"],' +
+    '"ciclo":["com.hola.apkcstudio.MainActivity.onCreate"]},' +
+    '"raiz":{"tipo":"LinearLayout","ancho":"match_parent","alto":"match_parent",' +
+    '"rect":{"x":0,"y":0,"ancho":360,"alto":640},"hijos":[{"tipo":"TextView",' +
+    '"texto":"Hello World!","estilo":"@0x01030042","ancho":"wrap_content",' +
+    '"alto":"wrap_content","rect":{"x":124,"y":308,"ancho":112,"alto":24}}]}}');
+  if (!modeloHola) mal("hola: modeloDeSalida rechaza el JSON de apkc preview");
+  else {
+    const planoHola = vistaPrevia.nodosAplanados(modeloHola);
+    if (modeloHola.nodos !== 2 || planoHola.length !== 2) {
+      mal(`hola: nodos=${modeloHola.nodos} y aplanados=${planoHola.length}, esperados 2`);
+    }
+    const pantallaHola = modeloHola.pantalla || {};
+    if (!(pantallaHola.ancho > 0 && pantallaHola.alto > 0)) {
+      mal(`hola: pantalla ${JSON.stringify(pantallaHola)} sin ancho/alto positivos`);
+    }
+    const rectHola = modeloHola.raiz.rect || {};
+    if (!(rectHola.ancho > 0 && rectHola.alto > 0)) {
+      mal(`hola: rect de la raíz ${JSON.stringify(rectHola)} no es positivo`);
+    }
+    const hijosHola = modeloHola.raiz.hijos || [];
+    if (hijosHola.length !== 1 || hijosHola[0].tipo !== "TextView" || hijosHola[0].id !== undefined) {
+      mal(`hola: hijos ${JSON.stringify(hijosHola)}, esperado un TextView sin id`);
+    }
+    if (vistaPrevia.textoDeNodo(hijosHola[0]) !== "Hello World!") {
+      mal("hola: textoDeNodo no devuelve «Hello World!»");
+    }
+    if (!/\b2 nodos\b/.test(vistaPrevia.textoDelModelo(modeloHola))) {
+      mal("hola: textoDelModelo no cuenta los 2 nodos: " + vistaPrevia.textoDelModelo(modeloHola));
+    }
+    if (!((modeloHola.ejecucion || {}).pasos > 0) || modeloHola.avisos || modeloHola.error) {
+      mal(`hola: ejecución sin pasos o con avisos/error: ${JSON.stringify(modeloHola.ejecucion)}`);
+    }
+    const rectsHola = vistaPrevia.rectsEscalados(modeloHola, 360, 640);
+    if (rectsHola.length !== 2 || rectsHola[1].texto !== "Hello World!") {
+      mal(`hola: rectsEscalados no pinta el texto: ${JSON.stringify(rectsHola)}`);
+    }
+  }
+
   console.log(fallos ? `PRUEBA FALLA: ${fallos} problemas` : "prueba: todo en orden");
   process.exit(fallos ? 1 : 0);
 })();
