@@ -629,6 +629,92 @@ const conductor = `(async () => {
       }
     }
   }
+  // --- el registro y la consola: lámina sobre el teléfono y Toast que se repite -----------------
+  document.querySelector('.pestana-vista[data-vista="pestana"]').click();
+  // Las pestañas y los paneles del inspector son una lámina de lectura: si capturaran el puntero, el
+  // clic del modelo que cae bajo ellos no llegaría al canvas (f2710a1 dejó fuera solo el detalle del
+  // modelo y la pestaña lo volvió a tapar). Acoplada al borde, la capa sí responde entera.
+  r.inspectorLamina = (() => {
+    const inspector = document.getElementById("previa-inspector");
+    const secciones = inspector ? inspector.querySelector(".previa-secciones") : null;
+    const pestana = document.getElementById("previa-seccion-registro");
+    const panel = document.getElementById("previa-consola");
+    const canvas = document.getElementById("previa-lateral-canvas");
+    const puntero = (n) => (n ? getComputedStyle(n).pointerEvents : "falta");
+    const visible = !!(inspector && !inspector.hidden && inspector.getClientRects().length);
+    // el punto se busca donde el inspector se solapa con el canvas: es donde el clic del modelo
+    // caía en la pestaña y no en el teléfono
+    const caja = inspector ? inspector.getBoundingClientRect() : null;
+    const cajaCanvas = canvas ? canvas.getBoundingClientRect() : null;
+    let el = null;
+    if (caja && cajaCanvas) {
+      const x = (Math.max(caja.left, cajaCanvas.left) + Math.min(caja.right, cajaCanvas.right)) / 2;
+      const arriba = Math.max(caja.top, cajaCanvas.top);
+      const abajo = Math.min(caja.bottom, cajaCanvas.bottom);
+      if (abajo > arriba) el = document.elementFromPoint(x, arriba + Math.min(14, (abajo - arriba) / 2));
+    }
+    const modo = inspector ? inspector.dataset.modo : "";
+    if (inspector) inspector.dataset.modo = "acoplado";
+    const acoplado = { secciones: puntero(secciones), pestana: puntero(pestana), panel: puntero(panel) };
+    if (inspector) { if (modo) inspector.dataset.modo = modo; else delete inspector.dataset.modo; }
+    return {
+      visible, canvas: !!canvas, encima: el ? (el.id || el.tagName) : null,
+      dentroDelInspector: !!(el && inspector && inspector.contains(el)),
+      secciones: puntero(secciones), pestana: puntero(pestana), panel: puntero(panel), acoplado,
+    };
+  })();
+  // Un Toast repetido con el mismo texto reinicia su cuenta atrás. Se emite a t=0 y otra vez a los
+  // 2,9 s: a los 3,1 s del primero tiene que seguir visible (antes se ocultaba con el reloj del
+  // primero porque la firma no distinguía una emisión de un repintado). Un repintado del mismo
+  // modelo, en cambio, no lo reinicia.
+  r.toastRepetido = await (async () => {
+    const modulo = await import("./vista-previa.js");
+    const modelo = (toast) => ({ pantalla: { ancho: 360, alto: 640 },
+      layout: "res/layout/main.xml", nodos: 1,
+      raiz: { tipo: "LinearLayout", hijos: [] }, ejecucion: { actividad: "MainActivity",
+        toast, pasos: 1 } });
+    const capa = () => document.getElementById("previa-toast");
+    const a = modelo("Repetido");
+    modulo.pintarVistaPrevia(a);
+    const alPrincipio = { texto: capa() ? capa().textContent : "", oculto: capa() ? capa().hidden : null };
+    await new Promise((ok) => setTimeout(ok, 2900));
+    modulo.pintarVistaPrevia(a);
+    const trasRepintado = !(capa() && capa().hidden);
+    // la repetición llega con el MISMO objeto de ejecución (una sesión que vuelve a avisar) pero
+    // en un modelo nuevo: la firma por identidad de la ejecución no la distingue y se ocultaba a los
+    // 3 s del primer aviso
+    modulo.pintarVistaPrevia({ ...a, ejecucion: a.ejecucion });
+    await new Promise((ok) => setTimeout(ok, 200));
+    const aLosTres = { oculto: capa() ? capa().hidden : null, texto: capa() ? capa().textContent : "" };
+    await new Promise((ok) => setTimeout(ok, 3000));
+    const alFinal = capa() ? capa().hidden : null;
+    // dejar el emulador como estaba: sin modelo, el panel vuelve a su aviso
+    modulo.mensajeVistaPrevia("Emulador: compila el proyecto para ver la pantalla que ejecuta la app.");
+    return { alPrincipio, trasRepintado, aLosTres, alFinal };
+  })();
+  // Un drop con dos ficheros: antes se procesaba files[0] y el resto desaparecía sin una palabra.
+  // Ahora se atiende al primero y se nombra lo que se ignora.
+  r.dropVarios = await (async () => {
+    const canvas = document.getElementById("previa-lateral-canvas");
+    if (!canvas) return { falta: true };
+    const filas = () => [...document.querySelectorAll("#previa-log-lista li")]
+      .map((li) => li.textContent);
+    // un drop sintético con dos ficheros: el manejador solo mira la lista .files
+    const dt = new DataTransfer();
+    dt.items.add(new File([new Uint8Array([1, 2, 3, 4])], "primero.dex",
+      { type: "application/octet-stream" }));
+    dt.items.add(new File([new Uint8Array([5, 6, 7, 8])], "segundo.dex",
+      { type: "application/octet-stream" }));
+    const antes = filas().length;
+    const drop = new DragEvent("drop", { bubbles: true, cancelable: true, dataTransfer: dt });
+    canvas.dispatchEvent(drop);
+    const inmediatas = filas().slice(antes);
+    const estadoInmediato = document.getElementById("previa-render-estado").textContent;
+    await new Promise((ok) => setTimeout(ok, 700));
+    return { nArchivos: dt.files.length, antes, inmediatas, estadoInmediato,
+      despues: filas().slice(antes),
+      estado: document.getElementById("previa-render-estado").textContent };
+  })();
   r.sinUndefined = !/undefined/.test(document.body.innerText);
 
   // el rastreo local, que es lo único que la página guarda
@@ -963,6 +1049,41 @@ function comprueba(cond, msg) { if (!cond) { fallos++; console.log("  FALLO:", m
     } else {
       console.log("  toast: sin APKC_WASM, se omite la compilación de la plantilla Menú");
     }
+    // el registro y la consola del panel son una lámina, y el Toast repetido reinicia su cuenta
+    const il = v.inspectorLamina || {};
+    comprueba(il.visible === true && il.canvas === true,
+      "el registro y la consola del panel no están visibles para medir la lámina: " +
+      JSON.stringify(il));
+    comprueba(il.secciones === "none" && il.pestana === "none" && il.panel === "none",
+      "las pestañas o los paneles del inspector capturan el puntero y tapan el canvas: " +
+      JSON.stringify(il));
+    comprueba(il.dentroDelInspector === false,
+      "el clic en la franja de pestañas cae dentro del inspector y no en el canvas: " +
+      JSON.stringify({ encima: il.encima }));
+    comprueba(il.acoplado && il.acoplado.secciones === "auto" && il.acoplado.pestana === "auto" &&
+      il.acoplado.panel === "auto",
+      "acoplado al borde (data-modo=acoplado), el inspector no recupera el puntero para sus " +
+      "pestañas y su texto: " + JSON.stringify(il.acoplado));
+    comprueba(il.encima === "previa-lateral-canvas",
+      "el punto de la pestaña no cae sobre el canvas del panel: " + JSON.stringify(il.encima));
+    const tr = v.toastRepetido || {};
+    comprueba(tr.alPrincipio && tr.alPrincipio.texto === "Repetido" && tr.alPrincipio.oculto === false,
+      "el Toast sintético no se pintó sobre el panel: " + JSON.stringify(tr.alPrincipio));
+    comprueba(tr.trasRepintado === true,
+      "un repintado del mismo modelo ocultó el Toast antes de tiempo");
+    comprueba(tr.aLosTres && tr.aLosTres.oculto === false && tr.aLosTres.texto === "Repetido",
+      "el Toast repetido a los 2,9 s se ocultó a los 3 s del primero: " + JSON.stringify(tr.aLosTres));
+    comprueba(tr.alFinal === true,
+      "el Toast repetido no se retira solo pasados sus tres segundos: " + JSON.stringify(tr.alFinal));
+    const dv = v.dropVarios || {};
+    comprueba(!dv.falta && Array.isArray(dv.inmediatas) &&
+      dv.inmediatas.some((f) => /uno por vez/.test(String(f)) && /segundo\.dex/.test(String(f))),
+      "un drop con dos ficheros ignora el segundo sin nombrarlo: " + JSON.stringify(dv).slice(0, 500));
+    comprueba(/uno por vez/.test(String(dv.estadoInmediato)),
+      "el aviso de «uno por vez» no llega a la línea del emulador: " +
+      String(dv.estadoInmediato).slice(0, 200));
+    console.log("  inspector:", JSON.stringify({ lamina: il,
+      toast: v.toastRepetido, drop: { inmediatas: (dv.inmediatas || []).slice(-1) } }).slice(0, 700));
     comprueba(v.sinUndefined, "quedó un 'undefined' visible en la página");
     comprueba(v.localStorage === "funciona", "localStorage en http: " + v.localStorage);
     comprueba(v.diagnosticoVisible && /herramienta-no-arranca/.test(String(v.diagnostico)),

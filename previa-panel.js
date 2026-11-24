@@ -695,6 +695,10 @@ export function crearPreviaPanel({ hospedador, proyecto, estadoPestana, editor, 
   // y el temporizador que lo retira. El historial completo sigue en la consola de la app.
   let toastFirma = "";
   let toastTemporizador = 0;
+  // Qué modelo produjo el Toast visible y cuántas emisiones se han visto. Un repintado repite el
+  // mismo objeto y no reinicia la cuenta; una emisión nueva trae otro y sí, aunque el texto sea igual.
+  let toastModelo = null;
+  let toastFecha = 0;
   // Identidad de la ejecución que produjo el Toast: un WeakMap da un número a cada objeto
   // `ejecucion`. Un repintado o un cambio de tamaño conservan la misma referencia (el modelo
   // escalado comparte `ejecucion`), y un build nuevo trae otra, así que su Toast vuelve a salir.
@@ -1713,7 +1717,8 @@ export function crearPreviaPanel({ hospedador, proyecto, estadoPestana, editor, 
         const elegido = fichero.files && fichero.files[0];
         fichero.value = "";
         if (!elegido) return;
-        intercambiarDexSoltado(elegido, superficie.id).catch(() => {});
+        intercambiarDexSoltado(elegido, superficie.id)
+          .catch((e) => falloSilencioso("intercambiar el dex elegido", e));
       });
       boton.addEventListener("click", () => {
         if (typeof fichero.click === "function") fichero.click();
@@ -1779,6 +1784,13 @@ export function crearPreviaPanel({ hospedador, proyecto, estadoPestana, editor, 
     }
   }
 
+  // El historial completo sigue en la consola: un fallo que se deja a propósito sin mensaje visible
+  // (una imagen que no se puede importar, un refresco que no aplica) se registra aquí con contexto
+  // en vez de desaparecer.
+  function falloSilencioso(contexto, e) {
+    console.warn("[apkc-previa] " + contexto + ": " + (e && e.message ? e.message : e));
+  }
+
   // La firma distingue una ejecución nueva de un repintado del mismo modelo: si el usuario redimensiona
   // o entra en Pantalla, el Toast ya visible no vuelve a empezar su cuenta atrás; si vuelve a pulsar el
   // ítem o recompila, la identidad de `ejecucion` cambia y el aviso se muestra otra vez.
@@ -1793,11 +1805,21 @@ export function crearPreviaPanel({ hospedador, proyecto, estadoPestana, editor, 
         ejecucionesDeToast.set(ejecucion, id);
       }
     }
-    return JSON.stringify([id, resumen.toast, resumen.pulsaciones, resumen.interacciones,
+    // `toastFecha` cuenta las emisiones (modelos nuevos), no los repintados: dos avisos con el
+    // mismo texto son firmas distintas y el segundo reinicia la cuenta atrás. Sin esto, repetir el
+    // mismo Toast a los 2,9 s se ocultaba a los 3 s del primero.
+    return JSON.stringify([id, toastFecha, resumen.toast, resumen.pulsaciones, resumen.interacciones,
       resumen.consola.length, resumen.error]);
   }
 
   function pintarToast(modelo) {
+    // el modelo CRUDO distingue una emisión de un repintado: `modeloConPantalla` devuelve una copia
+    // escalada del mismo modelo cuando el tamaño elegido no coincide con el suyo
+    const fuente = modeloActual() || modelo;
+    if (fuente !== toastModelo) {
+      toastModelo = fuente;
+      toastFecha++;
+    }
     const resumen = apagado ? null : resumenEjecucion(modelo);
     const firma = firmaDeToast(modelo, resumen);
     if (!firma) {
@@ -2883,7 +2905,7 @@ export function crearPreviaPanel({ hospedador, proyecto, estadoPestana, editor, 
     clearTimeout(temporizadorVivo);
     temporizadorVivo = setTimeout(() => {
       temporizadorVivo = 0;
-      refrescarVivo().catch(() => {});
+      refrescarVivo().catch((e) => falloSilencioso("refrescar el modo vivo", e));
     }, typeof espera === "number" ? espera : ESPERA_TECLEO);
   }
 
@@ -3060,7 +3082,7 @@ export function crearPreviaPanel({ hospedador, proyecto, estadoPestana, editor, 
       const canvas = canvasVivo();
       if (canvas && typeof canvas.focus === "function") canvas.focus();
     }
-    refrescarVivo().catch(() => {});
+    refrescarVivo().catch((e) => falloSilencioso("refrescar el modo vivo", e));
     if (mensaje) avisarEdicion(mensaje);
     return true;
   }
@@ -4137,7 +4159,8 @@ export function crearPreviaPanel({ hospedador, proyecto, estadoPestana, editor, 
   function conectarSoltarCanvas(canvas, { editable = false } = {}) {
     if (!canvas) return;
     ponerPistaSoltar(canvas, canvas.title);
-    const archivoDeArrastre = (e) => e.dataTransfer && e.dataTransfer.files ? e.dataTransfer.files[0] : null;
+    const archivosDeArrastre = (e) => (e.dataTransfer && e.dataTransfer.files
+      ? Array.from(e.dataTransfer.files) : []);
     canvas.addEventListener("dragover", (e) => {
       if (!e.dataTransfer) return;
       const tipos = Array.from(e.dataTransfer.types || []);
@@ -4152,29 +4175,46 @@ export function crearPreviaPanel({ hospedador, proyecto, estadoPestana, editor, 
       // el navegador no puede quedarse el fichero: sin esto, soltarlo fuera de su rama lo abre como
       // documento y saca al usuario del editor sin guardar (el convenio de deps.js)
       e.preventDefault();
-      const archivo = archivoDeArrastre(e);
+      const archivos = archivosDeArrastre(e);
+      const archivo = archivos[0];
       if (!archivo) return;
-      if (esArchivoApk(archivo)) {
-        abrirApkSoltada(archivo).catch((err) => {
-          mensajeEmulador("no se pudo cargar el apk soltado: " + (err && err.message ? err.message : err));
-        });
-        return;
+      const atenderPrimero = () => {
+        if (esArchivoApk(archivo)) {
+          abrirApkSoltada(archivo).catch((err) => {
+            mensajeEmulador("no se pudo cargar el apk soltado: " +
+              (err && err.message ? err.message : err));
+          });
+          return;
+        }
+        if (esArchivoDex(archivo)) {
+          const superficie = SUPERFICIES.find((s) =>
+            s.canvasRender === canvas.id || s.canvasVivo === canvas.id);
+          intercambiarDexSoltado(archivo, superficie ? superficie.id : "panel").catch((err) => {
+            mensajeEmulador("no se pudo intercambiar el dex soltado: " +
+              (err && err.message ? err.message : err));
+          });
+          return;
+        }
+        if (!editable || !editando) return;
+        const nodo = seleccion && modeloVivo ? nodoPorRuta(modeloVivo.raiz, seleccion) : null;
+        if (!nodoImagen(nodo)) return;
+        const campo = document.querySelector(
+          '#previa-propiedades-campos [data-propiedad="android:src"]');
+        importarImagen(archivo, campo)
+          .catch((e) => falloSilencioso("importar la imagen soltada", e));
+      };
+      atenderPrimero();
+      if (archivos.length > 1) {
+        // Antes solo entraba `files[0]` y los demás desaparecían sin una palabra. El swap y la
+        // apertura de un apk trabajan de uno en uno (el guion del preview se repite entero), así
+        // que se dice qué se atiende y qué se ignora en vez de tragárselo. El aviso va DESPUÉS del
+        // primer fichero: su rechazo repinta la línea de estado y la lista, y borraría este texto.
+        const sobran = archivos.slice(1).map((f) => "«" + (f.name || "sin nombre") + "»");
+        const texto = "uno por vez: se atiende «" + (archivo.name || "el primer fichero") + "» y se " +
+          (sobran.length === 1 ? "ignora " + sobran[0] : "ignoran " + sobran.join(", "));
+        mensajeEmulador(texto);
+        registrarSwap(texto, "aviso");
       }
-      if (esArchivoDex(archivo)) {
-        const superficie = SUPERFICIES.find((s) =>
-          s.canvasRender === canvas.id || s.canvasVivo === canvas.id);
-        intercambiarDexSoltado(archivo, superficie ? superficie.id : "panel").catch((err) => {
-          mensajeEmulador("no se pudo intercambiar el dex soltado: " +
-            (err && err.message ? err.message : err));
-        });
-        return;
-      }
-      if (!editable || !editando) return;
-      const nodo = seleccion && modeloVivo ? nodoPorRuta(modeloVivo.raiz, seleccion) : null;
-      if (!nodoImagen(nodo)) return;
-      const campo = document.querySelector(
-        '#previa-propiedades-campos [data-propiedad="android:src"]');
-      importarImagen(archivo, campo).catch(() => {});
     });
     // el resultado de una carga se queda en el marco hasta que el usuario pulsa el emulador: el
     // overlay no captura el puntero, así que este `pointerdown` es el que lo retira
@@ -4334,7 +4374,7 @@ export function crearPreviaPanel({ hospedador, proyecto, estadoPestana, editor, 
         const f = archivoImagen.files && archivoImagen.files[0];
         const campo = campoImagenActivo || document.querySelector(
           '#previa-propiedades-campos [data-propiedad="android:src"]');
-        if (f) importarImagen(f, campo).catch(() => {});
+        if (f) importarImagen(f, campo).catch((e) => falloSilencioso("importar la imagen elegida", e));
         archivoImagen.value = "";
       });
       const cerrarPropiedades = document.getElementById("previa-propiedades-cerrar");

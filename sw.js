@@ -30,6 +30,33 @@ function conCabeceras(respuesta) {
   });
 }
 
+// Cachear es un extra: si falla (cuota llena, respuesta no cacheable) la página sigue funcionando.
+// Antes el `.catch(() => {})` se lo tragaba sin dejar rastro; ahora queda en la consola del SW.
+function falloSilencioso(contexto, e) {
+  console.warn("[apkc-sw] " + contexto + ": " + (e && e.message ? e.message : e));
+}
+
+// La versión del cache lleva fecha (apkc-studio-2026-11-22-...). Compararlas como texto pone
+// «1.10» antes que «1.9»; se comparan los números y, si empatan, el texto.
+function compararVersiones(a, b) {
+  const trozos = (v) => String(v).match(/\d+|\D+/g) || [];
+  const A = trozos(a), B = trozos(b);
+  for (let i = 0; i < Math.max(A.length, B.length); i++) {
+    const x = A[i], y = B[i];
+    if (x === y) continue;
+    if (x === undefined) return -1;
+    if (y === undefined) return 1;
+    const nx = /^\d+$/.test(x), ny = /^\d+$/.test(y);
+    if (nx && ny) {
+      const d = Number(x) - Number(y);
+      if (d !== 0) return d < 0 ? -1 : 1;
+      continue;
+    }
+    return x < y ? -1 : 1;
+  }
+  return 0;
+}
+
 // No cachea el jar del SDK, los keystores ni el proyecto (OPFS no pasa por HTTP). El binario wasm
 // y wasm_exec.js sí se intentan cachear en la instalación; si el host no los sirve, se cachean la
 // primera vez que se usan.
@@ -68,7 +95,7 @@ self.addEventListener("activate", (evento) => {
       // respaldo real si la instalación nueva se queda a medias o no hay red. Solo se guardan dos.
       const versiones = claves
         .filter((k) => k.indexOf("apkc-studio-") === 0)
-        .sort();
+        .sort(compararVersiones);
       const conservar = new Set([CACHE]);
       if (versiones.length > 1) conservar.add(versiones[versiones.length - 2]);
       return Promise.all(claves.filter((k) => !conservar.has(k)).map((k) => caches.delete(k)));
@@ -100,7 +127,8 @@ self.addEventListener("fetch", (evento) => {
           if (respuesta && respuesta.ok) {
             const copia = respuesta.clone();
             const clave = peticion.mode === "navigate" ? "./index.html" : peticion;
-            caches.open(CACHE).then((cache) => cache.put(clave, copia)).catch(() => {});
+            caches.open(CACHE).then((cache) => cache.put(clave, copia))
+              .catch((e) => falloSilencioso("guardar en caché " + clave, e));
           }
           return conCabeceras(respuesta);
         })
@@ -117,7 +145,8 @@ self.addEventListener("fetch", (evento) => {
       return fetch(peticion).then((respuesta) => {
         if (respuesta && respuesta.ok) {
           const copia = respuesta.clone();
-          caches.open(CACHE).then((cache) => cache.put(peticion, copia)).catch(() => {});
+          caches.open(CACHE).then((cache) => cache.put(peticion, copia))
+            .catch((e) => falloSilencioso("guardar en caché una respuesta de la red", e));
         }
         return conCabeceras(respuesta);
       });

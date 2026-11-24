@@ -356,7 +356,9 @@ import { diagnosticarXml } from "./xml-editor.js";
       }
     } finally {
       enCurso = false;
-      await hospedador.limpiar(TEMPORAL).catch(() => {});
+      await hospedador.limpiar(TEMPORAL).catch((e) => {
+        console.warn("[apkc] limpiar el temporal del diagnóstico: " + ((e && e.message) || e));
+      });
       if (pendiente) { pendiente = false; programar(); }
     }
   }

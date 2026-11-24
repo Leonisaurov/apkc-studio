@@ -2635,6 +2635,116 @@ public final class R {
     }
   }
 
+  // 11c-bis. el worker que no carga y el que se queda mudo. Sin estos dos caminos la promesa de
+  // `pedir` no se resuelve nunca: el velo de carga se queda encima y el comando parece colgado
+  // (solo lo salvaba pulsar «Detener»). Se conduce el hospedador real con un Worker de mentira.
+  {
+    const hospedador = pestanaMod.hospedador;
+    const pausa = (ms) => new Promise((r) => setTimeout(r, ms));
+    const descNavegador = Object.getOwnPropertyDescriptor(globalThis, "navigator");
+    const WorkerReal = globalThis.Worker;
+    const armar = () => {
+      Object.defineProperty(globalThis, "navigator", { configurable: true, writable: true,
+        value: { storage: { getDirectory: async () => ({ nombre: "raiz-de-prueba" }) } } });
+    };
+    const soltar = () => {
+      if (WorkerReal === undefined) delete globalThis.Worker; else globalThis.Worker = WorkerReal;
+      if (descNavegador) Object.defineProperty(globalThis, "navigator", descNavegador);
+      else delete globalThis.navigator;
+      hospedador.cancelar();
+    };
+    // (a) el módulo del worker no carga: el navegador dispara `error` en el Worker
+    {
+      const creados = [];
+      class WorkerRoto {
+        constructor(url, opciones) {
+          this.url = String(url); this.opciones = opciones; this.oyentes = {};
+          creados.push(this);
+        }
+        addEventListener(tipo, fn) { (this.oyentes[tipo] = this.oyentes[tipo] || []).push(fn); }
+        postMessage() { /* el módulo no cargó: nunca contesta */ }
+        terminate() { this.terminado = true; }
+      }
+      globalThis.Worker = WorkerRoto;
+      armar();
+      try {
+        const t0 = Date.now();
+        const promesa = hospedador.ejecutar(["version"]);
+        await pausa(20);
+        for (const fn of (creados[0] && creados[0].oyentes.error) || []) {
+          fn({ type: "error", message: "Failed to fetch dynamically imported module hospedador.js" });
+        }
+        const salida = await promesa;
+        const ms = Date.now() - t0;
+        if (ms >= 2000) mal("el fallo de import del worker tardó " + ms + " ms en resolverse");
+        if (!salida || salida.tipo !== "error" ||
+            !/hospedador no arrancó/i.test(String(salida.error || ""))) {
+          mal("el fallo de import del worker no resolvió con un error con nombre: " +
+            JSON.stringify(salida).slice(0, 200));
+        }
+        if (!/módulo|module|import/i.test(String(salida && salida.mensaje || ""))) {
+          mal("el mensaje del fallo no dice que el worker no cargó: " +
+            String(salida && salida.mensaje).slice(0, 160));
+        }
+        if (!creados[0] || creados[0].terminado !== true) {
+          mal("el worker roto no se terminó: la siguiente petición reutilizaría uno muerto");
+        }
+      } catch (e) {
+        mal("el fallo de import del worker rechazó en vez de resolver: " + ((e && e.message) || e));
+      } finally {
+        soltar();
+      }
+    }
+    // (b) el worker arranca y se queda mudo: el vigilante resuelve con un mensaje y lo reinicia
+    {
+      class WorkerMudo {
+        constructor() { this.oyentes = {}; this.terminado = false; }
+        addEventListener() { /* nada: no hay eventos que lleguen */ }
+        postMessage() { /* traga el mensaje */ }
+        terminate() { this.terminado = true; }
+      }
+      globalThis.Worker = WorkerMudo;
+      armar();
+      const setTimeoutReal = globalThis.setTimeout;
+      const clearTimeoutReal = globalThis.clearTimeout;
+      // se acelera SOLO el vigilante (espera de segundos): el temporizador de la prueba sigue real
+      globalThis.setTimeout = (fn, ms) => {
+        if (Number(ms) >= 1000) {
+          const asa = { fn, ms, cancelado: false };
+          setTimeoutReal(() => { if (!asa.cancelado) fn(); }, 10);
+          return asa;
+        }
+        return setTimeoutReal(fn, ms);
+      };
+      globalThis.clearTimeout = (asa) => {
+        if (asa && typeof asa === "object" && "cancelado" in asa) { asa.cancelado = true; return; }
+        clearTimeoutReal(asa);
+      };
+      try {
+        const t0 = Date.now();
+        const salida = await hospedador.arbol();
+        const ms = Date.now() - t0;
+        if (ms >= 2000) mal("el vigilante del worker mudo tardó " + ms + " ms");
+        if (!salida || salida.tipo !== "error" || !/no respondió/i.test(String(salida.error || ""))) {
+          mal("un worker mudo no resolvió con «no respondió»: " + JSON.stringify(salida).slice(0, 200));
+        }
+        // el siguiente comando ya no espera: el recuerdo del fallo contesta al momento
+        const despues = await hospedador.arbol();
+        if (!despues || despues.tipo !== "error") {
+          mal("tras el vigilante, el hospedador siguió esperando a un worker muerto: " +
+            JSON.stringify(despues).slice(0, 160));
+        }
+      } catch (e) {
+        mal("el vigilante del worker mudo rechazó en vez de resolver: " + ((e && e.message) || e));
+      } finally {
+        globalThis.setTimeout = setTimeoutReal;
+        globalThis.clearTimeout = clearTimeoutReal;
+        // «Detener» olvida el fallo: `cancelar` deja el hospedador disponible otra vez
+        soltar();
+      }
+    }
+  }
+
   // 11d. la lista de clases se invalida sin `refrescar()`: crear o renombrar un `.java` publica
   // `apkc:proyecto-cambio` (lo mismo que hace `pestana.js` al guardar/crear/mover) y el siguiente
   // `cargarClasesProyecto()` vuelve a mirar el árbol. Se conduce con un OPFS de mentira y un

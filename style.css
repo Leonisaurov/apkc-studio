@@ -686,10 +686,18 @@ kbd {
      cabecera llega al canvas que hay debajo (el botón del contador queda en esa franja) */
   pointer-events: none;
 }
-/* El detalle del modelo es solo lectura: si capturara el puntero, cualquier vista del canvas que
-   caiga bajo esa línea —el botón de `id/pulsar`, medido en la franja del inspector— dejaría de
-   responder al clic. La cabecera y el contenedor ya se declaran transparentes por el mismo motivo. */
-.previa-inspector > :not(.previa-detalle-modelo) { pointer-events: auto; }
+/* El registro y la consola flotan encima del teléfono: lo que es una lámina de lectura no puede
+   capturar el puntero, o el clic que cae bajo ella no llega al canvas (el botón de `id/pulsar` se
+   mide en esa franja). Además del detalle del modelo, son láminas la franja de pestañas y los tres
+   paneles de sección; los botones de «Pulsar» sí capturan, porque son la otra forma de disparar el
+   `onClick`. Cuando la capa se acopla al borde o se minimiza recupera el puntero entero —pestañas,
+   texto y scroll—, que es cuando el usuario la maneja como una ventana. La cabecera, el asa y sus
+   botones no cambian: siguen capturando para mover, minimizar, acoplar y cerrar. */
+.previa-inspector > :not(.previa-inspector-cab):not(.previa-detalle-modelo) { pointer-events: none; }
+.previa-inspector > .previa-seccion > .previa-oyentes,
+.previa-inspector > .previa-seccion > .previa-oyentes * { pointer-events: auto; }
+.previa-inspector[data-modo="acoplado"] > .previa-secciones,
+.previa-inspector[data-modo="acoplado"] > .previa-seccion { pointer-events: auto; }
 .previa-inspector[hidden] { display: none; }
 .previa-inspector[data-modo="libre"],
 .previa-inspector[data-modo="acoplado"],

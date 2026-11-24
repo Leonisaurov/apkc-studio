@@ -27,15 +27,75 @@ const PROYECTO = "/proyecto";
 // en la misma cola: lo que se cancela es el check, no su trabajo.
 let comandosDelUsuario = 0;
 
+// Un fallo que se deja a propósito sin mensaje visible no puede ser invisible del todo: el `.catch`
+// de las cáscaras de refresco y de historial lo deja por aquí con su contexto, en vez de tragárselo.
+function falloSilencioso(contexto, e) {
+  console.warn("[apkc] " + contexto + ": " + (e && e.message ? e.message : e));
+}
+
 const hospedador = (() => {
   // el worker se crea al primer uso, no al cargar el fichero: la prueba de node exige estas
   // funciones puras (el resaltador) y no tiene Worker ni document
   let worker = null, próximo = 1, alSalir = null;
+  // id → { resuelve, temporizador, tipo }. El temporizador es el vigilante de ESA petición: un
+  // worker mudo no puede dejar la página esperando para siempre (el velo de `conCarga` se retira
+  // cuando la promesa se resuelve, aunque sea con error).
   const pendientes = new Map();
+  // Sin respuesta en este tiempo, la petición se da por perdida. Es generoso porque un build en
+  // wasm tarda, y cada mensaje del worker (la salida va llegando por trozos) lo reinicia.
+  const ESPERA_WORKER = 20000;
+  // Último fallo del worker. Un import que no carga se repite en cada intento, así que se recuerda
+  // y se responde con él sin esperar al temporizador; `detener` (el botón del usuario) lo olvida.
+  let roto = null;
+  const fallo = (texto) => ({ tipo: "error", error: texto, mensaje: texto, consola: "" });
+  const resolverPendiente = (id, valor) => {
+    const pendiente = pendientes.get(id);
+    if (!pendiente) return false;
+    pendientes.delete(id);
+    clearTimeout(pendiente.temporizador);
+    pendiente.resuelve(valor);
+    return true;
+  };
+  const vigilar = (id) => {
+    const pendiente = pendientes.get(id);
+    if (!pendiente) return;
+    clearTimeout(pendiente.temporizador);
+    pendiente.temporizador = setTimeout(() => {
+      const texto = "el hospedador no respondió en " + Math.round(ESPERA_WORKER / 1000) + " s (" +
+        (pendiente.tipo || "comando") + "): se ha reiniciado. Lo escrito en el proyecto sigue " +
+        "guardado en el navegador.";
+      roto = texto;
+      for (const otro of [...pendientes.keys()]) resolverPendiente(otro, fallo(texto));
+      try { if (worker) worker.terminate(); } catch (e) { /* ya estaba muerto */ }
+      worker = null;
+      raizPedida = null;
+    }, ESPERA_WORKER);
+  };
+  // cualquier mensaje del worker es una señal de vida: reinicia el vigilante de lo que siga pendiente
+  const senalDeVida = () => { for (const id of pendientes.keys()) vigilar(id); };
   const asegurar = () => {
     if (worker) return worker;
     worker = new Worker(urlConfiable("hospedador.js"), { type: "module" });   // module: el hospedador importa su fs con import
+    // El módulo del worker puede no cargar (un 404, un import roto, COOP/COEP ausente). El
+    // navegador lo avisa aquí y sin esto la promesa de `pedir` no se resolvería: el velo se queda
+    // encima y el comando parece colgado.
+    const morir = (detalle) => {
+      const texto = "el hospedador no arrancó (" + (detalle || "el worker no cargó") +
+        "): recarga la página y vuelve a intentarlo.";
+      roto = texto;
+      for (const id of [...pendientes.keys()]) resolverPendiente(id, fallo(texto));
+      try { worker.terminate(); } catch (e) { /* ya estaba muerto */ }
+      worker = null;
+      raizPedida = null;
+    };
+    worker.addEventListener("error", (e) => {
+      const evento = e && typeof e === "object" ? e : {};
+      morir(String(evento.message || evento.filename || "").trim() || null);
+    });
+    // un mensaje que no se puede deserializar también deja el worker inservible para esa petición
+    worker.addEventListener("messageerror", () => morir("mensaje ilegible del worker"));
     worker.onmessage = (e) => {
+      senalDeVida();
       if (e.data && e.data.tipo === "salida") {
         if (alSalir) alSalir(String(e.data.texto || ""));
         return;
@@ -44,15 +104,21 @@ const hospedador = (() => {
         CONSOLA.escribir(String(e.data.texto || "") + "\n");
         return;
       }
-      const resolver = pendientes.get(e.data.id);
-      if (resolver) { pendientes.delete(e.data.id); resolver(e.data); }
+      resolverPendiente(e.data.id, e.data);
     };
     return worker;
   };
   const pedir = (mensaje) => new Promise((resuelve) => {
+    if (roto) { resuelve(fallo(roto)); return; }
     const id = próximo++;
-    pendientes.set(id, resuelve);
-    asegurar().postMessage({ ...mensaje, id });
+    pendientes.set(id, { resuelve, temporizador: 0, tipo: String(mensaje.tipo || "comando") });
+    vigilar(id);
+    try {
+      asegurar().postMessage({ ...mensaje, id });
+    } catch (e) {
+      resolverPendiente(id, fallo("no se pudo hablar con el hospedador: " +
+        (e && e.message ? e.message : e)));
+    }
   });
   // navigator.storage no existe dentro del worker, así que el mango raíz de OPFS lo baja la
   // página y se lo pasa al hospedador; sin esto el fs no tiene dónde escribir
@@ -72,12 +138,13 @@ const hospedador = (() => {
   // matar el worker deja sin resolver lo que estuviera pendiente: el que pidió ese comando recibe
   // un error con nombre en vez de una promesa que nunca llega
   const detener = () => {
-    if (!worker) return false;
+    if (!worker) { roto = null; return false; }
     try { worker.terminate(); } catch (e) { /* ya estaba muerto */ }
     worker = null;
     raizPedida = null;
-    for (const [id, resolver] of pendientes) {
-      if (pendientes.delete(id)) resolver({ tipo: "error", error: "comando detenido por el usuario", consola: "" });
+    roto = null;
+    for (const id of [...pendientes.keys()]) {
+      resolverPendiente(id, fallo("comando detenido por el usuario"));
     }
     return true;
   };
@@ -896,7 +963,8 @@ async function aplicarBorradoRemoto(ruta) {
       doc.remotoEliminado = true;
       conservar.push(doc);
     } else {
-      Historial.borrar(VENTANA, doc.ruta).catch(() => {});
+      Historial.borrar(VENTANA, doc.ruta)
+        .catch((e) => falloSilencioso("borrar el historial de " + doc.ruta, e));
     }
   }
   DOCUMENTOS.lista = conservar;
@@ -922,14 +990,17 @@ async function recibirRemoto(msg) {
   if (msg.tipo === "guardado") {
     const doc = documentoDe(msg.ruta);
     if (doc) await recargarDocumentoRemoto(doc, msg.revision);
-    await hospedador.refrescar(PROYECTO).catch(() => {});
+    await hospedador.refrescar(PROYECTO)
+      .catch((e) => falloSilencioso("refrescar el espejo tras un guardado de otra ventana", e));
     await refrescarArbol();
     return;
   }
   if (msg.tipo === "mutacion") {
     if (msg.accion === "renombrar" || msg.accion === "mover") {
-      await hospedador.refrescar(msg.origen).catch(() => {});
-      await hospedador.refrescar(msg.destino).catch(() => {});
+      await hospedador.refrescar(msg.origen)
+        .catch((e) => falloSilencioso("refrescar el origen de un renombrado remoto", e));
+      await hospedador.refrescar(msg.destino)
+        .catch((e) => falloSilencioso("refrescar el destino de un renombrado remoto", e));
       remapearDocumentos(msg.origen, msg.destino);
       remapearAbiertos(msg.origen, msg.destino);
       revelarRuta(estadoPestana.ruta);
@@ -937,18 +1008,21 @@ async function recibirRemoto(msg) {
       await aplicarBorradoRemoto(msg.ruta);
     } else if (msg.accion === "subir" || msg.accion === "crear" || msg.accion === "deps") {
       for (const ruta of msg.rutas || []) {
-        await hospedador.refrescar(ruta).catch(() => {});
+        await hospedador.refrescar(ruta)
+          .catch((e) => falloSilencioso("refrescar " + ruta + " tras un cambio de otra ventana", e));
         const doc = documentoDe(ruta);
         if (!doc) continue;
         await recargarDocumentoRemoto(doc, revisionActual(ruta));
       }
     }
-    await hospedador.refrescar(PROYECTO).catch(() => {});
+    await hospedador.refrescar(PROYECTO)
+      .catch((e) => falloSilencioso("refrescar el espejo tras un cambio de otra ventana", e));
     await refrescarArbol();
     return;
   }
   if (msg.tipo === "proyecto") {
-    await hospedador.refrescar(PROYECTO).catch(() => {});
+    await hospedador.refrescar(PROYECTO)
+      .catch((e) => falloSilencioso("refrescar el espejo tras crear un proyecto en otra ventana", e));
     for (const doc of DOCUMENTOS.lista) {
       if (doc.sucio) doc.remotoEliminado = true;
       else doc.texto = null;
@@ -1104,7 +1178,8 @@ function volcarHistorial() {
     scroll: area ? [area.scrollTop, area.scrollLeft] : [0, 0],
   });
   if (id) {
-    Historial.guardar(VENTANA, arbol).catch(() => {});
+    Historial.guardar(VENTANA, arbol)
+      .catch((e) => falloSilencioso("guardar el historial del árbol", e));
     renderHistorial();
   }
 }
@@ -1129,7 +1204,8 @@ function aplicarNodoHistorial(nodo) {
   marcarSucio(true);
   doc.texto = texto;
   renderHistorial();
-  Historial.guardar(VENTANA, doc.hist).catch(() => {});
+  Historial.guardar(VENTANA, doc.hist)
+    .catch((e) => falloSilencioso("guardar el historial de " + doc.ruta, e));
 }
 
 function deshacer() {
@@ -1165,7 +1241,8 @@ function limpiarHistorial() {
   if (!doc || !doc.hist) return;
   if (!window.confirm("¿Borrar el historial de " + relativa(doc.ruta) + "?")) return;
   doc.hist = Historial.crear(doc.ruta, EDITOR.texto());
-  Historial.guardar(VENTANA, doc.hist).catch(() => {});
+  Historial.guardar(VENTANA, doc.hist)
+    .catch((e) => falloSilencioso("guardar el historial de " + doc.ruta, e));
   renderHistorial();
 }
 
@@ -1285,7 +1362,8 @@ async function cargarDocumentoEnEditor(doc, ruta, turno) {
     // se invalida si otra ventana publicó una revisión distinta (no en el flujo local de subida)
     const revisionDisco = revisionActual(ruta);
     if (doc.revision && revisionDisco && doc.revision !== revisionDisco) {
-      await hospedador.refrescar(ruta).catch(() => {});
+      await hospedador.refrescar(ruta)
+        .catch((e) => falloSilencioso("refrescar " + ruta + " antes de releerlo", e));
     }
     let bytes;
     try {
@@ -1372,7 +1450,7 @@ function remapearDocumentos(origen, destino) {
   const historiasAbiertas = DOCUMENTOS.lista.filter((doc) => doc.hist).map((doc) => doc.hist);
   Historial.renombrarBajo(VENTANA, origen, destino)
     .then(() => Promise.all(historiasAbiertas.map((hist) => Historial.guardar(VENTANA, hist))))
-    .catch(() => {});
+    .catch((e) => falloSilencioso("renombrar el historial bajo " + origen, e));
   renderPestanas();
   renderHistorial();
   actualizarAccionesFichero();
@@ -1383,7 +1461,8 @@ async function quitarDocumentosBajo(ruta) {
   const indiceActiva = DOCUMENTOS.lista.findIndex((doc) => doc.ruta === DOCUMENTOS.activa);
   for (const doc of DOCUMENTOS.lista) {
     if (doc.ruta === ruta || doc.ruta.startsWith(ruta + "/")) {
-      Historial.borrar(VENTANA, doc.ruta).catch(() => {});
+      Historial.borrar(VENTANA, doc.ruta)
+        .catch((e) => falloSilencioso("borrar el historial de " + doc.ruta, e));
     }
   }
   DOCUMENTOS.lista = DOCUMENTOS.lista.filter((doc) =>
@@ -1402,7 +1481,7 @@ async function quitarDocumentosBajo(ruta) {
 
 // crear un proyecto borra /proyecto: las pestañas viejas no pueden quedar apuntando a la nada
 function limpiarEstadoEditor() {
-  Historial.limpiar(VENTANA).catch(() => {});
+  Historial.limpiar(VENTANA).catch((e) => falloSilencioso("limpiar el historial al crear proyecto", e));
   DOCUMENTOS.lista = [];
   DOCUMENTOS.activa = null;
   estadoPestana.ruta = null;
@@ -2001,7 +2080,8 @@ async function guardar() {
   renderPestanas();
   renderHistorial();
   actualizarAccionesFichero();
-  Historial.guardar(VENTANA, doc.hist).catch(() => {});
+  Historial.guardar(VENTANA, doc.hist)
+    .catch((e) => falloSilencioso("guardar el historial de " + doc.ruta, e));
   publicar({ tipo: "guardado", ruta, revision });
   nota("guardado en " + ruta);
   await refrescarArbol();
@@ -3390,7 +3470,9 @@ if (typeof document !== "undefined") {
     }
     const filtroArbol = document.getElementById("filtro-arbol");
     if (filtroArbol) {
-      filtroArbol.addEventListener("input", () => { refrescarArbol().catch(() => {}); });
+      filtroArbol.addEventListener("input", () => {
+        refrescarArbol().catch((e) => falloSilencioso("refrescar el árbol al filtrar", e));
+      });
     }
     en("buscar-siguiente", () => buscarSiguiente(false));
     en("buscar-anterior", () => buscarSiguiente(true));
@@ -3406,7 +3488,9 @@ if (typeof document !== "undefined") {
     const detalleAjustes = document.getElementById("detalle-ajustes");
     if (detalleAjustes) {
       detalleAjustes.addEventListener("toggle", () => {
-        if (detalleAjustes.open) leerAjustes(true).catch(() => {});
+        if (detalleAjustes.open) {
+          leerAjustes(true).catch((e) => falloSilencioso("leer los ajustes del proyecto", e));
+        }
       });
     }
     en("plegar-arbol", plegarTodo);
