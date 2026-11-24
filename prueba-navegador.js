@@ -287,7 +287,9 @@ const conductor = `(async () => {
     };
   })();
   r.previa = previa;
-  r.tiradoresPrevia = document.querySelectorAll("#marco-previa .tirador-previa").length;
+  // Solo los tiradores del marco: el inspector acoplable cuelga dentro de #marco-previa y añade
+  // otros ocho con la misma clase para redimensionarse a sí mismo, no la vista dividida.
+  r.tiradoresPrevia = document.querySelectorAll("#marco-previa > .tirador-previa").length;
   r.modosPrevia = [document.getElementById("previa-modo-vivo").textContent,
     document.getElementById("previa-modo-render").textContent];
   // el menú de opciones: las dos superficies montan el botón de tres puntos y su desplegable. Sin
@@ -911,6 +913,14 @@ const conductor = `(async () => {
 
 let fallos = 0;
 function comprueba(cond, msg) { if (!cond) { fallos++; console.log("  FALLO:", msg); } }
+// Brave desplaza hasta 1 cada canal al leer getImageData: una sonda aislada que pinta el literal
+// #ffffff devuelve [255,254,254] y #d6d7d7 [214,215,215], también con colorSpace:"srgb"
+// (node /home/leonisauro/.cache/apkc-web/cdp-color-probe/probe.mjs). En la corrida completa el
+// mismo literal salió [254,254,255] y [215,214,215]: el desplazamiento cambia de canal entre
+// lienzos. El pintor usa los literales del tema y prueba.js ya verifica su fillStyle, así que la
+// tolerancia es del muestreo, no una rebaja del pintor. Se compara canal a canal, ±1.
+const pixelCercano = (pix, esperado) => Array.isArray(pix) && pix.length === 3 &&
+  pix.every((v, i) => Number.isInteger(v) && Math.abs(v - esperado[i]) <= 1);
 
 (async () => {
   const t = await target();
@@ -992,15 +1002,15 @@ function comprueba(cond, msg) { if (!cond) { fallos++; console.log("  FALLO:", m
     comprueba(v.canvasDeLaPrevia === 4,
       "faltan canvas (Pantalla en vivo y emulador, y la vista dividida en vivo y emulador: deben ser cuatro): " +
       v.canvasDeLaPrevia);
-    comprueba(v.temaAparato && v.temaAparato.fondo.join(",") === "255,255,255" &&
-      v.temaAparato.boton.join(",") === "214,215,215",
+    comprueba(v.temaAparato && pixelCercano(v.temaAparato.fondo, [255, 255, 255]) &&
+      pixelCercano(v.temaAparato.boton, [214, 215, 215]),
       "el emulador no pinta el fondo blanco y el botón gris del APK real: " +
       JSON.stringify(v.temaAparato));
     const tm = v.temaAparatoMedia || {};
     comprueba(tm.caja && tm.caja.join(",") === "44,24" &&
-      tm.esquina && tm.esquina.join(",") === "214,215,215" &&
-      tm.centro && tm.centro.join(",") === "214,215,215" &&
-      tm.fuera && tm.fuera.join(",") === "255,255,255",
+      pixelCercano(tm.esquina, [214, 215, 215]) &&
+      pixelCercano(tm.centro, [214, 215, 215]) &&
+      pixelCercano(tm.fuera, [255, 255, 255]),
       "a media pantalla el botón no mide 44x24, no pinta el gris en su relleno o el blanco bajo " +
       "su borde: " + JSON.stringify(tm));
     comprueba(v.punteroInspector === "none" && v.punteroDetalleModelo === "none",
@@ -1199,8 +1209,10 @@ function comprueba(cond, msg) { if (!cond) { fallos++; console.log("  FALLO:", m
         comprueba(sc.autoCasilla && sc.autoFirma && sc.autoJunto,
           "el modo «compilar e intercambiar» no está junto a los botones de Compilar y a " +
           "#inc-compilar: " + JSON.stringify(sc));
-        comprueba(sa.derivada === firmaSwap,
-          "la firma no se derivó del .java activo: " + String(sa.derivada) + " ≠ " + firmaSwap);
+        // firmaSwap vive dentro del conductor del navegador: aquí se usa la misma firma que ese
+        // publicó en r.swap.firma, para no comparar con una variable fuera de ámbito.
+        comprueba(sa.derivada === sw.firma,
+          "la firma no se derivó del .java activo: " + String(sa.derivada) + " ≠ " + String(sw.firma));
         comprueba(sa.casilla === true && sa.guion.length > sa.antes &&
           Array.isArray(sa.guion) && sa.guion.some((p) =>
             String(p).indexOf("intercambiar:") === 0 && String(p).indexOf(sa.derivada) > 0),

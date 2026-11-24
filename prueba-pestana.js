@@ -4800,7 +4800,9 @@ async function conductor() {
         },
         fila: Math.round(fila.height),
         guardado, guardadoEntero,
-        tiradores: document.querySelectorAll("#marco-previa .tirador-previa").length,
+        // El inspector acoplable está dentro de #marco-previa y trae otros ocho tiradores suyos:
+        // solo los hijos directos son los del marco de la vista dividida.
+        tiradores: document.querySelectorAll("#marco-previa > .tirador-previa").length,
       };
     })()`);
     comprueba("la arista inferior cambia el alto del panel y deja el ancho quieto",
