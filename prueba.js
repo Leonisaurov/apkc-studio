@@ -182,6 +182,38 @@ if (!/BLUETOOTH_CONNECT/.test(chatbt.files["AndroidManifest.xml"])) {
   mal("la plantilla chatbt no declara los permisos de Bluetooth en el manifiesto");
 }
 
+// 2e. Lienzo es la plantilla de la vista propia: no hay layout XML y el contenido se dibuja con
+// Canvas. Lo que la hace compilar es el reparto de métodos: onDraw delega en pintar, y los seis
+// rayos van en métodos de una sola instrucción, porque el emisor reparte registros por método y
+// seis drawLine juntos agotan la forma corta de aload/fload. Esta comprobación fija esa forma.
+const lienzoApp = a.buildProject({ ...estado, template: "lienzo", kotlin: false, libs: false,
+  native: false, assets: false, device: false });
+const lienzoJava = lienzoApp.files[fuentesApp + "/Lienzo.java"];
+const lienzoMain = lienzoApp.files[fuentesApp + "/MainActivity.java"];
+if (!/class Lienzo extends View/.test(lienzoJava)) {
+  mal("la plantilla Lienzo no define una vista propia que extienda View");
+}
+if (!/protected void onDraw\(Canvas lienzo\)/.test(lienzoJava)) {
+  mal("la plantilla Lienzo no dibuja en onDraw");
+}
+if (!/setContentView\(lienzo\)/.test(lienzoMain)) {
+  mal("la plantilla Lienzo no pone la vista propia como contenido");
+}
+if (!/void onDraw\(Canvas lienzo\) \{\s*super\.onDraw\(lienzo\);\s*actualizarGeometria\(\);\s*pintar\(lienzo\);\s*\}/.test(lienzoJava)) {
+  mal("onDraw de Lienzo no delega en actualizarGeometria y pintar");
+}
+for (let n = 1; n <= 6; n++) {
+  const metodo = lienzoJava.match(new RegExp("private void rayo" + n + "\\(Canvas l, float cx, float cy\\) \\{([^}]*)\\}"));
+  if (!metodo || (metodo[1].match(/drawLine/g) || []).length !== 1) {
+    mal(`el rayo ${n} de Lienzo no es un único drawLine en su propio método`);
+  }
+}
+const pintar = lienzoJava.match(/private void pintar\(Canvas lienzo\) \{([^}]*)\}/);
+if (!pintar || /drawLine/.test(pintar[1]) || !/circulos\(/.test(pintar[1]) ||
+    !/rayos\(/.test(pintar[1]) || !/textos\(/.test(pintar[1])) {
+  mal("pintar de Lienzo no reparte el dibujo entre circulos, rayos y textos");
+}
+
 // 3. el EOCD y los modos: un lector estricto (zipcheck.py) es el que ve lo que zipfile tolera
 const eocd = buf.readUInt16LE(buf.lastIndexOf(Buffer.from("PK\x05\x06", "latin1")) + 8);
 if (eocd !== entradas.length) mal(`el EOCD anuncia ${eocd} entradas y hay ${entradas.length}`);
