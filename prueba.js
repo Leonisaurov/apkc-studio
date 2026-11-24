@@ -379,6 +379,82 @@ if (declPermisos < 0 || siPermisos < 0 || retornoPermisos < 0 ||
   mal("la plantilla chatbt declara los permisos después del if o del return de pedirPermisos y no compila");
 }
 
+// 2g-bis. emulación medida de chatbt: `apkc preview` tiene que ejecutar el dex de la plantilla,
+//         registrar los tres botones y entregar el guion de texto y clic. Se activa con
+//         APKC_PREVIEW y APK_CHATBT; sin ellos se omite y no se dice que se emuló. Las líneas que
+//         miran ids del layout son comprobación estructural del fixture generado, no emulación.
+if (process.env.APKC_PREVIEW && process.env.APK_CHATBT) {
+  const binario = process.env.APKC_PREVIEW;
+  const apk = process.env.APK_CHATBT;
+  const preview = (...args) => {
+    const crudo = execFileSync(binario, ["preview", ...args, apk], { encoding: "utf8", maxBuffer: 8 << 20 });
+    try { return JSON.parse(crudo); }
+    catch (e) { mal("apkc preview de chatbt no devuelve JSON: " + e.message); return null; }
+  };
+  const nodoChatbt = (modelo, id) => {
+    const buscar = (n) => {
+      if (!n) return null;
+      if (n.id === id) return n;
+      for (const h of n.hijos || []) { const r = buscar(h); if (r) return r; }
+      return null;
+    };
+    return buscar(modelo && modelo.raiz);
+  };
+  const reposo = preview();
+  const guion = preview("--escribir", "id/entrada/hola", "--pulsar", "id/enviar");
+  if (reposo && guion) {
+    for (const [nombre, modelo] of [["reposo", reposo], ["guion", guion]]) {
+      if (!(modelo.pantalla && modelo.pantalla.ancho > 0 && modelo.pantalla.alto > 0)) {
+        mal(nombre + " de chatbt: pantalla=" + JSON.stringify(modelo.pantalla));
+      }
+      if (!Number.isInteger(modelo.nodos) || modelo.nodos < 1) {
+        mal(nombre + " de chatbt: nodos=" + modelo.nodos);
+      }
+      const ejecucion = modelo.ejecucion || {};
+      if (!(ejecucion.pasos > 0)) mal(nombre + " de chatbt: pasos=" + ejecucion.pasos);
+      if (ejecucion.error) mal(nombre + " de chatbt: error=" + ejecucion.error);
+      // Límite medido, no éxito limpio: el intérprete no tiene checkSelfPermission y devuelve
+      // cero, así que la app entra por la rama de permiso concedido sin consultar Bluetooth.
+      const nuevos = (ejecucion.avisos || []).filter(
+        (aviso) => !/checkSelfPermission\(Ljava\/lang\/String;\)I no está en el dex ni en los stubs/.test(aviso));
+      if (nuevos.length) mal(nombre + " de chatbt: avisos nuevos=" + JSON.stringify(nuevos));
+    }
+    for (const id of ["id/estado", "id/entrada", "id/enviar", "id/buscar", "id/limpiar", "id/mensajes"]) {
+      if (!nodoChatbt(reposo, id)) {
+        mal("chatbt: el modelo no tiene " + id + " (estructural del fixture)");
+      }
+    }
+    const e0 = reposo.ejecucion || {};
+    for (const id of ["id/enviar", "id/buscar", "id/limpiar"]) {
+      if (!(e0.oyentes || []).some((o) => o.id === id)) {
+        mal("chatbt en reposo: sin oyente en " + id + ": " + JSON.stringify(e0.oyentes));
+      }
+    }
+    const estado0 = nodoChatbt(reposo, "id/estado");
+    if (!estado0 || !/Bluetooth/.test(estado0.textoDinamico || "")) {
+      mal("chatbt en reposo: estado=" + JSON.stringify(estado0 && estado0.textoDinamico));
+    }
+    const e1 = guion.ejecucion || {};
+    if (e1.interacciones !== 2 || !(e1.pulsaciones || []).includes("id/enviar") ||
+        !(e1.escrituras || []).includes("id/entrada/hola")) {
+      mal("chatbt: el guion escribir/pulsar no se entregó: " + JSON.stringify({
+        interacciones: e1.interacciones, pulsaciones: e1.pulsaciones, escrituras: e1.escrituras }));
+    }
+    if (!(e1.capturas || []).some((c) => c.id === "id/estado" && /2 mensajes/.test(c.texto || ""))) {
+      mal("chatbt: el estado no cuenta los dos mensajes: " + JSON.stringify(e1.capturas));
+    }
+    const lista = nodoChatbt(guion, "id/mensajes");
+    const filas = ((lista && lista.hijos) || []).map((h) => h.textoDinamico || h.texto || "");
+    if (filas.length !== 2 || filas[0] !== "yo: hola" || filas[1] !== "eco: hola (sin socket)") {
+      mal("chatbt: el ListView no pinta el eco local: " + JSON.stringify(filas));
+    }
+    console.log("  emulación chatbt: " + e1.interacciones + " interacciones, ListView=" +
+      JSON.stringify(filas) + ", avisos=" + JSON.stringify(e1.avisos || []));
+  }
+} else {
+  console.log("  (sin APKC_PREVIEW/APK_CHATBT: la emulación de chatbt se omite)");
+}
+
 // 2h. la plantilla Notas se compila de verdad en e2e.sh: vigila las dos formas que el emisor de
 //     `--compiler go` rechaza. Reasignar una local dentro de un `if` y leerla despues, o guardar el id
 //     de la vista en una local y encadenar tres `else if`, dejan el hueco sin asignar en el marco
