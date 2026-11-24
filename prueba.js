@@ -399,6 +399,104 @@ if (!/if \(vista\.getId\(\) == R\.id\.anterior\)/.test(actNotas) ||
   mal("la plantilla Notas encadena else if en vez de comparar y terminar cada rama con return");
 }
 
+// 2h-bis. la plantilla Notas no solo compila: se EMULA. Esta comprobación tiene dos partes
+// etiquetadas. La PRIMERA es estructural/fixture y corre siempre sin binario: fija el EditText
+// id/editor (el que recibe --escribir), el botón id/guardar y las tres llamadas que el intérprete
+// tiene que ver para publicar la escritura y el registro de SharedPreferences. La SEGUNDA es la
+// ejecución real con `apkc preview`, detrás de APKC_PREVIEW/APK_NOTAS igual que el Cronómetro:
+// medida el 2026-11-24 con apkc 46a9a792 sobre la apk generada por este buildProject. Sin esas
+// variables se omite y se dice, no se finge que se emuló; e2e.sh añadirá ese recorrido después.
+const layNotas = notas.files["res/layout/principal.xml"] || "";
+if (!/<EditText\s+android:id="@\+id\/editor"/.test(layNotas)) {
+  mal("plantilla Notas: el EditText no es id/editor; --escribir id/editor/... no tendría vista");
+}
+for (const id of ["guardar", "borrar", "lista", "seleccion"]) {
+  if (!new RegExp("@\\+id/" + id + '"').test(layNotas)) {
+    mal(`plantilla Notas: falta @+id/${id} en principal.xml`);
+  }
+}
+if (!/getSharedPreferences\("notas", 0\)/.test(actNotas) ||
+    !/editor\.getEditableText\(\)\.toString\(\)/.test(actNotas) ||
+    !/prefs\.edit\(\)\.putString\(clave, notas\[i\]\)\.apply\(\)/.test(actNotas)) {
+  mal("plantilla Notas: faltan SharedPreferences/getEditableText/putString que publica el emulador");
+}
+if (process.env.APKC_PREVIEW && process.env.APK_NOTAS) {
+  const binarioNotas = process.env.APKC_PREVIEW;
+  const apkNotas = process.env.APK_NOTAS;
+  const previewNotas = (...args) => {
+    const crudo = execFileSync(binarioNotas, ["preview", ...args, apkNotas],
+      { encoding: "utf8", maxBuffer: 8 << 20 });
+    try { return JSON.parse(crudo); }
+    catch (e) { mal("apkc preview (Notas) no devuelve JSON: " + e.message); return null; }
+  };
+  const reposoNotas = previewNotas();
+  const guardadoNotas = previewNotas("--escribir", "id/editor/TextoDePrueba", "--pulsar", "id/guardar");
+  if (reposoNotas && guardadoNotas) {
+    const nodoDeNotas = (modelo, id) => {
+      const buscar = (n) => {
+        if (!n) return null;
+        if (n.id === id) return n;
+        for (const h of n.hijos || []) { const r = buscar(h); if (r) return r; }
+        return null;
+      };
+      return buscar(modelo.raiz);
+    };
+    for (const [nombre, modelo] of [["reposo", reposoNotas], ["guardado", guardadoNotas]]) {
+      if (!(modelo.pantalla && modelo.pantalla.ancho > 0 && modelo.pantalla.alto > 0)) {
+        mal(nombre + " Notas: pantalla=" + JSON.stringify(modelo.pantalla));
+      }
+      if (!(modelo.nodos > 0)) mal(nombre + " Notas: nodos=" + modelo.nodos);
+      if (!((modelo.ejecucion && modelo.ejecucion.pasos) > 0)) {
+        mal(nombre + " Notas: ejecución sin pasos=" + JSON.stringify(modelo.ejecucion));
+      }
+      if (modelo.avisos || modelo.error) {
+        mal(nombre + " Notas: avisos/error=" + JSON.stringify([modelo.avisos, modelo.error]));
+      }
+    }
+    const editor0 = nodoDeNotas(reposoNotas, "id/editor");
+    if (!editor0 || editor0.textoDinamico) {
+      mal("Notas en reposo: el editor ya trae texto=" + JSON.stringify(editor0 && editor0.textoDinamico));
+    }
+    if (reposoNotas.ejecucion.preferencias) {
+      mal("Notas en reposo: ya hay preferencias=" + JSON.stringify(reposoNotas.ejecucion.preferencias));
+    }
+    const editor1 = nodoDeNotas(guardadoNotas, "id/editor");
+    const seleccion1 = nodoDeNotas(guardadoNotas, "id/seleccion");
+    const ejec1 = guardadoNotas.ejecucion;
+    if (!editor1 || editor1.textoDinamico !== "TextoDePrueba") {
+      mal("--escribir id/editor no llegó a textoDinamico: " + JSON.stringify(editor1 && editor1.textoDinamico));
+    }
+    if (!seleccion1 || seleccion1.textoDinamico !== "Nota 1 de 1") {
+      mal("--pulsar id/guardar no actualizó la selección: " + JSON.stringify(seleccion1 && seleccion1.textoDinamico));
+    }
+    if (!(ejec1.escrituras || []).includes("id/editor/TextoDePrueba")) {
+      mal("la ejecución no registra la escritura: " + JSON.stringify(ejec1.escrituras));
+    }
+    if (!(ejec1.pulsaciones || []).includes("id/guardar")) {
+      mal("la ejecución no registra el clic en guardar: " + JSON.stringify(ejec1.pulsaciones));
+    }
+    if (!(ejec1.capturas || []).some((c) => c.origen === "usuario.escribir" &&
+        c.id === "id/editor" && c.texto === "TextoDePrueba")) {
+      mal("no hay captura usuario.escribir del texto tecleado: " + JSON.stringify(ejec1.capturas));
+    }
+    // Esta plantilla no imprime nada en consola: la huella del guardado está en el registro
+    // (SharedPreferences), en las capturas de TextView.setText y en textoDinamico, no en consola.
+    const prefs = ejec1.preferencias && ejec1.preferencias.notas;
+    if (!prefs || prefs.cuantas !== 1 || prefs.nota0 !== "TextoDePrueba") {
+      mal("el guardado no persistió la nota en preferencias: " + JSON.stringify(ejec1.preferencias));
+    }
+    const lista = nodoDeNotas(guardadoNotas, "id/lista");
+    if (!lista || !(lista.hijos || []).some((h) => h.texto === "TextoDePrueba")) {
+      mal("el ListView no pinta la nota guardada: " + JSON.stringify(lista && lista.hijos));
+    }
+    console.log("  emulación Notas: escribir id/editor dejó " +
+      JSON.stringify(editor1.textoDinamico) + ", pulsar id/guardar dejó " +
+      JSON.stringify(seleccion1.textoDinamico) + " y preferencias " + JSON.stringify(prefs));
+  }
+} else {
+  console.log("  (sin APKC_PREVIEW/APK_NOTAS: la emulación real de Notas se omite; queda el fixture)");
+}
+
 // 2i. las locales de los bucles de tareas se declaran en el ámbito del método, no dentro del bloque.
 // apkc acumula las muertes de ámbito entre métodos: una local declarada dentro del `for` deja el
 // hueco sin asignar al analizar los marcos JVM y la compilación falla con "se lee el hueco N sin
