@@ -1607,7 +1607,7 @@ export function crearPreviaPanel({ hospedador, proyecto, estadoPestana, editor, 
     return campo && typeof campo.value === "string" ? campo.value.trim() : "";
   }
 
-  async function intercambiarDexSoltado(archivo, idSuperficie) {
+  async function intercambiarDexSoltado(archivo, idSuperficie, firmaDada) {
     if (!archivo) return null;
     const nombre = String(archivo.name || "el dex");
     const rechazar = (texto) => {
@@ -1628,7 +1628,9 @@ export function crearPreviaPanel({ hospedador, proyecto, estadoPestana, editor, 
     // swap se rechazó antes de llegar a ejecutar el guion.
     let ejecutando = false;
     try {
-      const firma = firmaDeSuperficie(idSuperficie);
+      // El modo cómodo manda la firma derivada del fuente; el camino avanzado sigue leyendo el
+      // campo «swap» de la superficie donde se soltó el dex.
+      const firma = firmaDada ? String(firmaDada).trim() : firmaDeSuperficie(idSuperficie);
       const malaFirma = motivoFirmaInvalida(firma);
       if (malaFirma) return rechazar("no se intercambió " + nombre + ": " + malaFirma);
       if (!resumenEjecucion(modeloActual())) {
@@ -1673,14 +1675,40 @@ export function crearPreviaPanel({ hospedador, proyecto, estadoPestana, editor, 
     }
   }
 
-  // El control mínimo del panel y de Pantalla: un campo con la firma y un botón que abre el
-  // selector de ficheros. Se monta aquí y no en el HTML para no duplicar el marcado en las dos
-  // superficies y para que la prueba de node siga importando el módulo sin DOM.
+  // El modo cómodo: el dex ya compilado por la pestaña entra en el guion vivo con la firma que
+  // manda el build, sin selector de ficheros y sin tocar el campo avanzado. Reutiliza la misma
+  // guarda, validación, escritura en OPFS y registro del camino del arrastre.
+  async function intercambiarDelBuild(bytes, firma) {
+    const nombre = "build/app.apk";
+    registrarSwap("intercambio automático desde " + nombre + ": " + String(firma || ""), "aviso");
+    const copia = new Uint8Array(bytes || []);
+    const archivo = { name: nombre, arrayBuffer: async () => copia.buffer };
+    const pintado = await intercambiarDexSoltado(archivo, SUPERFICIES[0].id, firma);
+    if (!pintado) return null;
+    const cambios = (resumenEjecucion(modeloActual()) || { intercambios: [] }).intercambios;
+    const ultimo = cambios.length ? cambios[cambios.length - 1] : null;
+    registrarSwap(ultimo
+      ? "intercambio automático aplicado: " + textoDeIntercambio(ultimo)
+      : "intercambio automático: el modelo no publicó el cambio", "aviso");
+    return pintado;
+  }
+
+  // El camino avanzado del panel y de Pantalla: un campo con la firma y un botón que abre el
+  // selector de ficheros. Queda plegado bajo «swap con .dex (avanzado)» para que el modo cómodo
+  // —marcar la casilla al compilar— sea lo que se ve primero. Se monta aquí y no en el HTML para
+  // no duplicar el marcado en las dos superficies y para que la prueba de node siga importando
+  // el módulo sin DOM.
   function montarControlIntercambio() {
     if (!conDocumento()) return;
     for (const superficie of SUPERFICIES) {
       const barra = el(superficie.controles);
       if (!barra || el(superficie.intercambio.firma)) continue;
+      const avanzado = document.createElement("details");
+      avanzado.className = "previa-control-avanzado";
+      const titulo = document.createElement("summary");
+      titulo.textContent = "swap con .dex (avanzado)";
+      titulo.title = "Intercambiar un método con un .dex elegido en el equipo";
+      avanzado.appendChild(titulo);
       const caja = document.createElement("label");
       caja.className = "previa-control-campo";
       caja.title = "Descriptor de la clase y, si es un método, /metodo(proto). Sin /metodo se " +
@@ -1699,7 +1727,7 @@ export function crearPreviaPanel({ hospedador, proyecto, estadoPestana, editor, 
       campo.setAttribute("aria-label", "Clase y método a intercambiar (clase/metodo(proto))");
       caja.appendChild(rotulo);
       caja.appendChild(campo);
-      barra.appendChild(caja);
+      avanzado.appendChild(caja);
 
       const boton = document.createElement("button");
       boton.id = superficie.intercambio.boton;
@@ -1723,8 +1751,9 @@ export function crearPreviaPanel({ hospedador, proyecto, estadoPestana, editor, 
       boton.addEventListener("click", () => {
         if (typeof fichero.click === "function") fichero.click();
       });
-      barra.appendChild(boton);
-      barra.appendChild(fichero);
+      avanzado.appendChild(boton);
+      avanzado.appendChild(fichero);
+      barra.appendChild(avanzado);
     }
   }
 
@@ -4592,8 +4621,15 @@ export function crearPreviaPanel({ hospedador, proyecto, estadoPestana, editor, 
     // el historial propio del diseñador (los mismos caminos que Ctrl+Z/Ctrl+Mayús+Z)
     deshacerDiseno,
     rehacerDiseno,
+    // el modo cómodo: el dex del build entra en el guion vivo con la firma que manda la pestaña
+    intercambiarDelBuild,
     // lectura para las pruebas: el modelo dibujado en el modo Vista previa (no el código)
     modeloVivo: () => modeloVivo,
+    // el intérprete solo intercambia sobre una sesión viva; la pestaña lo usa para decidir si
+    // inicia el emulador o aplica el dex directamente
+    tieneSesion: () => !!resumenEjecucion(modeloActual()),
+    // lo que el modelo publicó en `ejecucion.intercambios`, no lo que el panel pidió
+    intercambios: () => (resumenEjecucion(modeloActual()) || { intercambios: [] }).intercambios,
     estado: () => ({
       ancho: caja.ancho, alto: caja.alto, arriba: caja.arriba,
       lado: cajaLado.ancho, ladoAlto: cajaLado.alto,

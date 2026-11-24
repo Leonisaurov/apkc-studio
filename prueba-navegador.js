@@ -541,6 +541,17 @@ const conductor = `(async () => {
       fichero: !!document.getElementById("previa-intercambio-fichero"),
       vistaFirma: !!document.getElementById("vista-intercambio-firma"),
       vistaBoton: !!document.getElementById("vista-intercambiar"),
+      // el modo cómodo es el visible: casilla y firma junto a los botones de Compilar y a #inc-compilar
+      autoCasilla: !!document.getElementById("hotswap-compilar"),
+      autoFirma: !!document.getElementById("hotswap-firma"),
+      autoJunto: (() => {
+        const panel = document.getElementById("panel-compilar");
+        const modo = document.getElementById("hotswap-controles");
+        const inc = document.getElementById("inc-compilar");
+        const boton = document.getElementById("compilar-debug");
+        return !!(panel && modo && inc && boton && panel.contains(modo) &&
+          panel.contains(inc) && panel.contains(boton));
+      })(),
     };
     if (typeof dexSwap === "string" || !dexSwap) {
       r.swap = { faltaDex: typeof dexSwap === "string" ? dexSwap : "el apk no trae classes.dex" };
@@ -626,6 +637,40 @@ const conductor = `(async () => {
         };
       } finally {
         hospedador.ejecutar = ejecutarReal;
+      }
+      // El modo cómodo: marcar la casilla y pulsar Compilar. El dex del build entra en el guion
+      // vivo sin selector y la firma se deriva del .java abierto. Se abre MainActivity a propósito
+      // para comprobar la derivación; el campo se deja vacío antes de compilar.
+      const casillaAuto = document.getElementById("hotswap-compilar");
+      const campoAuto = document.getElementById("hotswap-firma");
+      if (casillaAuto && campoAuto && typeof abrir === "function") {
+        document.querySelector('.pestana-vista[data-vista="pestana"]').click();
+        await abrir("/proyecto/src/" + paqueteSwap.replace(/\./g, "/") + "/MainActivity.java");
+        campoAuto.value = "";
+        casillaAuto.checked = true;
+        document.getElementById("compilar-debug").click();
+        const antesAuto = PREVIA_PANEL.estado().guion.length;
+        let filasAuto = [];
+        for (let i = 0; i < 200; i++) {
+          await new Promise((ok) => setTimeout(ok, 500));
+          filasAuto = filasRegistro();
+          if (filasAuto.some((f) => /intercambio automático aplicado/.test(String(f)))) break;
+          const codigo = (document.getElementById("ultimo-codigo").textContent || "").trim();
+          if (i > 20 && codigo && /falló|error/i.test(codigo)) break;
+        }
+        const estadoAuto = PREVIA_PANEL.estado();
+        r.swapAuto = {
+          derivada: campoAuto.value,
+          casilla: casillaAuto.checked,
+          antes: antesAuto,
+          guion: estadoAuto.guion,
+          rutas: estadoAuto.intercambios,
+          cambios: PREVIA_PANEL.intercambios(),
+          filas: filasAuto.slice(-6),
+          estado: document.getElementById("previa-render-estado").textContent,
+          codigo: (document.getElementById("ultimo-codigo").textContent || "").trim(),
+        };
+        casillaAuto.checked = false;
       }
     }
   }
@@ -1072,6 +1117,36 @@ function comprueba(cond, msg) { if (!cond) { fallos++; console.log("  FALLO:", m
             /no se intercambió caido\.dex/.test(String(f)) && /transporte roto/.test(String(f))),
           "un fallo del transporte no dejó el rechazo en el registro con nombre y motivo: " +
           JSON.stringify(ca).slice(0, 400));
+        // el modo nuevo: casilla visible junto a Compilar, firma derivada del .java activo, dex
+        // del build en el guion vivo y resultado publicado por el intérprete. El rechazo del dex
+        // roto sigue comprobándose arriba, por el camino avanzado.
+        const sa = v.swapAuto || {};
+        comprueba(sc.autoCasilla && sc.autoFirma && sc.autoJunto,
+          "el modo «compilar e intercambiar» no está junto a los botones de Compilar y a " +
+          "#inc-compilar: " + JSON.stringify(sc));
+        comprueba(sa.derivada === firmaSwap,
+          "la firma no se derivó del .java activo: " + String(sa.derivada) + " ≠ " + firmaSwap);
+        comprueba(sa.casilla === true && sa.guion.length > sa.antes &&
+          Array.isArray(sa.guion) && sa.guion.some((p) =>
+            String(p).indexOf("intercambiar:") === 0 && String(p).indexOf(sa.derivada) > 0),
+          "compilar con la casilla marcada no añadió el intercambio al guion vivo: " +
+          JSON.stringify({ antes: sa.antes, guion: (sa.guion || []).slice(-4) }));
+        comprueba(Array.isArray(sa.rutas) &&
+          sa.rutas.length > (Array.isArray(rutasProto) ? rutasProto.length : 0) &&
+          /^\/previa-soltada\/intercambio-\d+\.dex$/.test(String(sa.rutas[sa.rutas.length - 1])),
+          "el dex del build no quedó en la zona aislada de OPFS: " + JSON.stringify(sa.rutas));
+        comprueba(Array.isArray(sa.filas) && sa.filas.some((f) =>
+          /intercambio automático aplicado/.test(String(f)) &&
+          String(f).indexOf(sa.derivada) >= 0 && /existía: sí/.test(String(f))),
+          "el intercambio automático no se registró con la firma derivada: " +
+          JSON.stringify(sa.filas).slice(0, 400));
+        comprueba(Array.isArray(sa.cambios) && sa.cambios.length > 0 &&
+          !!sa.cambios[sa.cambios.length - 1].clase,
+          "el intercambio automático no se publicó en ejecucion.intercambios: " +
+          JSON.stringify(sa.cambios).slice(0, 300));
+        comprueba(/res\/layout\/main\.xml/.test(String(sa.estado)) &&
+          !/sin ejecución/i.test(String(sa.estado)),
+          "el modo automático reinició o perdió la sesión del emulador: " + String(sa.estado));
         console.log("  swap:", JSON.stringify({ firma: sw.firma, rutas: sw.rutas,
           ultimas: (sw.filas || []).slice(-2), roto: (roto.filas || []).slice(-1),
           doble: (db.segundo || []).slice(-1), pasosDoble: [db.swapsAntes, db.swapsDespues],

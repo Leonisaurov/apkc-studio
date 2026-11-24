@@ -643,6 +643,10 @@ kbd {
   stroke-linejoin: round;
 }
 .previa-control[aria-pressed="true"] { background: var(--acento); color: var(--blanco); }
+/* El selector de .dex pasa a «avanzado»: el modo cómodo se marca al compilar, no aquí. */
+.previa-controles details { display: inline-block; max-width: 100%; font-size: 11px; }
+.previa-controles details > summary { color: var(--texto-medio); cursor: pointer; }
+.previa-controles details[open] > * + * { margin-top: 3px; }
 .previa-control-campo {
   display: inline-flex;
   align-items: center;

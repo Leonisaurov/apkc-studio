@@ -775,6 +775,17 @@
                 </div>
                 <p class="nota" id="estado-verificacion">sin verificar todavía</p>
 
+                <div class="panel-form" id="hotswap-controles">
+                  <label><input type="checkbox" id="hotswap-compilar"> compilar e intercambiar en caliente</label>
+                  <label>firma a intercambiar <input type="text" id="hotswap-firma" class="ruta" autocomplete="off" spellcheck="false" placeholder="se deriva del .java activo; p. ej. Lcom/hola/Saludo;/metodo()I"></label>
+                  <p class="nota" id="hotswap-ayuda">Sin selector de archivos: al compilar se toma el
+                    <code>classes.dex</code> del apk recién generado y se aplica sobre el emulador
+                    vivo, sin reiniciar la sesión. La firma se rellena con la clase del fichero
+                    activo; puedes escribir <code>clase/metodo(proto)</code> para un método
+                    concreto. En la primera compilación todavía no hay sesión que intercambiar: se
+                    inicia el emulador y el intercambio ocurre en la siguiente.</p>
+                </div>
+
                 <details id="detalle-ajustes">
                   <summary>Ajustes del proyecto (versión y API)</summary>
                   <div class="panel-form">
@@ -848,6 +859,8 @@
                   <label><input type="checkbox" id="v4-compilar" checked> escribir el <code>.idsig</code> (firma v4)</label>
                   <label><input type="checkbox" id="inc-compilar" checked> compilación incremental (<code>--inc</code>)</label>
                   <p class="nota">Reutiliza las cachés del build anterior; destildarlo fuerza una compilación completa.</p>
+                  <p class="nota">Para intercambiar en caliente sin elegir un <code>.dex</code>, marca
+                    «compilar e intercambiar en caliente» junto a los botones de compilación.</p>
                 </details>
               </div>
 

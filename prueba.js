@@ -1859,6 +1859,21 @@ if (/\bfillText\s*\(/.test(fuentePrevia)) {
 
 // 7. el resaltador del editor es puro y se puede probar sin DOM; si se rompe, el código se
 // queda sin color o, peor, el HTML del resaltado se come el texto
+// La firma automática del modo intercambio se deriva del .java activo sin tocar el DOM.
+const firmaAuto = pestanaMod.firmaPorDefectoDe(
+  "package com.hola.apkcstudio;\npublic class MainActivity extends Activity {}\n",
+  "/proyecto/src/com/hola/apkcstudio/MainActivity.java");
+if (firmaAuto !== "Lcom/hola/apkcstudio/MainActivity;") {
+  mal("la firma automática no deriva la clase del .java activo: " + firmaAuto);
+}
+if (pestanaMod.firmaPorDefectoDe("class SinPaquete {}", "/proyecto/src/SinPaquete.java") !==
+    "LSinPaquete;") {
+  mal("la firma automática no admite el paquete por defecto");
+}
+if (pestanaMod.firmaPorDefectoDe("", "/proyecto/res/layout/main.xml") !== "") {
+  mal("la firma automática inventa una clase donde no hay fuente Java");
+}
+
 const java = pestanaMod.resaltar("package x;\n// hola\npublic class X {}\n", "java");
 if (!/<span class="palabra">package<\/span>/.test(java)) mal("el resaltador no pinta package");
 if (!/<span class="comentario">\/\/ hola<\/span>/.test(java)) mal("el resaltador no pinta el comentario");

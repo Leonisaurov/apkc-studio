@@ -1391,6 +1391,7 @@ async function cargarDocumentoEnEditor(doc, ruta, turno) {
   // EDITOR.poner marca limpio; el estado sucio de la pestaña hay que restaurarlo después
   const sucio = doc.sucio;
   EDITOR.poner(doc.texto);
+  actualizarFirmaAutomatica();
   const area = document.getElementById("codigo");
   if (area && doc.cursor) area.setSelectionRange(doc.cursor[0], doc.cursor[1]);
   if (area && doc.scroll) {
@@ -3030,6 +3031,86 @@ async function decirEstadoDepuracion() {
   }
 }
 
+// La firma por defecto del modo «compilar e intercambiar en caliente» sale del .java activo. La
+// clase entera es el valor más útil cuando se acaba de editar un método: `apkc preview` cambia
+// todos los que el dex declare para esa clase y conserva el estado de la sesión. Si el usuario
+// escribe `clase/metodo(proto)` en el campo, esa firma gana y se intercambia solo ese método.
+function firmaPorDefectoDe(texto, ruta = "") {
+  const fuente = String(texto || "");
+  const paquete = (/^\s*package\s+([\w.]+)\s*;/m.exec(fuente) || [])[1] || "";
+  let clase = (/\b(?:class|interface|enum)\s+([A-Za-z_$][\w$]*)/.exec(fuente) || [])[1] || "";
+  if (!clase && /\.java$/i.test(String(ruta || ""))) {
+    clase = String(ruta).split(/[\\/]/).pop().replace(/\.java$/i, "");
+  }
+  if (!clase) return "";
+  return "L" + paquete.replace(/\./g, "/") + (paquete ? "/" : "") + clase + ";";
+}
+
+// El campo se rellena solo mientras siga mostrando el valor automático anterior; una firma
+// escrita a mano no se pisa al cambiar de pestaña.
+let firmaAutomaticaAnterior = "";
+function actualizarFirmaAutomatica() {
+  const campo = document.getElementById("hotswap-firma");
+  if (!campo) return;
+  const doc = DOCUMENTOS.activa ? documentoDe(DOCUMENTOS.activa) : null;
+  const firma = doc && typeof doc.texto === "string"
+    ? firmaPorDefectoDe(doc.texto, doc.ruta) : "";
+  if (!firma) return;
+  const actual = campo.value.trim();
+  if (actual && actual !== firmaAutomaticaAnterior) return;
+  campo.value = firma;
+  firmaAutomaticaAnterior = firma;
+}
+
+function firmaDeHotswap() {
+  const campo = document.getElementById("hotswap-firma");
+  const escrita = campo && typeof campo.value === "string" ? campo.value.trim() : "";
+  if (escrita) return escrita;
+  actualizarFirmaAutomatica();
+  return campo ? campo.value.trim() : "";
+}
+
+// El dex que se intercambia es el del propio build: `classes.dex` dentro de build/app.apk, leído
+// con el mismo leerZip que usa el editor para importar proyectos. No se genera con `apkc dex`
+// aparte porque el build acaba de dejarlo firmado y igual al que ejecuta el emulador.
+async function dexDelUltimoBuild() {
+  const apk = await hospedador.bytes(PROYECTO + "/build/app.apk");
+  if (!apk || !apk.length) return null;
+  const entradas = await leerZip(apk);
+  const claseDex = entradas.find((e) => !e.dir && e.ruta === "classes.dex");
+  return claseDex ? claseDex.datos : null;
+}
+
+async function intercambiarTrasCompilar() {
+  const firma = firmaDeHotswap();
+  if (!firma) {
+    nota("intercambio en caliente: abre un .java o escribe la firma clase/metodo(proto)");
+    return null;
+  }
+  let dex;
+  try {
+    dex = await dexDelUltimoBuild();
+  } catch (e) {
+    dex = null;
+    nota("intercambio en caliente: no se pudo leer el dex del build: " +
+      (e && e.message ? e.message : e));
+  }
+  if (!dex) { nota("intercambio en caliente: build/app.apk no trae classes.dex"); return null; }
+  if (!PREVIA_PANEL.tieneSesion()) {
+    // el primer build no tiene sesión viva: se inicia el emulador como siempre y se dice por qué
+    // no hubo intercambio. Repetir Compilar con la casilla marcada sí lo aplica.
+    await previsualizarLoCompilado();
+    nota("intercambio en caliente: no había sesión viva; se inició el emulador. La próxima " +
+      "compilación intercambiará " + firma);
+    return null;
+  }
+  const aplicado = await PREVIA_PANEL.intercambiarDelBuild(dex, firma);
+  nota(aplicado
+    ? "intercambio en caliente aplicado: " + firma
+    : "intercambio en caliente rechazado: " + firma + "; el motivo está en el registro del emulador");
+  return aplicado;
+}
+
 // Por defecto la página compila con `--inc`: saltarse el enlace de recursos cuando `res/` no
 // cambió deja el apk igual entrada por entrada y es el 23 % de la pasada caliente en wasm
 // (docs/plan-incremental-web.md). El checkbox `#inc-compilar` permite desactivarlo, y
@@ -3082,8 +3163,12 @@ async function compilarCon(k, tipo, opciones = {}) {
       nota("el build salió bien, pero no se pudo guardar la última apk: " +
         (e && e.message ? e.message : e));
     }
-    // el build ya está bien; la vista previa es un extra y su fallo no puede convertirlo en fallo
-    await previsualizarLoCompilado();
+    // el build ya está bien; la vista previa es un extra y su fallo no puede convertirlo en fallo.
+    // Con el modo intercambio encendido no se reinicia la sesión: el dex recién compilado entra
+    // en el guion vivo y el resultado se lee en `ejecucion.intercambios` y en el registro.
+    const casillaHotswap = document.getElementById("hotswap-compilar");
+    if (casillaHotswap && casillaHotswap.checked) await intercambiarTrasCompilar();
+    else await previsualizarLoCompilado();
   }
   return r;
 }
@@ -3458,6 +3543,10 @@ if (typeof document !== "undefined") {
     en("traer-android-jar", () => traerJarDelSdk(false));
     en("compilar-debug", compilarDebug);
     en("compilar-apk", compilarDelTodo);
+    const casillaHotswap = document.getElementById("hotswap-compilar");
+    if (casillaHotswap) casillaHotswap.addEventListener("change", () => {
+      if (casillaHotswap.checked) actualizarFirmaAutomatica();
+    });
     en("verificar-apk", verificarLoCompilado);
     en("descargar-debug-keystore", () => descargarRuta(DEBUG_KEY.ruta));
     en("leer-ajustes", () => leerAjustes());
@@ -3564,7 +3653,7 @@ export {
   aplicarNodoHistorial, historialDe, conCarga, mostrarCarga, ocultarCarga,
   pintarConsola, KEYSTORES, DEBUG_KEY, RUTA_JAR, RUTA_LINAJE, RUTA_VIEJO,
   PREVIA_PANEL,
-  firmar, asegurarDebugKeystore, compilarCon, nuevoFichero,
+  firmar, asegurarDebugKeystore, compilarCon, firmaPorDefectoDe, nuevoFichero,
   renombrarRuta, borrarRuta, abrirMenuArchivo, decirEstadoJar,
   consultarJarDelSdk, traerJarDelSdk, asegurarJarDelProyecto,
   conBloqueo, publicar, recibirRemoto, decirEstadoClave,
@@ -3595,7 +3684,7 @@ if (typeof window !== "undefined") {
     programarHistorial, aplicarNodoHistorial, historialDe, conCarga,
     mostrarCarga, ocultarCarga, pintarConsola, KEYSTORES, DEBUG_KEY,
     RUTA_JAR, RUTA_LINAJE, RUTA_VIEJO, firmar,
-    asegurarDebugKeystore, compilarCon, nuevoFichero, renombrarRuta,
+    asegurarDebugKeystore, compilarCon, firmaPorDefectoDe, nuevoFichero, renombrarRuta,
     borrarRuta, abrirMenuArchivo, decirEstadoJar, consultarJarDelSdk,
     traerJarDelSdk, asegurarJarDelProyecto, conBloqueo, publicar, recibirRemoto,
     decirEstadoClave, actualizarEstadoClave, abrirDialogoClave, generarClaveRelease,
