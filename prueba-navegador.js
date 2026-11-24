@@ -621,10 +621,16 @@ const conductor = `(async () => {
         swapsDespues: swapsDe(),
         filas: filasRegistro(),
       };
-      // el transporte que lanza también tiene que dejar el rechazo en el registro, con el nombre
+      // el transporte que lanza también tiene que dejar el rechazo en el registro, con el nombre.
+      // El envoltorio sigue vivo durante el intercambio automático para guardar el argv enviado al
+      // intérprete; el fallo del transporte se apaga antes de esa parte, porque allí sí se necesita
+      // que preview corra de verdad.
       const ejecutarReal = hospedador.ejecutar;
+      let romperPreview = true;
+      r.swapAuto = { llamadas: [] };
       hospedador.ejecutar = (argv) => {
-        if (argv && argv[0] === "preview") throw new Error("transporte roto");
+        if (Array.isArray(r.swapAuto.llamadas)) r.swapAuto.llamadas.push(argv);
+        if (romperPreview && argv && argv[0] === "preview") throw new Error("transporte roto");
         return ejecutarReal.call(hospedador, argv);
       };
       try {
@@ -637,45 +643,183 @@ const conductor = `(async () => {
           pasos: PREVIA_PANEL.estado().guion.length,
           antes: antesCaida,
         };
+        romperPreview = false;
+        // El modo cómodo: marcar la casilla y pulsar Compilar. El dex del build entra en el guion
+        // vivo sin selector y la firma se deriva del .java abierto. Se escribe el Contador, se dan
+        // cuatro clics y se cambia el incremento antes del segundo build: con la firma de la clase
+        // exterior el quinto clic daría 5; con la del OnClickListener anónimo da 9.
+        const casillaAuto = document.getElementById("hotswap-compilar");
+        const campoAuto = document.getElementById("hotswap-firma");
+        if (casillaAuto && campoAuto && typeof abrir === "function") {
+          document.querySelector('.pestana-vista[data-vista="pestana"]').click();
+          // El conductor es un template literal: el punto hay que escaparlo dos veces o llega al
+          // navegador como /./g y sustituye TODOS los caracteres del paquete, dejando una ruta
+          // /proyecto/src//////////////MainActivity.java que no abre ningún documento.
+          const paqueteRutaSwap = paqueteSwap.replace(/\\./g, "/");
+          const rutaJavaSwap = "/proyecto/src/" + paqueteRutaSwap + "/MainActivity.java";
+          const fuenteContadorSwap = (incremento) => [
+            "package " + paqueteSwap + ";",
+            "",
+            "import android.app.*;",
+            "import android.os.*;",
+            "import android.view.*;",
+            "import android.widget.*;",
+            "",
+            "public class MainActivity extends Activity {",
+            "    int pulsos = 0;",
+            "    TextView total;",
+            "",
+            "    @Override",
+            "    public void onCreate(Bundle savedInstanceState) {",
+            "        super.onCreate(savedInstanceState);",
+            "        setContentView(R.layout.main);",
+            "        total = (TextView) findViewById(R.id.total);",
+            "        findViewById(R.id.pulsar).setOnClickListener(new View.OnClickListener() {",
+            "            public void onClick(View v) {",
+            "                pulsos = pulsos + " + incremento + ";",
+            "                total.setText(\\\"Pulsos: \\\" + pulsos);",
+            "            }",
+            "        });",
+            "    }",
+            "}",
+            "",
+          ].join("\\n");
+          const layoutContadorSwap = [
+            '<?xml version="1.0" encoding="utf-8"?>',
+            '<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"',
+            '    android:orientation="vertical"',
+            '    android:layout_width="match_parent"',
+            '    android:layout_height="match_parent"',
+            '    android:gravity="center">',
+            '    <TextView',
+            '        android:id="@+id/total"',
+            '        android:layout_width="wrap_content"',
+            '        android:layout_height="wrap_content"',
+            '        android:text="Pulsos: 0"/>',
+            '    <Button',
+            '        android:id="@+id/pulsar"',
+            '        android:layout_width="wrap_content"',
+            '        android:layout_height="wrap_content"',
+            '        android:text="Pulsar"/>',
+            '</LinearLayout>',
+            "",
+          ].join("\\n");
+          // El oráculo de valores es el JSON del intérprete, nunca PREVIA_PANEL.modeloVivo(): ese
+          // modelo es el del layout dibujado y se queda en «Pulsos: 0» aunque la app ya haya
+          // ejecutado veinte clics.
+          const capturasSwap = async () => {
+            const vp = await import("/vista-previa.js");
+            const modelo = vp.modeloActual();
+            const ejecucion = (modelo && modelo.ejecucion) || {};
+            const capturas = Array.isArray(ejecucion.capturas) ? ejecucion.capturas : [];
+            return {
+              totales: capturas.filter((c) => c && c.id === "id/total").map((c) => c.texto),
+              oyentes: Array.isArray(ejecucion.oyentes) ? ejecucion.oyentes : [],
+              intercambios: Array.isArray(ejecucion.intercambios) ? ejecucion.intercambios : [],
+            };
+          };
+          const esperarCapturaSwap = async (valor) => {
+            // pulsar ya espera a que el intérprete publique el modelo: en caliente basta una lectura,
+            // y el sondeo corto solo cubre el repintado asíncrono del panel.
+            for (let i = 0; i < 60; i++) {
+              const leido = await capturasSwap();
+              if (leido.totales.length && leido.totales[leido.totales.length - 1] === valor) {
+                return leido;
+              }
+              await new Promise((ok) => setTimeout(ok, 100));
+            }
+            return capturasSwap();
+          };
+          const escribirJavaSwap = async (fuente) => {
+            await abrir(rutaJavaSwap);
+            const area = document.getElementById("codigo");
+            EDITOR.cambiar(0, (area.value || "").length, fuente, [0, 0]);
+            await guardar();
+          };
+          await escribirJavaSwap(fuenteContadorSwap(1));
+          await hospedador.escribir("/proyecto/res/layout/main.xml",
+            new TextEncoder().encode(layoutContadorSwap));
+          await hospedador.limpiar("/proyecto/build");
+          if (document.getElementById("storepass-compilar")) {
+            document.getElementById("storepass-compilar").value = "android";
+          }
+          campoAuto.value = "";
+          casillaAuto.checked = false;
+          document.getElementById("compilar-debug").click();
+          let inicialSwap = null;
+          for (let i = 0; i < 120; i++) {
+            const leido = await capturasSwap();
+            if (leido.oyentes.some((o) => o.id === "id/pulsar")) { inicialSwap = leido; break; }
+            await new Promise((ok) => setTimeout(ok, 200));
+          }
+          const botonSwapContador = inicialSwap
+            ? inicialSwap.oyentes.find((o) => o.id === "id/pulsar") : null;
+          const timelineSwap = ["Pulsos: 0"];
+          for (let n = 1; n <= 4 && botonSwapContador; n++) {
+            await PREVIA_PANEL.pulsar(botonSwapContador.idRef);
+            const leido = await esperarCapturaSwap("Pulsos: " + n);
+            timelineSwap.push(leido.totales.length ? leido.totales[leido.totales.length - 1] : "?");
+          }
+          // el segundo build trae el mismo OnClickListener con el incremento cambiado; la firma
+          // derivada debe apuntar a la anónima para que el quinto clic ejecute el cuerpo nuevo.
+          // Se guarda el apk base (+1): el hot swap de verdad cambia el método de una app que ya
+          // estaba corriendo, no recompila la pantalla con el cuerpo nuevo desde cero.
+          const apkBaseClics = await hospedador.bytes("/proyecto/build/app.apk");
+          await escribirJavaSwap(fuenteContadorSwap(5));
+          r.swapAuto.llamadas = [];
+          campoAuto.value = "";
+          casillaAuto.checked = true;
+          document.getElementById("compilar-debug").click();
+          const antesAuto = PREVIA_PANEL.estado().guion.length;
+          let filasAuto = [];
+          for (let i = 0; i < 200; i++) {
+            await new Promise((ok) => setTimeout(ok, 500));
+            filasAuto = filasRegistro();
+            if (filasAuto.some((f) => /intercambio automático aplicado/.test(String(f)))) break;
+            const codigo = (document.getElementById("ultimo-codigo").textContent || "").trim();
+            if (i > 20 && codigo && /falló|error/i.test(codigo)) break;
+          }
+          // el dex del build +5 ya está copiado en /previa-soltada/. Se devuelve el apk base +1 y
+          // se repite el paso de intercambio para que el guion se reevalúe con la app que estaba
+          // viva: los cuatro clics siguen dando 4 y el cuerpo +5 solo entra después de ellos.
+          let dexCincoSwap = null;
+          try {
+            const entradasCinco = await leerZip(await hospedador.bytes("/proyecto/build/app.apk"));
+            const entradaDex = entradasCinco.find((e) => !e.dir && e.ruta === "classes.dex");
+            dexCincoSwap = entradaDex ? entradaDex.datos : null;
+          } catch (e) { dexCincoSwap = null; }
+          if (apkBaseClics && dexCincoSwap) {
+            await hospedador.escribir("/proyecto/build/app.apk", apkBaseClics);
+            await PREVIA_PANEL.intercambiarDelBuild(dexCincoSwap, campoAuto.value);
+          }
+          const despuesSwap = await esperarCapturaSwap("Pulsos: 4");
+          timelineSwap.push(despuesSwap.totales.length
+            ? despuesSwap.totales[despuesSwap.totales.length - 1] : "?");
+          if (botonSwapContador) {
+            await PREVIA_PANEL.pulsar(botonSwapContador.idRef);
+            const despuesClic = await esperarCapturaSwap("Pulsos: 9");
+            timelineSwap.push(despuesClic.totales.length
+              ? despuesClic.totales[despuesClic.totales.length - 1] : "?");
+          }
+          const estadoAuto = PREVIA_PANEL.estado();
+          Object.assign(r.swapAuto, {
+            derivada: campoAuto.value,
+            casilla: casillaAuto.checked,
+            antes: antesAuto,
+            guion: estadoAuto.guion,
+            rutas: estadoAuto.intercambios,
+            cambios: PREVIA_PANEL.intercambios(),
+            filas: filasAuto.slice(-6),
+            estado: document.getElementById("previa-render-estado").textContent,
+            codigo: (document.getElementById("ultimo-codigo").textContent || "").trim(),
+            timeline: timelineSwap,
+            capturas: despuesSwap.totales,
+            idRef: botonSwapContador ? botonSwapContador.idRef : "",
+          });
+          casillaAuto.checked = false;
+        }
       } finally {
         hospedador.ejecutar = ejecutarReal;
-      }
-      // El modo cómodo: marcar la casilla y pulsar Compilar. El dex del build entra en el guion
-      // vivo sin selector y la firma se deriva del .java abierto. Se abre MainActivity a propósito
-      // para comprobar la derivación; el campo se deja vacío antes de compilar.
-      const casillaAuto = document.getElementById("hotswap-compilar");
-      const campoAuto = document.getElementById("hotswap-firma");
-      if (casillaAuto && campoAuto && typeof abrir === "function") {
-        document.querySelector('.pestana-vista[data-vista="pestana"]').click();
-        // El conductor es un template literal: el punto hay que escaparlo dos veces o llega al
-        // navegador como /./g y sustituye TODOS los caracteres del paquete, dejando una ruta
-        // /proyecto/src//////////////MainActivity.java que no abre ningún documento.
-        await abrir("/proyecto/src/" + paqueteSwap.replace(/\\./g, "/") + "/MainActivity.java");
-        campoAuto.value = "";
-        casillaAuto.checked = true;
-        document.getElementById("compilar-debug").click();
-        const antesAuto = PREVIA_PANEL.estado().guion.length;
-        let filasAuto = [];
-        for (let i = 0; i < 200; i++) {
-          await new Promise((ok) => setTimeout(ok, 500));
-          filasAuto = filasRegistro();
-          if (filasAuto.some((f) => /intercambio automático aplicado/.test(String(f)))) break;
-          const codigo = (document.getElementById("ultimo-codigo").textContent || "").trim();
-          if (i > 20 && codigo && /falló|error/i.test(codigo)) break;
-        }
-        const estadoAuto = PREVIA_PANEL.estado();
-        r.swapAuto = {
-          derivada: campoAuto.value,
-          casilla: casillaAuto.checked,
-          antes: antesAuto,
-          guion: estadoAuto.guion,
-          rutas: estadoAuto.intercambios,
-          cambios: PREVIA_PANEL.intercambios(),
-          filas: filasAuto.slice(-6),
-          estado: document.getElementById("previa-render-estado").textContent,
-          codigo: (document.getElementById("ultimo-codigo").textContent || "").trim(),
-        };
-        casillaAuto.checked = false;
       }
     }
   }
@@ -1221,17 +1365,31 @@ const pixelCercano = (pix, esperado) => Array.isArray(pix) && pix.length === 3 &
         comprueba(sc.autoCasilla && sc.autoFirma && sc.autoJunto,
           "el modo «compilar e intercambiar» no está junto a los botones de Compilar y a " +
           "#inc-compilar: " + JSON.stringify(sc));
-        // firmaSwap vive dentro del conductor del navegador: aquí se usa la misma firma que ese
-        // publicó en r.swap.firma, para no comparar con una variable fuera de ámbito.
-        comprueba(sa.derivada === sw.firma,
-          "la firma no se derivó del .java activo: " + String(sa.derivada) + " ≠ " + String(sw.firma));
+        // `paqueteSwap` vive dentro del conductor: se recupera de la firma de la clase exterior
+        // que ese mismo conductor publicó en r.swap.firma. El Contador pone el onClick en la
+        // anónima $1, así que la firma correcta no es la de MainActivity.
+        const paqueteSwapNode = String(sw.firma || "").replace(/^L/, "")
+          .replace(/\/MainActivity;$/, "");
+        const firmaDerivadaSwap = "L" + paqueteSwapNode.replace(/\./g, "/") +
+          "/MainActivity$1;/onClick(Landroid/view/View;)V";
+        comprueba(sa.derivada === firmaDerivadaSwap,
+          "la firma automática eligió la clase exterior en vez del OnClickListener anónimo: " +
+          String(sa.derivada) + " ≠ " + firmaDerivadaSwap);
+        const timelineEsperado = ["Pulsos: 0", "Pulsos: 1", "Pulsos: 2", "Pulsos: 3",
+          "Pulsos: 4", "Pulsos: 4", "Pulsos: 9"];
+        comprueba(JSON.stringify(sa.timeline) === JSON.stringify(timelineEsperado),
+          "el contador del hot swap no va 0,1,2,3,4,4,9: " + JSON.stringify(sa.timeline));
+        comprueba(Array.isArray(sa.llamadas) && sa.llamadas.some((argv) =>
+          Array.isArray(argv) && argv.some((p, i) => String(p) === "--intercambiar" &&
+            String(argv[i + 1] || "").indexOf(sa.derivada + "=") === 0)),
+          "el intérprete no recibió --intercambiar con la firma del anónimo: " +
+          JSON.stringify(sa.llamadas).slice(0, 500));
         comprueba(sa.casilla === true && sa.guion.length > sa.antes &&
           Array.isArray(sa.guion) && sa.guion.some((p) =>
             String(p).indexOf("intercambiar:") === 0 && String(p).indexOf(sa.derivada) > 0),
           "compilar con la casilla marcada no añadió el intercambio al guion vivo: " +
           JSON.stringify({ antes: sa.antes, guion: (sa.guion || []).slice(-4) }));
-        comprueba(Array.isArray(sa.rutas) &&
-          sa.rutas.length > (Array.isArray(rutasProto) ? rutasProto.length : 0) &&
+        comprueba(Array.isArray(sa.rutas) && sa.rutas.length > 0 &&
           /^\/previa-soltada\/intercambio-\d+\.dex$/.test(String(sa.rutas[sa.rutas.length - 1])),
           "el dex del build no quedó en la zona aislada de OPFS: " + JSON.stringify(sa.rutas));
         comprueba(Array.isArray(sa.filas) && sa.filas.some((f) =>

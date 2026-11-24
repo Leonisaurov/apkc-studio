@@ -2552,6 +2552,79 @@ if (pestanaMod.firmaPorDefectoDe("class SinPaquete {}", "/proyecto/src/SinPaquet
 if (pestanaMod.firmaPorDefectoDe("", "/proyecto/res/layout/main.xml") !== "") {
   mal("la firma automática inventa una clase donde no hay fuente Java");
 }
+// El Contador pone el `onClick` en una anónima: intercambiar la clase exterior deja el clic viejo.
+// La firma tiene que ser la del listener, no la de MainActivity.
+const actContadorSwap = [
+  "package com.hola.contador;",
+  "import android.app.*;",
+  "import android.view.*;",
+  "public class MainActivity extends Activity {",
+  "    TextView total;",
+  "    public void onCreate(Bundle b) {",
+  "        total = (TextView) findViewById(R.id.total);",
+  "        findViewById(R.id.pulsar).setOnClickListener(new View.OnClickListener() {",
+  "            public void onClick(View v) { total.setText(\"Pulsos\"); }",
+  "        });",
+  "    }",
+  "}",
+  "",
+].join("\n");
+const rutaContadorSwap = "/proyecto/src/com/hola/contador/MainActivity.java";
+const firmaListenerSwap = "Lcom/hola/contador/MainActivity$1;/onClick(Landroid/view/View;)V";
+if (pestanaMod.firmaPorDefectoDe(actContadorSwap, rutaContadorSwap) !== firmaListenerSwap) {
+  mal("la firma automática eligió la clase exterior en vez del OnClickListener anónimo: " +
+    pestanaMod.firmaPorDefectoDe(actContadorSwap, rutaContadorSwap));
+}
+// javac numera también las anónimas que no son listener: con un Runnable delante es $2.
+const conRunnableSwap = actContadorSwap.replace("        total =",
+  "        new Runnable() { public void run() {} }.run();\n        total =");
+if (pestanaMod.firmaPorDefectoDe(conRunnableSwap, rutaContadorSwap) !==
+    firmaListenerSwap.replace("$1;", "$2;")) {
+  mal("la firma automática no cuenta las anónimas anteriores al listener");
+}
+// Las plantillas sin anónima declaran la interfaz en la propia actividad.
+const oyenteDirectoSwap = "package com.hola.lienzo;\npublic class MainActivity " +
+  "implements View.OnClickListener {\n    public void onClick(View v) {}\n}\n";
+if (pestanaMod.firmaPorDefectoDe(oyenteDirectoSwap, "/proyecto/src/MainActivity.java") !==
+    "Lcom/hola/lienzo/MainActivity;/onClick(Landroid/view/View;)V") {
+  mal("la firma automática no reconoce el OnClickListener de la actividad");
+}
+{
+  // Con un dex en la mano se comprueba que la anónima existe; si no está se degrada a la clase.
+  // `nota` y el campo de la firma necesitan un DOM mínimo, que se retira al terminar.
+  const anteriorDocumento = globalThis.document;
+  const anteriorActiva = pestanaMod.DOCUMENTOS.activa;
+  const campoFirma = { value: "Lcom/manual/Otra;/metodo()V" };
+  globalThis.document = {
+    getElementById: (id) => id === "hotswap-firma" ? campoFirma : null,
+  };
+  const documentoFirma = { ruta: rutaContadorSwap, texto: actContadorSwap, sucio: false, hist: null };
+  pestanaMod.DOCUMENTOS.lista.push(documentoFirma);
+  pestanaMod.DOCUMENTOS.activa = rutaContadorSwap;
+  try {
+    const dexSinAnonima = new TextEncoder().encode("Lcom/hola/contador/MainActivity;");
+    if (pestanaMod.firmaPorDefectoDe(actContadorSwap, rutaContadorSwap, dexSinAnonima) !==
+        "Lcom/hola/contador/MainActivity$1;") {
+      mal("la firma automática no degrada a la anónima cuando el dex no la trae");
+    }
+    const dexConAnonima = new TextEncoder().encode(firmaListenerSwap);
+    if (pestanaMod.firmaPorDefectoDe(actContadorSwap, rutaContadorSwap, dexConAnonima) !==
+        firmaListenerSwap) {
+      mal("la firma automática no conserva el método cuando el dex sí trae la anónima");
+    }
+    // una firma escrita a mano gana: ni el cambio de pestaña ni el dex la pisan
+    pestanaMod.actualizarFirmaAutomatica(dexConAnonima);
+    if (pestanaMod.firmaDeHotswap() !== campoFirma.value ||
+        campoFirma.value !== "Lcom/manual/Otra;/metodo()V") {
+      mal("la firma automática pisó una firma escrita a mano");
+    }
+  } finally {
+    pestanaMod.DOCUMENTOS.lista.splice(pestanaMod.DOCUMENTOS.lista.indexOf(documentoFirma), 1);
+    pestanaMod.DOCUMENTOS.activa = anteriorActiva;
+    if (anteriorDocumento === undefined) delete globalThis.document;
+    else globalThis.document = anteriorDocumento;
+  }
+}
 
 const java = pestanaMod.resaltar("package x;\n// hola\npublic class X {}\n", "java");
 if (!/<span class="palabra">package<\/span>/.test(java)) mal("el resaltador no pinta package");

@@ -3033,9 +3033,28 @@ async function decirEstadoDepuracion() {
 
 // La firma por defecto del modo «compilar e intercambiar en caliente» sale del .java activo. La
 // clase entera es el valor más útil cuando se acaba de editar un método: `apkc preview` cambia
-// todos los que el dex declare para esa clase y conserva el estado de la sesión. Si el usuario
-// escribe `clase/metodo(proto)` en el campo, esa firma gana y se intercambia solo ese método.
-function firmaPorDefectoDe(texto, ruta = "") {
+// todos los que el dex declare para esa clase y conserva el estado de la sesión. El Contador, sin
+// embargo, pone el `onClick` en una clase anónima: intercambiar solo la exterior deja el clic con
+// el cuerpo viejo, así que la firma tiene que ser la del listener anónimo. Si el usuario escribe
+// `clase/metodo(proto)` en el campo, esa firma gana y se intercambia solo ese método.
+
+// El descriptor de una clase vive en la tabla de cadenas del dex como texto ASCII. Se busca byte
+// a byte, sin parsear el dex: solo se pregunta si está o no está el nombre que ya se derivó.
+function dexContieneTexto(dex, texto) {
+  if (!dex || typeof dex.length !== "number") return true;
+  const bytes = dex instanceof Uint8Array ? dex : new Uint8Array(dex);
+  const aguja = new TextEncoder().encode(texto);
+  for (let i = 0; i + aguja.length <= bytes.length; i++) {
+    let iguales = true;
+    for (let j = 0; j < aguja.length; j++) {
+      if (bytes[i + j] !== aguja[j]) { iguales = false; break; }
+    }
+    if (iguales) return true;
+  }
+  return false;
+}
+
+function firmaPorDefectoDe(texto, ruta = "", dex = null) {
   const fuente = String(texto || "");
   const paquete = (/^\s*package\s+([\w.]+)\s*;/m.exec(fuente) || [])[1] || "";
   let clase = (/\b(?:class|interface|enum)\s+([A-Za-z_$][\w$]*)/.exec(fuente) || [])[1] || "";
@@ -3043,18 +3062,49 @@ function firmaPorDefectoDe(texto, ruta = "") {
     clase = String(ruta).split(/[\\/]/).pop().replace(/\.java$/i, "");
   }
   if (!clase) return "";
-  return "L" + paquete.replace(/\./g, "/") + (paquete ? "/" : "") + clase + ";";
+  const prefijo = "L" + paquete.replace(/\./g, "/") + (paquete ? "/" : "");
+
+  // javac numera las anónimas en orden de fuente: la primera es $1 aunque sea un Runnable. Por eso
+  // se cuenta también la anónima que no es listener, pero solo se elige la que se pasa a
+  // setOnClickListener( y cuyo tipo termina en OnClickListener.
+  const anonimas = /new\s+([\w.]+)\s*\([^()]*\)\s*\{/g;
+  let coincidencia;
+  let ordinal = 0;
+  while ((coincidencia = anonimas.exec(fuente))) {
+    ordinal += 1;
+    const tipo = coincidencia[1];
+    if (!/(^|\.)OnClickListener$/.test(tipo)) continue;
+    if (!/setOnClickListener\(\s*$/.test(fuente.slice(0, coincidencia.index))) continue;
+    const anonima = prefijo + clase + "$" + ordinal + ";";
+    if (dex && !dexContieneTexto(dex, anonima)) {
+      nota("intercambio en caliente: el dex no trae " + anonima +
+        "; se intercambia la clase anónima sin método");
+      return anonima;
+    }
+    return anonima + "/onClick(Landroid/view/View;)V";
+  }
+  // las plantillas Lienzo y Notas implementan la interfaz en la propia actividad
+  if (/\bimplements\b[^{]*\b(?:View\.)?OnClickListener\b/.test(fuente) &&
+      /\bvoid\s+onClick\s*\(\s*View\b/.test(fuente)) {
+    return prefijo + clase + ";/onClick(Landroid/view/View;)V";
+  }
+  return prefijo + clase + ";";
 }
 
 // El campo se rellena solo mientras siga mostrando el valor automático anterior; una firma
 // escrita a mano no se pisa al cambiar de pestaña.
 let firmaAutomaticaAnterior = "";
-function actualizarFirmaAutomatica() {
+function actualizarFirmaAutomatica(dex = null) {
   const campo = document.getElementById("hotswap-firma");
   if (!campo) return;
   const doc = DOCUMENTOS.activa ? documentoDe(DOCUMENTOS.activa) : null;
-  const firma = doc && typeof doc.texto === "string"
-    ? firmaPorDefectoDe(doc.texto, doc.ruta) : "";
+  // guardar() deja `texto = null` en el documento activo (se relee de OPFS al volver a abrirlo),
+  // pero el buffer del editor sí tiene el fuente que se acaba de compilar.
+  let texto = doc && typeof doc.texto === "string" ? doc.texto : "";
+  if (!texto && doc && DOCUMENTOS.activa === doc.ruta) {
+    try { texto = EDITOR.texto(); } catch (e) { texto = ""; }
+  }
+  const firma = texto ? firmaPorDefectoDe(texto, doc.ruta, dex) : "";
   if (!firma) return;
   const actual = campo.value.trim();
   if (actual && actual !== firmaAutomaticaAnterior) return;
@@ -3082,11 +3132,6 @@ async function dexDelUltimoBuild() {
 }
 
 async function intercambiarTrasCompilar() {
-  const firma = firmaDeHotswap();
-  if (!firma) {
-    nota("intercambio en caliente: abre un .java o escribe la firma clase/metodo(proto)");
-    return null;
-  }
   let dex;
   try {
     dex = await dexDelUltimoBuild();
@@ -3096,6 +3141,14 @@ async function intercambiarTrasCompilar() {
       (e && e.message ? e.message : e));
   }
   if (!dex) { nota("intercambio en caliente: build/app.apk no trae classes.dex"); return null; }
+  // con el dex en la mano se comprueba que la anónima derivada existe antes de escribir la firma;
+  // el campo escrito a mano sigue ganando porque actualizarFirmaAutomatica lo respeta.
+  actualizarFirmaAutomatica(dex);
+  const firma = firmaDeHotswap();
+  if (!firma) {
+    nota("intercambio en caliente: abre un .java o escribe la firma clase/metodo(proto)");
+    return null;
+  }
   if (!PREVIA_PANEL.tieneSesion()) {
     // el primer build no tiene sesión viva: se inicia el emulador como siempre y se dice por qué
     // no hubo intercambio. Repetir Compilar con la casilla marcada sí lo aplica.
@@ -3663,7 +3716,8 @@ export {
   aplicarNodoHistorial, historialDe, conCarga, mostrarCarga, ocultarCarga,
   pintarConsola, KEYSTORES, DEBUG_KEY, RUTA_JAR, RUTA_LINAJE, RUTA_VIEJO,
   PREVIA_PANEL,
-  firmar, asegurarDebugKeystore, compilarCon, firmaPorDefectoDe, nuevoFichero,
+  firmar, asegurarDebugKeystore, compilarCon, firmaPorDefectoDe, firmaDeHotswap,
+  actualizarFirmaAutomatica, nuevoFichero,
   renombrarRuta, borrarRuta, abrirMenuArchivo, decirEstadoJar,
   consultarJarDelSdk, traerJarDelSdk, asegurarJarDelProyecto,
   conBloqueo, publicar, recibirRemoto, decirEstadoClave,
@@ -3694,7 +3748,8 @@ if (typeof window !== "undefined") {
     programarHistorial, aplicarNodoHistorial, historialDe, conCarga,
     mostrarCarga, ocultarCarga, pintarConsola, KEYSTORES, DEBUG_KEY,
     RUTA_JAR, RUTA_LINAJE, RUTA_VIEJO, firmar,
-    asegurarDebugKeystore, compilarCon, firmaPorDefectoDe, nuevoFichero, renombrarRuta,
+    asegurarDebugKeystore, compilarCon, firmaPorDefectoDe, firmaDeHotswap,
+    actualizarFirmaAutomatica, nuevoFichero, renombrarRuta,
     borrarRuta, abrirMenuArchivo, decirEstadoJar, consultarJarDelSdk,
     traerJarDelSdk, asegurarJarDelProyecto, conBloqueo, publicar, recibirRemoto,
     decirEstadoClave, actualizarEstadoClave, abrirDialogoClave, generarClaveRelease,
