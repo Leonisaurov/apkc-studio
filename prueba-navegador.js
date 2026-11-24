@@ -517,10 +517,11 @@ const conductor = `(async () => {
     const manifiestoSwap = new TextDecoder().decode(
       await hospedador.bytes(PROYECTO + "/AndroidManifest.xml"));
     const paqueteSwap = (/package="([^"]+)"/.exec(manifiestoSwap) || [])[1] || "";
-    // la firma sin «/metodo» cambia la clase entera, que es la forma natural de la pestaña. Se usa
-    // esa y no un método concreto porque todo método útil de la plantilla lleva un parámetro de
-    // referencia y el parser de --intercambiar corta por el ÚLTIMO «;» del descriptor: con
-    // (Landroid/os/Bundle;)V se comería la firma (deuda del comando, no de la pestaña).
+    // la primera firma cambia la clase entera, sin «/metodo». El troceo de la firma lo hace
+    // parteFirmaDeIntercambio (apkc/preview.go): corta la clase por su PRIMER «;» con
+    // strings.IndexByte, así que un proto con tipos de referencia conserva sus «;». Más abajo
+    // se suelta el mismo dex con .../onCreateOptionsMenu(Landroid/view/Menu;)Z y se exige que
+    // el swap la acepte; con el LastIndex(";") viejo se partía dentro del parámetro.
     const firmaSwap = "L" + paqueteSwap.replace(/\\./g, "/") + "/MainActivity;";
     const campoSwap = document.getElementById("previa-intercambio-firma");
     const botonSwap = document.getElementById("previa-intercambiar");
@@ -558,6 +559,25 @@ const conductor = `(async () => {
         filas: filasSwap,
         guion: estadoSwap.guion,
         rutas: estadoSwap.intercambios,
+        estado: document.getElementById("previa-render-estado").textContent,
+      };
+      // la firma con el proto completo y un tipo de referencia dentro no se parte: la plantilla
+      // Menú ejecutó onCreateOptionsMenu(Landroid/view/Menu;)Z, el método existe en la sesión
+      // viva y el swap tiene que aceptarlo con el «;» del parámetro intacto.
+      const firmaProtoSwap = "L" + paqueteSwap.replace(/\\./g, "/") +
+        "/MainActivity;/onCreateOptionsMenu(Landroid/view/Menu;)Z";
+      // el primer swap tiene que haber terminado («aplicado desde nuevo.dex» se registra al
+      // final, cuando la guarda ya se soltó); si no, el segundo drop se rechaza por serialización
+      await esperarSwap("aplicado desde nuevo.dex");
+      campoSwap.value = firmaProtoSwap;
+      soltarEn(canvasSwap, new File([dexSwap], "proto.dex", { type: "application/x-dex" }));
+      await esperarSwap("proto.dex");
+      const estadoProtoSwap = PREVIA_PANEL.estado();
+      r.swap.proto = {
+        firma: firmaProtoSwap,
+        filas: filasRegistro(),
+        guion: estadoProtoSwap.guion,
+        rutas: estadoProtoSwap.intercambios,
         estado: document.getElementById("previa-render-estado").textContent,
       };
       // un dex roto se rechaza antes de tocar OPFS y sin añadir un paso al guion
@@ -887,6 +907,30 @@ function comprueba(cond, msg) { if (!cond) { fallos++; console.log("  FALLO:", m
           !/sin ejecución/i.test(String(sw.estado)),
           "el hot swap perdió el modelo: la línea del emulador quedó en " +
           String(sw.estado).slice(0, 160));
+        // la firma con un tipo de referencia dentro del proto llega entera al intérprete: la
+        // clase se corta por su primer «;» (IndexByte en preview.go) y los «;» del proto quedan
+        // dentro. Con el LastIndex(";") viejo el swap se habría rechazado al parsear la firma.
+        const pr = sw.proto || {};
+        const firmaProto = String(pr.firma || "");
+        const filasProto = Array.isArray(pr.filas) ? pr.filas : [];
+        const guionProto = Array.isArray(pr.guion) ? pr.guion : [];
+        const rutasProto = Array.isArray(pr.rutas) ? pr.rutas : [];
+        comprueba(firmaProto.indexOf("/onCreateOptionsMenu(Landroid/view/Menu;)Z") > 0,
+          "la firma con referencia en el proto no llegó entera al intercambio: " + firmaProto);
+        // la línea «aplicado desde proto.dex» solo se registra cuando el preview aceptó la firma
+        // y publicó el cambio; el repintado del modelo no la fabrica
+        comprueba(filasProto.some((f) =>
+          String(f).indexOf("aplicado desde proto.dex") >= 0 &&
+          String(f).indexOf(firmaProto) >= 0 && /existía: sí/.test(String(f))),
+          "el swap con referencia en el proto no se aplicó (la firma se partió): " +
+          JSON.stringify(filasProto.slice(-3)).slice(0, 500));
+        comprueba(guionProto.some((p) =>
+          String(p).indexOf("intercambiar:") === 0 && String(p).indexOf(firmaProto) > 0),
+          "el guion no conservó la firma con referencia en el proto: " +
+          JSON.stringify(guionProto.slice(-3)));
+        comprueba(rutasProto.length > (Array.isArray(sw.rutas) ? sw.rutas.length : 0) &&
+          /^\/previa-soltada\/intercambio-\d+\.dex$/.test(String(rutasProto[rutasProto.length - 1])),
+          "el dex del swap con proto no quedó en la zona aislada: " + JSON.stringify(rutasProto));
         const roto = sw.roto || {};
         comprueba(roto.pasos === roto.antes &&
           Array.isArray(roto.filas) &&
