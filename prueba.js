@@ -377,6 +377,14 @@ if (botonEstrecho.length !== 2 || botonEstrecho[1].ancho !== 88 || botonEstrecho
     botonEstrecho[1].x !== 4 || botonEstrecho[1].y !== 6) {
   mal("el botón estrecho no se ensancha a 88x48dp desde su esquina: " + JSON.stringify(botonEstrecho[1]));
 }
+// con escala menor que 1 el alto también se escala: una regresión a Math.max(alto, …) lo dejaba a 48
+// cuando el ancho ya valía 50, y rompía la proporción de la pantalla en el emulador
+const aMediaPantalla = vistaPrevia.rectsEscalados({ pantalla: { ancho: 360, alto: 640 },
+  raiz: { tipo: "LinearLayout", rect: { x: 0, y: 0, ancho: 360, alto: 640 },
+    hijos: [{ tipo: "TextView", texto: "x", rect: { x: 0, y: 0, ancho: 100, alto: 48 } }] } }, 180, 320);
+if (aMediaPantalla.length !== 2 || aMediaPantalla[1].ancho !== 50 || aMediaPantalla[1].alto !== 24) {
+  mal("el alto no se escala con la pantalla a media medida: " + JSON.stringify(aMediaPantalla[1]));
+}
 // un nodo sin rect se omite en vez de pintarse en (0,0); y la cota corta un árbol desmedido
 const sinRect = { pantalla: { ancho: 100, alto: 100 }, raiz: { tipo: "X", hijos: [{ tipo: "Y" }] } };
 if (vistaPrevia.rectsEscalados(sinRect, 100, 100).length !== 0) mal("rectsEscalados pinta un nodo sin rect");

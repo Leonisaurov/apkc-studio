@@ -209,7 +209,7 @@ export function rectsEscalados(modelo, ancho, alto) {
       x: caja.x + x * caja.escala,
       y: caja.y + y * caja.escala,
       ancho: Math.max(1, ancho * caja.escala),
-      alto: Math.max(alto, alto * caja.escala),
+      alto: Math.max(1, alto * caja.escala),
       tipo: String(nodo.tipo || ""),
       id: String(nodo.id || ""),
       // el id de recurso numérico y la marca de oyente son lo que necesita el clic del canvas: el
