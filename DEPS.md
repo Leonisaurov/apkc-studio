@@ -263,7 +263,9 @@ prueba y la falsificación; no hay una copia más laxa en cada sitio.
   ```
 
   Sin `APKC_WISP_EXTERNO=1`, `prueba-pestana.js` imprime «omitido gate del modo externo» y no abre
-  ni un relay. **Este gate no se corre en CI**: necesita red hacia relays de terceros y no está
+  ni un relay. El **wrapper** `tools/entorno.sh wisp-externo` es más estricto: sin la variable sale
+  **rc 2** con «gate externo omitido: fija APKC_WISP_EXTERNO=1…»; es un fallo de uso, no un aviso
+  inofensivo. **Este gate no se corre en CI**: necesita red hacia relays de terceros y no está
   auditado; en CI solo corre el gate por defecto y la falsificación, que no toca la red.
 
 **Pruebas del módulo.**

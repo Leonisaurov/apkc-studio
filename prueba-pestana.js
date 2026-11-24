@@ -5921,7 +5921,9 @@ async function conductor() {
       /workflow/.test(String(sinIndice.estado)) && sinIndice.visible === false,
       JSON.stringify(sinIndice).slice(0, 300));
 
-    // y nada de esto ha sacado una petición del origen (el gate global lo repite al final)
+    // Comprobación local gruesa de esta sección: el gate global al final usa wisp-gates.js, que
+    // mira también el origen incrustado en data:/blob:. Aquí solo se descartan las peticiones
+    // HTTP ajenas; no es el filtro autoritativo y no debe relajarse en el gate global.
     const ajenasDeps = peticiones.slice(antesDeps).filter((u) =>
       !u.startsWith("http://127.0.0.1:" + PUERTO) && !/^(?:data|blob):/.test(u));
     comprueba("la sección de dependencias no pide nada fuera del origen",
