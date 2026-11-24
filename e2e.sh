@@ -295,7 +295,7 @@ guion_de() {
     lienzo) printf '%s' '' ;;
     notas) printf '%s' '--escribir id/editor/TextoDePrueba --pulsar id/guardar' ;;
     chatbt) printf '%s' '--escribir id/entrada/hola --pulsar id/enviar' ;;
-    tareas) printf '%s' '' ;;
+    tareas) printf '%s' '--escribir id/nueva/Comprar --pulsar id/agregar' ;;
     cronometro) printf '%s' '--pulsar id/iniciar --avanzar 1000' ;;
   esac
 }
