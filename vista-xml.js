@@ -24,6 +24,9 @@
 const PANTALLA_POR_DEFECTO = { ancho: 360, alto: 640 };
 const ALTO_TEXTO = 24;
 const ALTO_BOTON = 48;
+// Widget.Material.Button (android.jar 34) impone minWidth=88dp y minHeight=48dp. El ancho
+// intrínseco del texto más el relleno de 16dp a cada lado no llega a 88dp con «Pulsar».
+const ANCHO_BOTON = 88;
 const ANCHO_CARACTER = 7;
 const PADDING_TEXTO = 16;
 const PADDING_BOTON = 32;
@@ -308,6 +311,12 @@ function crearNodo(elemento, resolucion, strings, colores) {
     texto: resolverTexto(local(elemento.atributos, "text"), strings, resolucion),
     fondo: colorDeCanvas(local(elemento.atributos, "background"), colores),
     colorTexto: colorDeCanvas(local(elemento.atributos, "textColor"), colores),
+    // El pintor comparte la apariencia por defecto con el emulador: lo declarado gana y lo que
+    // falta cae al tema del aparato (texto de 14sp, botón gris, relleno del botón).
+    tamTexto: String(local(elemento.atributos, "textSize") || "").trim(),
+    estilo: String(local(elemento.atributos, "style") || "").trim(),
+    estiloTexto: String(local(elemento.atributos, "textStyle") || "").trim(),
+    padding: paddingDe(elemento),
     // `android:src` tal cual (`@drawable/foto`, `@android:drawable/ic_delete`): el panel lee el PNG
     // del proyecto para pintarlo; el modelo de `apkc preview` no trae esta clave.
     recurso: String(local(elemento.atributos, "src") || "").trim(),
@@ -328,7 +337,7 @@ function intrinseco(nodo) {
   const hijos = nodo.hijos;
   if (!hijos.length) {
     if (esBoton(nodo.tipo)) {
-      return { ancho: Math.max(ALTO_BOTON, Math.ceil(nodo.texto.length * ANCHO_CARACTER) + PADDING_BOTON), alto: ALTO_BOTON };
+      return { ancho: Math.max(ANCHO_BOTON, Math.ceil(nodo.texto.length * ANCHO_CARACTER) + PADDING_BOTON), alto: ALTO_BOTON };
     }
     if (esTexto(nodo.tipo)) {
       return { ancho: Math.max(24, Math.ceil(nodo.texto.length * ANCHO_CARACTER) + PADDING_TEXTO), alto: ALTO_TEXTO };

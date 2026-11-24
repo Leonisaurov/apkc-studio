@@ -17,6 +17,24 @@
 const PANTALLA_POR_DEFECTO = { x: 0, y: 0, ancho: 360, alto: 640 };
 const NODOS_MAXIMOS = 512;
 
+// Colores del tema del aparato, medidos sobre Contador.apk en Droidloom (wm density 213):
+// `windowBackground=@android:color/white`, `textColorPrimary=#30323a` y el fondo de
+// `Widget.Material.Button` sale #d6d7d7. Son del tema de la APP, no del editor: el lienzo
+// representa la pantalla del teléfono aunque quien lo mire esté en tema oscuro.
+const TEMA_APARATO = { fondo: "#ffffff", texto: "#30323a", boton: "#d6d7d7" };
+// Widget.Material.Button (android.jar 34) declara minWidth=88dp y minHeight=48dp. La
+// aproximación de apkc no los aplica, así que el pintor los impone al preparar los rects.
+const ANCHO_BOTON_DP = 88;
+const ALTO_BOTON_DP = 48;
+// Theme.DeviceDefault.Light usa 14sp por defecto; TextAppearance.Large/Medium/Small son
+// 22/18/14sp. `sp` y `dp` coinciden con la escala de fuente del aparato (factor 1).
+const TEXTO_DP = 14;
+const TEXTO_POR_ESTILO = {
+  "1030042": 22, // @android:style/TextAppearance.Large
+  "1030044": 18, // @android:style/TextAppearance.Medium
+  "1030046": 14, // @android:style/TextAppearance.Small
+};
+
 // El mensaje del panel vacío. Vive aquí y lo importa `previa-panel.js` para que el estado vacío
 // de las dos superficies (la vista dividida y Pantalla) diga exactamente lo mismo: el canvas de
 // las dos es el Emulador, no el modo Vista previa, que dibuja el XML sin compilar.
@@ -88,6 +106,53 @@ export function nodosAplanados(modelo) {
   return salida;
 }
 
+// Una dimensión declarada en dp/sp/px, en unidades dp del modelo. Sin unidades también cuenta:
+// el JAX de `apkc preview` escribe números en algunos campos de medida.
+function dpDeValor(valor) {
+  if (typeof valor === "number") return Number.isFinite(valor) && valor > 0 ? valor : null;
+  const m = /^\s*(\d+(?:\.\d+)?)\s*(sp|dp|dip|px)?\s*$/i.exec(String(valor || ""));
+  if (!m) return null;
+  const n = Number(m[1]);
+  return Number.isFinite(n) && n > 0 ? n : null;
+}
+
+// La apariencia por defecto de una vista sin atributos, tal como la pinta ART con el tema medido.
+// Es pura y se prueba en node: decide el relleno del fondo, el tamaño y peso de la letra, las
+// mayúsculas del Button y el relleno interior. Lo que el modelo declare gana siempre al respaldo.
+export function aparienciaDe(nodo) {
+  const tipo = typeof nodo?.tipo === "string" ? nodo.tipo : "";
+  const boton = /Button/.test(tipo);
+  const estilo = String(nodo?.estilo || "");
+  const idEstilo = (/0x([0-9a-f]+)/i.exec(estilo) || [])[1];
+  const porEstilo = idEstilo
+    ? TEXTO_POR_ESTILO[idEstilo.toLowerCase().replace(/^0+/, "")] || null : null;
+  const tamanoDp = dpDeValor(nodo?.tamTexto) || porEstilo || TEXTO_DP;
+  const peso = /bold/i.test(String(nodo?.estiloTexto || "")) ? 700 : (boton ? 500 : 400);
+  const pad = nodo?.padding && typeof nodo.padding === "object" ? nodo.padding : {};
+  // apkc escribe `arr`/`aba`; el modelo del editor (vista-xml.js) escribe `arriba`/`abajo`.
+  const alias = { izq: "izq", der: "der", arr: "arriba", aba: "abajo" };
+  const lado = (clave, respaldo) => {
+    const valor = aNumeroOFinito(pad[clave]);
+    const otro = aNumeroOFinito(pad[alias[clave]]);
+    const elegido = valor !== null && valor >= 0 ? valor : otro;
+    return elegido !== null && elegido >= 0 ? elegido : respaldo;
+  };
+  const relleno = {
+    izq: lado("izq", boton ? 16 : 0),
+    der: lado("der", boton ? 16 : 0),
+    arr: lado("arr", boton ? 8 : 0),
+    aba: lado("aba", boton ? 8 : 0),
+  };
+  // Solo lo que el layout declara llega en `fondo`; el gris del botón por defecto lo pinta
+  // `pintarFondoBoton` con esquinas redondeadas, como el drawable del tema.
+  const fondo = typeof nodo?.fondo === "string" && nodo.fondo.trim() !== ""
+    ? nodo.fondo : "";
+  const colorTexto = typeof nodo?.colorTexto === "string" && nodo.colorTexto.trim() !== ""
+    ? nodo.colorTexto : (typeof nodo?.color === "string" && nodo.color.trim() !== ""
+      ? nodo.color : TEMA_APARATO.texto);
+  return { boton, tamanoDp, peso, mayusculas: boton, relleno, fondo, colorTexto };
+}
+
 // Encaja la pantalla del modelo en una caja (el canvas en píxeles CSS) sin deformarla: una sola
 // escala para los dos ejes y centrada. La traslación resta el origen de `pantalla` y centra el
 // rectángulo de la pantalla dentro de la caja.
@@ -133,13 +198,18 @@ export function rectsEscalados(modelo, ancho, alto) {
     // las cuatro medidas se leen con la misma regla que la pantalla: `null` o una cadena vacía
     // no valen cero, valen «este nodo no se puede situar»
     const x = aNumeroOFinito(r.x), y = aNumeroOFinito(r.y);
-    const ancho = aNumeroOFinito(r.ancho), alto = aNumeroOFinito(r.alto);
+    let ancho = aNumeroOFinito(r.ancho), alto = aNumeroOFinito(r.alto);
     if ([x, y, ancho, alto].some((v) => v === null)) continue;
+    const apariencia = aparienciaDe(nodo);
+    if (apariencia.boton) {
+      ancho = Math.max(ancho, ANCHO_BOTON_DP);
+      alto = Math.max(alto, ALTO_BOTON_DP);
+    }
     const escalado = {
       x: caja.x + x * caja.escala,
       y: caja.y + y * caja.escala,
       ancho: Math.max(1, ancho * caja.escala),
-      alto: Math.max(1, alto * caja.escala),
+      alto: Math.max(alto, alto * caja.escala),
       tipo: String(nodo.tipo || ""),
       id: String(nodo.id || ""),
       // el id de recurso numérico y la marca de oyente son lo que necesita el clic del canvas: el
@@ -147,9 +217,14 @@ export function rectsEscalados(modelo, ancho, alto) {
       idRef: String(nodo.idRef || ""),
       oyente: nodo.oyente === true,
       texto: textoDeNodo(nodo),
-      // colores del layout, ya normalizados por `vista-xml.js`; vacío significa «el del tema»
-      fondo: typeof nodo.fondo === "string" ? nodo.fondo : "",
-      colorTexto: typeof nodo.colorTexto === "string" ? nodo.colorTexto : "",
+      // colores y letra del layout o, si no los declara, los del tema medido del aparato
+      fondo: apariencia.fondo,
+      colorTexto: apariencia.colorTexto,
+      boton: apariencia.boton,
+      tamanoDp: apariencia.tamanoDp,
+      peso: apariencia.peso,
+      mayusculas: apariencia.mayusculas,
+      relleno: apariencia.relleno,
       // `src` y, si el panel ya lo decodificó, el mapa de bits del PNG del proyecto
       recurso: typeof nodo.recurso === "string" ? nodo.recurso : "",
       imagen: nodo.imagen || null,
@@ -173,6 +248,17 @@ function colorDe(nombre, respaldo) {
   if (typeof getComputedStyle !== "function" || typeof document === "undefined") return respaldo;
   const valor = getComputedStyle(document.documentElement).getPropertyValue(nombre).trim();
   return valor || respaldo;
+}
+
+// El fondo del botón del tema medido: un rectángulo redondeado de 2dp en lugar del hueco
+// transparente que el pintor dibujaba antes. No toca el rect del modelo ni la escala.
+function pintarFondoBoton(ctx, r, escala) {
+  const radio = Math.min(2 * escala, r.ancho / 2, r.alto / 2);
+  ctx.beginPath();
+  if (typeof ctx.roundRect === "function") ctx.roundRect(r.x, r.y, r.ancho, r.alto, radio);
+  else ctx.rect(r.x, r.y, r.ancho, r.alto);
+  ctx.fillStyle = TEMA_APARATO.boton;
+  ctx.fill();
 }
 
 // --- el dibujo de una vista propia ---------------------------------------------------------
@@ -375,7 +461,6 @@ export function pintarModelo(canvas, modelo, medir) {
   ctx.clearRect(0, 0, ancho, alto);
 
   const fondo = colorDe("--superficie", "#202020");
-  const marco = colorDe("--superficie2", "#252526");
   const borde = colorDe("--borde", "#2b2b2b");
   const bordeFuerte = colorDe("--borde2", "#3c3c3c");
   const acento = colorDe("--acento", "#007acc");
@@ -389,7 +474,10 @@ export function pintarModelo(canvas, modelo, medir) {
     // un modelo sin pantalla medible deja el fondo y lo dice el estado; no se inventan rectángulos
     return { ancho, alto, nodos: 0, escala: 0, valida: false, modelo };
   }
-  ctx.fillStyle = marco;
+  // La pantalla del teléfono lleva el fondo de su tema, no el del editor: es lo que mide
+  // `windowBackground=@android:color/white` en el APK real. El marco oscuro de alrededor
+  // sigue siendo la diferencia visual entre el lienzo y la interfaz de la página.
+  ctx.fillStyle = TEMA_APARATO.fondo;
   ctx.fillRect(marcoRect.x, marcoRect.y, marcoRect.ancho, marcoRect.alto);
   ctx.strokeStyle = borde;
   ctx.lineWidth = 1;
@@ -422,12 +510,21 @@ export function pintarModelo(canvas, modelo, medir) {
       }
       continue;
     }
-    ctx.fillStyle = r.fondo || marco;
-    ctx.fillRect(r.x, r.y, r.ancho, r.alto);
-    // la vista que responde a un clic se marca con el acento: es la única que el emulador atiende
-    ctx.strokeStyle = r.oyente ? acento : bordeFuerte;
-    ctx.lineWidth = r.oyente ? 2 : 1;
-    ctx.strokeRect(r.x + 0.5, r.y + 0.5, Math.max(1, r.ancho - 1), Math.max(1, r.alto - 1));
+    // Un TextView sin `android:background` no pinta nada: deja ver el fondo blanco del tema.
+    // El Button sin fondo declarado sí pinta el gris de Widget.Material.Button medido en ART.
+    if (r.fondo) {
+      ctx.fillStyle = r.fondo;
+      ctx.fillRect(r.x, r.y, r.ancho, r.alto);
+    } else if (r.boton) {
+      pintarFondoBoton(ctx, r, marcoRect.escala);
+    }
+    // La vista que responde a un clic se marca con el acento (un solo píxel, como ayuda del
+    // emulador). El borde gris que se dibujaba alrededor de TODAS las vistas no existe en ART.
+    if (r.oyente) {
+      ctx.strokeStyle = acento;
+      ctx.lineWidth = 1;
+      ctx.strokeRect(r.x + 0.5, r.y + 0.5, Math.max(1, r.ancho - 1), Math.max(1, r.alto - 1));
+    }
     ctx.save();
     ctx.beginPath();
     ctx.rect(r.x + 1, r.y + 1, Math.max(1, r.ancho - 2), Math.max(1, r.alto - 2));
@@ -461,11 +558,22 @@ export function pintarModelo(canvas, modelo, medir) {
     // El tipo y el id no se pierden: siguen en el modelo, en `rectsEscalados`, en el `resumen` que
     // devuelve `pintarModelo` y en `data-nodos` del canvas (no se pinta nada de eso).
     if (r.texto && r.alto >= 8) {
-      // una sola línea, con la fuente encogida al hueco real: 8..12 px
-      const tamano = Math.max(8, Math.min(12, Math.floor(r.alto - 6)));
-      ctx.font = tamano + "px ui-monospace, SFMono-Regular, Menlo, Consolas, monospace";
-      ctx.fillStyle = r.colorTexto || tinta;
-      ctx.fillText(r.texto, r.x + 5, r.y + 3, Math.max(0, r.ancho - 10));
+      // `tamTexto`/`estilo` del modelo (sp≈dp) escalados con la pantalla: un TextView sin
+      // estilo usa los 14sp del tema; el de la plantilla Contador trae Large (22sp).
+      const escalaTexto = marcoRect.escala;
+      const tamano = Math.max(6, Math.min(96, r.tamanoDp * escalaTexto));
+      ctx.font = r.peso + " " + Math.round(tamano * 100) / 100 +
+        "px Roboto, 'Noto Sans', system-ui, sans-serif";
+      ctx.fillStyle = r.colorTexto || TEMA_APARATO.texto;
+      ctx.textBaseline = "middle";
+      ctx.textAlign = r.boton ? "center" : "left";
+      // TextAppearance.Material.Button pone textAllCaps: en el aparato «Pulsar» se lee PULSAR.
+      const visible = r.mayusculas ? r.texto.toUpperCase() : r.texto;
+      const hueco = Math.max(0, r.ancho - (r.relleno.izq + r.relleno.der) * escalaTexto);
+      const xTexto = r.boton ? r.x + r.ancho / 2 : r.x + r.relleno.izq * escalaTexto;
+      ctx.fillText(visible, xTexto, r.y + r.alto / 2, hueco);
+      ctx.textAlign = "left";
+      ctx.textBaseline = "top";
     }
     ctx.restore();
   }

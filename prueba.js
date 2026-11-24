@@ -306,8 +306,48 @@ if (totalR.x !== 0 || totalR.y !== 0 || totalR.ancho !== 176 || totalR.alto !== 
   mal("el rectángulo del TextView no coincide con el modelo: " + JSON.stringify(totalR));
 }
 if (totalR.tipo !== "TextView" || totalR.id !== "id/total") mal("el rectángulo no lleva tipo e id");
-if (botonR.y !== 48 || botonR.ancho !== 128 || botonR.alto !== 96) {
-  mal("el rectángulo del Button no coincide con el modelo: " + JSON.stringify(botonR));
+// El modelo de apkc da 64x48 dp, pero Widget.Material.Button impone minWidth=88dp: el
+// pintor ensancha el rect del botón sin tocar el modelo ni la posición.
+if (botonR.y !== 48 || botonR.ancho !== 176 || botonR.alto !== 96) {
+  mal("el rectángulo del Button no aplica el ancho mínimo medido en ART: " + JSON.stringify(botonR));
+}
+if (totalR.ancho !== 176 || raizR.ancho !== 720) mal("el ancho mínimo del botón no respeta el modelo");
+// 6b-bis. la apariencia por defecto del tema del aparato, medida sobre Contador.apk en Droidloom
+// (fondo blanco, texto #30323a, botón #d6d7d7, 14sp, botón 88x48dp con relleno 16/8dp).
+const textoPlano = vistaPrevia.aparienciaDe({ tipo: "TextView", texto: "hola" });
+const botonPlano = vistaPrevia.aparienciaDe({ tipo: "Button", texto: "Pulsar" });
+if (textoPlano.fondo !== "" || textoPlano.colorTexto !== "#30323a" ||
+    textoPlano.tamanoDp !== 14 || textoPlano.peso !== 400 || textoPlano.mayusculas !== false) {
+  mal("un TextView sin atributos no toma la apariencia del tema claro medido: " + JSON.stringify(textoPlano));
+}
+if (botonPlano.fondo !== "" || botonPlano.colorTexto !== "#30323a" ||
+    botonPlano.tamanoDp !== 14 || botonPlano.peso !== 500 || botonPlano.mayusculas !== true ||
+    botonPlano.relleno.izq !== 16 || botonPlano.relleno.der !== 16 ||
+    botonPlano.relleno.arr !== 8 || botonPlano.relleno.aba !== 8) {
+  mal("un Button sin atributos no tiene el fondo, peso y relleno de Widget.Material.Button: " +
+    JSON.stringify(botonPlano));
+}
+const textoLarge = vistaPrevia.aparienciaDe({ tipo: "TextView", estilo: "@0x01030042" });
+const declarado = vistaPrevia.aparienciaDe({ tipo: "TextView", tamTexto: "24sp",
+  color: "#123456", fondo: "#654321", estiloTexto: "bold",
+  padding: { izq: 4, arr: 2, der: 6, aba: 3 } });
+if (textoLarge.tamanoDp !== 22) mal("TextAppearance.Large no se traduce a 22sp");
+if (declarado.tamanoDp !== 24 || declarado.peso !== 700 || declarado.colorTexto !== "#123456" ||
+    declarado.fondo !== "#654321" || declarado.relleno.izq !== 4 || declarado.relleno.der !== 6 ||
+    declarado.relleno.arr !== 2 || declarado.relleno.aba !== 3) {
+  mal("lo que declara el modelo no gana al tema por defecto: " + JSON.stringify(declarado));
+}
+const conArriba = vistaPrevia.aparienciaDe({ tipo: "Button",
+  padding: { arriba: 3, abajo: 5 } });
+if (conArriba.relleno.arr !== 3 || conArriba.relleno.aba !== 5) {
+  mal("no se lee el relleno del modelo del editor (arriba/abajo): " + JSON.stringify(conArriba.relleno));
+}
+const botonEstrecho = vistaPrevia.rectsEscalados({ pantalla: { ancho: 100, alto: 100 },
+  raiz: { tipo: "LinearLayout", rect: { x: 0, y: 0, ancho: 100, alto: 100 },
+    hijos: [{ tipo: "Button", texto: "x", rect: { x: 4, y: 6, ancho: 40, alto: 20 } }] } }, 100, 100);
+if (botonEstrecho.length !== 2 || botonEstrecho[1].ancho !== 88 || botonEstrecho[1].alto !== 48 ||
+    botonEstrecho[1].x !== 4 || botonEstrecho[1].y !== 6) {
+  mal("el botón estrecho no se ensancha a 88x48dp desde su esquina: " + JSON.stringify(botonEstrecho[1]));
 }
 // un nodo sin rect se omite en vez de pintarse en (0,0); y la cota corta un árbol desmedido
 const sinRect = { pantalla: { ancho: 100, alto: 100 }, raiz: { tipo: "X", hijos: [{ tipo: "Y" }] } };
@@ -455,6 +495,30 @@ const modeloDibujo = {
   const sinDibujo = lienzoFalso(360, 640);
   const pintadoSin = vistaPrevia.pintarModelo(sinDibujo.canvas, modeloPrevia);
   if (!pintadoSin || pintadoSin.operaciones !== 0) mal("un modelo sin dibujo pinta operaciones");
+}
+
+// 6b-ter. el pintor usa los colores y la letra del tema del aparato, no los del editor: la
+// pantalla se rellena de blanco, el botón de gris y el estilo Large se pinta a 22px.
+{
+  const { canvas, llamadas } = lienzoFalso(360, 640);
+  vistaPrevia.pintarModelo(canvas, modeloPrevia, { ancho: 360, alto: 640 });
+  const pantalla = llamadas.findLastIndex((c) => c.nombre === "fillRect" && c.args.join(",") === "0,0,360,640");
+  if (pantalla < 0 || estiloAntes(llamadas, pantalla, "fillStyle") !== "#ffffff") {
+    mal("el fondo de la pantalla no es el blanco del tema de la app: " +
+      (pantalla < 0 ? "sin relleno" : estiloAntes(llamadas, pantalla, "fillStyle")));
+  }
+  const boton = llamadas.findIndex((c) => c.nombre === "roundRect");
+  const rellenoBoton = llamadas.findIndex((c, i) => c.nombre === "fill" && i > boton);
+  if (boton < 0 || rellenoBoton < 0 || estiloAntes(llamadas, rellenoBoton, "fillStyle") !== "#d6d7d7") {
+    mal("el botón sin background no pinta el gris medido en ART");
+  }
+  const rotulo = llamadas.find((c) => c.nombre === "fillText" && c.args[0] === "Pulsos: 0");
+  const fuente = rotulo ? estiloAntes(llamadas, llamadas.indexOf(rotulo), "font") : "";
+  if (!/\b22px\b/.test(String(fuente)) || !/Roboto/.test(String(fuente))) {
+    mal("el estilo Large no se pinta a 22px con fuente del sistema: " + fuente);
+  }
+  const pulsar = llamadas.find((c) => c.nombre === "fillText" && c.args[0] === "PULSAR");
+  if (!pulsar) mal("el texto del botón no se pinta en mayúsculas como en textAllCaps");
 }
 
 // 6b-quater. el estado vacío y la línea del emulador son uno solo: el panel (`previa-panel.js`) los
@@ -725,9 +789,10 @@ if (!enVivo.ok) {
   if (boton.tipo !== "Button" || boton.texto !== "Pulsar" || boton.rect.alto !== 48) {
     mal("el Button no se mide con su alto: " + JSON.stringify(boton));
   }
-  // gravity=center del LinearLayout vertical: cada hijo centrado en horizontal y la pila centrada
+  // gravity=center del LinearLayout vertical: cada hijo centrado en horizontal y la pila centrada.
+  // El botón mide 88dp de ancho (minWidth de Widget.Material.Button), no los 74dp del texto.
   if (texto.rect.y !== 284 || boton.rect.y !== 308 ||
-      Math.round(texto.rect.x) !== 151 || Math.round(boton.rect.x) !== 143) {
+      Math.round(texto.rect.x) !== 151 || Math.round(boton.rect.x) !== 136) {
     mal("gravity/centrado del LinearLayout no se aplica: " + JSON.stringify({ texto: texto.rect, boton: boton.rect }));
   }
   if (texto.rect.alto !== 24 || Math.round(texto.rect.ancho) !== 58) {

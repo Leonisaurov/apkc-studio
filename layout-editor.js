@@ -184,14 +184,15 @@ export function infoTipo(tipo) {
 // El tamaño por defecto con el que entra cada tipo en el editor (dp). Es el mismo que pinta el
 // indicador de destino: contenedores 160×96; vistas, el intrínseco que mide `vista-xml.js` con su
 // texto por defecto (7 px por carácter, 16/32 de padding y 24/48 de alto: las mismas constantes,
-// `prueba.js` comprueba que el modelo del nodo insertado coincide con esto).
+// `prueba.js` comprueba que el modelo del nodo insertado coincide con esto). El botón entra a
+// 88×48dp porque Widget.Material.Button impone ese minWidth medido en el aparato.
 export function tamanoDeTipo(tipo) {
   const t = TIPOS[tipo];
   if (!t) return null;
   if (t.contenedor) return { ancho: 160, alto: 96 };
   const texto = t.texto || "";
   if (/^(Button|ImageButton)$/.test(tipo)) {
-    return { ancho: Math.max(48, Math.ceil(texto.length * 7) + 32), alto: 48 };
+    return { ancho: Math.max(88, Math.ceil(texto.length * 7) + 32), alto: 48 };
   }
   if (/^(TextView|EditText)$/.test(tipo)) {
     return { ancho: Math.max(24, Math.ceil(texto.length * 7) + 16), alto: 24 };

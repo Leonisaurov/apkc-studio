@@ -773,6 +773,26 @@ const conductor = `(async () => {
   fuente.dispatchEvent(new Event("change", { bubbles: true }));
   r.fuente = getComputedStyle(document.getElementById("codigo")).fontSize;
   r.avisoAlmacenamiento = (document.getElementById("aviso-almacenamiento") || {}).textContent || "";
+
+  // El emulador pinta el tema de la APP, no el del editor: se mide un lienzo aparte con el
+  // modelo de la plantilla Contador. Es la comprobación de píxel que node no puede hacer.
+  const arte = await import("/vista-previa.js");
+  const modeloArte = { layout: "res/layout/main.xml",
+    pantalla: { x: 0, y: 0, ancho: 360, alto: 640 }, aproximado: true, nodos: 3,
+    raiz: { tipo: "LinearLayout", rect: { x: 0, y: 0, ancho: 360, alto: 640 }, hijos: [
+      { tipo: "TextView", id: "id/total", texto: "Pulsos: 0", estilo: "@0x01030042",
+        rect: { x: 100, y: 290, ancho: 160, alto: 48 } },
+      { tipo: "Button", id: "id/pulsar", texto: "Pulsar",
+        rect: { x: 136, y: 358, ancho: 88, alto: 48 } }] } };
+  const lienzoArte = document.createElement("canvas");
+  arte.pintarModelo(lienzoArte, modeloArte, { ancho: 360, alto: 640 });
+  const contextoArte = lienzoArte.getContext("2d");
+  const factorArte = lienzoArte.width / 360;
+  const pixelArte = (x, y) => {
+    const d = contextoArte.getImageData(Math.round(x * factorArte), Math.round(y * factorArte), 1, 1).data;
+    return [d[0], d[1], d[2]];
+  };
+  r.temaAparato = { fondo: pixelArte(10, 10), boton: pixelArte(145, 366) };
   return r;
 })()`;
 
@@ -859,6 +879,10 @@ function comprueba(cond, msg) { if (!cond) { fallos++; console.log("  FALLO:", m
     comprueba(v.canvasDeLaPrevia === 4,
       "faltan canvas (Pantalla en vivo y emulador, y la vista dividida en vivo y emulador: deben ser cuatro): " +
       v.canvasDeLaPrevia);
+    comprueba(v.temaAparato && v.temaAparato.fondo.join(",") === "255,255,255" &&
+      v.temaAparato.boton.join(",") === "214,215,215",
+      "el emulador no pinta el fondo blanco y el botón gris del APK real: " +
+      JSON.stringify(v.temaAparato));
     comprueba(v.punteroInspector === "none" && v.punteroDetalleModelo === "none",
       "el detalle del modelo no deja pasar el clic al canvas que hay debajo (debe ser transparente " +
       "al puntero, como la caja del inspector): " +
