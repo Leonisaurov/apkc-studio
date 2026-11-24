@@ -668,8 +668,11 @@ for (const prefijo of ["previa-inspector", "vista-lado"]) {
 if (!/const BORDES = \["izquierda", "derecha", "arriba", "abajo"\]/.test(fuentePreviaEstado)) {
   mal("previa-panel.js no ofrece los cuatro bordes de acoplamiento");
 }
-if (!/\.previa-inspector > \.tirador-previa \{ pointer-events: auto; \}/.test(fuenteEstilo)) {
-  mal("style.css no deja arrastrar los tiradores de la capa flotante del panel");
+// La regla del :not() anterior tiene especificidad (0,3,0): el tirador ha de repetir su clase para
+// alcanzarla, o el navegador aplica `none` y los ocho tiradores no reciben el puntero (ni flotando
+// ni acoplado). La aserción fija esa especificidad, no solo la presencia de `pointer-events: auto`.
+if (!/\.previa-inspector > \.tirador-previa\.tirador-previa \{ pointer-events: auto; \}/.test(fuenteEstilo)) {
+  mal("style.css no da a los tiradores del panel bastante especificidad para recibir el puntero");
 }
 for (const eje of ["oeste", "este", "norte", "sur", "noroeste", "noreste", "suroeste", "sureste"]) {
   const id = "previa-inspector-tirador-" + eje;
