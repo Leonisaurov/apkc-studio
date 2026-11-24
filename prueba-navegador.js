@@ -428,11 +428,34 @@ const conductor = `(async () => {
       plantilla.dispatchEvent(new Event("change", { bubbles: true }));
     }
   }
+  // La API elegida en el formulario de Inicio fija el targetSdk del manifiesto al crear. Se baja a
+  // 33 con el mismo evento change que dispara una persona, para medir el puente visible -> ocultos.
+  const apiVisible = document.getElementById("api-version");
+  if (apiVisible) {
+    apiVisible.value = "33";
+    apiVisible.dispatchEvent(new Event("change", { bubbles: true }));
+  }
   document.getElementById("crear-proyecto").click();
   // el aviso pasa de «creando…» al resultado: se espera, no se duerme
   await esperarTexto(() => document.getElementById("estado-crear").textContent,
     (t) => !!String(t || "").trim() && String(t).trim() !== "creando…");
   r.avisoCrear = document.getElementById("estado-crear").textContent;
+  // El selector visible manda en el manifiesto al crear y sincroniza los ocultos que lee build.
+  const manifiesto = String(document.getElementById("codigo").value || "");
+  const lineaApi = manifiesto.split("\\n").find((l) => /targetSdkVersion/.test(l)) || "";
+  r.api = {
+    selector: apiVisible ? apiVisible.value : "",
+    ocultos: [document.getElementById("sdk-version").value,
+      document.getElementById("codename").value],
+    preferencia: sa(() => localStorage.getItem("apkc-studio/api")),
+    destino: (lineaApi.match(/android:targetSdkVersion="([^"]+)"/) || [])[1] || "",
+  };
+  // se devuelve a la API por defecto antes del build: los ocultos vuelven a 34/14 aunque el
+  // manifiesto ya naciera con 33 (es lo que mide esta sonda, no un estado persistente).
+  if (apiVisible) {
+    apiVisible.value = "34";
+    apiVisible.dispatchEvent(new Event("change", { bubbles: true }));
+  }
 
   // La plantilla real «Menú de opciones»: compilar en wasm, abrir ⋮ Menú, pulsar «Opciones» y exigir
   // que «Menu pulsado» se vea como capa sobre el emulador, no solo en la consola. Se hace en las dos
@@ -1059,6 +1082,28 @@ const conductor = `(async () => {
       cajaEsperada.y + cajaEsperada.alto - 3),
     fuera: pixelMedia(cajaEsperada.x + 3, cajaEsperada.y + cajaEsperada.alto + 3),
   } : { falta: true };
+
+  // Un solo clic en «Compilar» abre el panel en su pestaña y deja el boton de debug listo, aunque
+  // el panel estuviera en otra pestaña: no es un interruptor, no se mide el clic de cierre.
+  const alternar = document.getElementById("alternar-panel");
+  const panelInferior = document.getElementById("panel-inferior");
+  const botonDebug = document.getElementById("compilar-debug");
+  const medirClicUnico = () => ({
+    oculto: panelInferior ? panelInferior.hidden : null,
+    expandido: alternar ? alternar.getAttribute("aria-expanded") : "",
+    pestana: (document.querySelector(".panel-tab.activo") || {}).dataset?.panel || "",
+    vista: document.getElementById("panel-compilar")
+      ? !document.getElementById("panel-compilar").hidden : null,
+    foco: !!botonDebug && document.activeElement === botonDebug,
+    deshabilitado: botonDebug ? botonDebug.disabled : null,
+  });
+  if (alternar) alternar.click();
+  const primero = medirClicUnico();
+  const pestanaOtra = document.querySelector('.panel-tab[data-panel="salida"]');
+  if (pestanaOtra) pestanaOtra.click();
+  const pestanaAntes = (document.querySelector(".panel-tab.activo") || {}).dataset?.panel || "";
+  if (alternar) alternar.click();
+  r.clicUnico = { primero, desdeOtra: medirClicUnico(), pestanaAntes };
   return r;
 })()`;
 
@@ -1485,6 +1530,19 @@ const pixelCercano = (pix, esperado) => Array.isArray(pix) && pix.length === 3 &
     comprueba(/OPFS/.test(String(v.avisoAlmacenamiento)) &&
       /Exportar proyecto/.test(String(v.avisoAlmacenamiento)),
       "falta el aviso de que el proyecto vive en este navegador: " + String(v.avisoAlmacenamiento).slice(0, 160));
+    const cu = v.clicUnico || {};
+    const buenClic = (m) => m && m.oculto === false && m.expandido === "true" &&
+      m.pestana === "compilar" && m.vista === true && m.foco === true &&
+      m.deshabilitado === false;
+    comprueba(cu.pestanaAntes === "salida" && buenClic(cu.primero) && buenClic(cu.desdeOtra),
+      "un solo clic en Compilar no abre la pestaña ni deja el botón listo desde otra pestaña: " +
+      JSON.stringify(cu));
+    const api = v.api || {};
+    comprueba(api.selector === "33" && api.destino === "33" &&
+      Array.isArray(api.ocultos) && api.ocultos.join(",") === "33,13" &&
+      api.preferencia === "33",
+      "el selector de API no fija el manifiesto ni sincroniza los ocultos: " + JSON.stringify(api));
+    console.log("  clic único:", JSON.stringify(cu).slice(0, 500), "| api:", JSON.stringify(api));
   }
   ws.close();
   navegador.kill("SIGKILL");

@@ -710,9 +710,10 @@ La fila superior del editor separa la acción principal de las de mantenimiento:
   `#exportar-proyecto`, `#importar-proyecto` (y su `#importar-archivo` oculto),
   `#descargar-fichero`, `#renombrar-fichero` y `#borrar-fichero`. Se cierra al pulsar una acción,
   al hacer clic fuera o con `Escape`; no guarda estado propio.
-- `#alternar-panel` se llama **Compilar**: abre `#panel-inferior` en la pestaña Compilar y lo
-  cierra si ya está abierto. ``Ctrl + ` `` sigue alternando el panel y conserva la pestaña activa.
-  La pestaña de salida se llama **Consola** y lleva el icono de terminal.
+- `#alternar-panel` se llama **Compilar**: con un clic abre `#panel-inferior` en la pestaña Compilar
+  y enfoca `#compilar-debug`; para cerrarlo se usa `#cerrar-panel` o ``Ctrl + ` ``.
+  ``Ctrl + ` `` alterna el panel y conserva la pestaña activa. La pestaña de salida se llama
+  **Consola** y lleva el icono de terminal.
 - `#descargar-fichero` sigue oculto hasta que hay un fichero abierto; descarga el buffer del
   editor (aunque tenga cambios sin guardar), no solo lo último guardado.
 
@@ -1004,8 +1005,8 @@ ningun servidor.
 ## Panel inferior
 
 El **panel inferior** (`#panel-inferior`) es la zona de salida, historial y acciones pesadas.
-Empieza cerrado para que el editor ocupe todo el alto; `#alternar-panel` lo abre en **Compilar**
-o lo cierra, y ``Ctrl + ` `` conserva la pestaña activa.
+Empieza cerrado para que el editor ocupe todo el alto; un clic en `#alternar-panel` abre el panel
+en **Compilar** y deja `#compilar-debug` enfocado. Para cerrarlo se usa `#cerrar-panel` o ``Ctrl + ` ``.
 
 ```html
 <div class="panel-inferior" id="panel-inferior" hidden>
@@ -1034,7 +1035,8 @@ o lo cierra, y ``Ctrl + ` `` conserva la pestaña activa.
 - `#panel-historial` pinta el undo tree del documento activo. `#historial-deshacer`,
   `#historial-rehacer` y `#historial-limpiar` son sus acciones; el menú **Archivo → Historial…**
   y `#abrir-historial` abren esta pestaña.
-- `alternarPanel()` abre o cierra el panel; si lo abre, vuelve a la pestana activa.
+- `alternarPanel()` es la funcion de ``Ctrl + ` ``: abre o cierra el panel y, si lo abre, vuelve a la
+  pestana activa; el boton `#alternar-panel` no la llama, siempre abre **Compilar**.
 - `cerrarPanel()` lo esconde y deja `aria-expanded="false"` en el boton `#alternar-panel`.
 - `correr(argv)` abre siempre la pestaña Consola, escribe `$ apkc ...`, muestra `#ocupado` y
   `#detener-comando` mientras el worker trabaja, actualiza `#ultimo-codigo` y refresca el arbol al
@@ -1065,8 +1067,10 @@ o lo cierra, y ``Ctrl + ` `` conserva la pestaña activa.
   `#sdk-elegir-archivo`, `#sdk-usar-servidor`, `#sdk-cerrar`, `#traer-android-jar`,
   `#estado-jar-sdk`, `#android-jar`, `#usar-android-jar`, `#estado-jar`), `#detalle-release`
   (`#keystore-compilar`, `#storepass-compilar`, `#keyalias-compilar`) y opciones avanzadas
-  (`#api-version`, los ocultos `#sdk-version`/`#codename`, `#v4-compilar`). `#api-version` es el
-  selector visible, 34 por defecto; al cambiar sincroniza los dos campos que lee `apkc build`.
+  (los ocultos `#sdk-version`/`#codename`, `#v4-compilar`). El selector visible de API
+  (`#api-version`) NO está aquí: vive en el formulario de Inicio, delante de `#crear-proyecto`, y
+  sincroniza los ocultos `#sdk-version`/`#codename` que lee `apkc build` (34/14 por defecto); al
+  crear fija `android:targetSdkVersion` del manifiesto (`vistas.js`).
   En una página estática, el diálogo exige marcar el acuse antes de habilitar los enlaces a los
   términos y a la descarga oficial de Google; no descarga nada por su cuenta y el editor extrae
   `android-34/android.jar` del `.zip`. El `.jar` suelto también vale. Con `servidor.js`, el botón «Traer el del SDK local» y
