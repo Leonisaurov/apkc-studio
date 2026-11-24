@@ -802,7 +802,23 @@ const cajaPrevia = vistaPrevia.escalaPara(modeloPrevia, 360, 640);
 if (cajaPrevia.escala !== 1 || cajaPrevia.x !== 0 || cajaPrevia.y !== 0) mal("escalaPara no deja 1:1 la pantalla de 360x640");
 const cajaDoble = vistaPrevia.escalaPara(modeloPrevia, 720, 1280);
 if (cajaDoble.escala !== 2 || cajaDoble.ancho !== 720 || cajaDoble.alto !== 1280) mal("escalaPara no escala x2");
-const rectsPrevia = vistaPrevia.rectsEscalados(modeloPrevia, 720, 1280);
+// El modelo de `apkc preview` da 64×48dp para el botón. ART pinta 88×40dp (ancho de
+// Widget.Material.Button; alto medido en la captura de Droidloom: 52 px a density 213 ≈ 39dp) y
+// centra la caja: x=0−(88−64)/2=−12dp, y=24+(48−40)/2=28dp. Los mínimos se aplican al MODELO,
+// antes de escalar, con `modeloConMinimos`; el pintor ya no los reaplica sobre píxeles reducidos.
+const conMinimos = vistaPrevia.modeloConMinimos(modeloPrevia);
+if (conMinimos === modeloPrevia || conMinimos.raiz === modeloPrevia.raiz ||
+    conMinimos.raiz.hijos[1] === modeloPrevia.raiz.hijos[1]) {
+  mal("modeloConMinimos muta el modelo que mira la vista dividida");
+}
+const botonMin = conMinimos.raiz.hijos[1].rect;
+if (botonMin.x !== -12 || botonMin.y !== 28 || botonMin.ancho !== 88 || botonMin.alto !== 40) {
+  mal("modeloConMinimos no centra ni mide el botón como ART: " + JSON.stringify(botonMin));
+}
+if (modeloPrevia.raiz.hijos[1].rect.ancho !== 64 || modeloPrevia.raiz.hijos[1].rect.alto !== 48) {
+  mal("modeloConMinimos cambia el modelo original");
+}
+const rectsPrevia = vistaPrevia.rectsEscalados(conMinimos, 720, 1280);
 if (rectsPrevia.length !== 3) mal("rectsEscalados no devuelve un rectángulo por nodo: " + rectsPrevia.length);
 const [raizR, totalR, botonR] = rectsPrevia;
 if (raizR.x !== 0 || raizR.y !== 0 || raizR.ancho !== 720 || raizR.alto !== 1280 || raizR.profundidad !== 0) {
@@ -812,14 +828,12 @@ if (totalR.x !== 0 || totalR.y !== 0 || totalR.ancho !== 176 || totalR.alto !== 
   mal("el rectángulo del TextView no coincide con el modelo: " + JSON.stringify(totalR));
 }
 if (totalR.tipo !== "TextView" || totalR.id !== "id/total") mal("el rectángulo no lleva tipo e id");
-// El modelo de apkc da 64x48 dp, pero Widget.Material.Button impone minWidth=88dp: el
-// pintor ensancha el rect del botón sin tocar el modelo ni la posición.
-if (botonR.y !== 48 || botonR.ancho !== 176 || botonR.alto !== 96) {
-  mal("el rectángulo del Button no aplica el ancho mínimo medido en ART: " + JSON.stringify(botonR));
+if (botonR.x !== -24 || botonR.y !== 56 || botonR.ancho !== 176 || botonR.alto !== 80) {
+  mal("el rectángulo del Button no conserva los mínimos ni el centro al escalar: " + JSON.stringify(botonR));
 }
-if (totalR.ancho !== 176 || raizR.ancho !== 720) mal("el ancho mínimo del botón no respeta el modelo");
+if (totalR.ancho !== 176 || raizR.ancho !== 720) mal("el escalado no respeta el modelo");
 // 6b-bis. la apariencia por defecto del tema del aparato, medida sobre Contador.apk en Droidloom
-// (fondo blanco, texto #30323a, botón #d6d7d7, 14sp, botón 88x48dp con relleno 16/8dp).
+// (fondo blanco, texto #30323a, botón #d6d7d7, 14sp, botón 88x40dp con relleno 16/8dp).
 const textoPlano = vistaPrevia.aparienciaDe({ tipo: "TextView", texto: "hola" });
 const botonPlano = vistaPrevia.aparienciaDe({ tipo: "Button", texto: "Pulsar" });
 if (textoPlano.fondo !== "" || textoPlano.colorTexto !== "#30323a" ||
@@ -848,12 +862,13 @@ const conArriba = vistaPrevia.aparienciaDe({ tipo: "Button",
 if (conArriba.relleno.arr !== 3 || conArriba.relleno.aba !== 5) {
   mal("no se lee el relleno del modelo del editor (arriba/abajo): " + JSON.stringify(conArriba.relleno));
 }
-const botonEstrecho = vistaPrevia.rectsEscalados({ pantalla: { ancho: 100, alto: 100 },
-  raiz: { tipo: "LinearLayout", rect: { x: 0, y: 0, ancho: 100, alto: 100 },
-    hijos: [{ tipo: "Button", texto: "x", rect: { x: 4, y: 6, ancho: 40, alto: 20 } }] } }, 100, 100);
-if (botonEstrecho.length !== 2 || botonEstrecho[1].ancho !== 88 || botonEstrecho[1].alto !== 48 ||
-    botonEstrecho[1].x !== 4 || botonEstrecho[1].y !== 6) {
-  mal("el botón estrecho no se ensancha a 88x48dp desde su esquina: " + JSON.stringify(botonEstrecho[1]));
+const botonEstrecho = vistaPrevia.rectsEscalados(vistaPrevia.modeloConMinimos(
+  { pantalla: { ancho: 100, alto: 100 },
+    raiz: { tipo: "LinearLayout", rect: { x: 0, y: 0, ancho: 100, alto: 100 },
+      hijos: [{ tipo: "Button", texto: "x", rect: { x: 4, y: 6, ancho: 40, alto: 20 } }] } }), 100, 100);
+if (botonEstrecho.length !== 2 || botonEstrecho[1].ancho !== 88 || botonEstrecho[1].alto !== 40 ||
+    botonEstrecho[1].x !== -20 || botonEstrecho[1].y !== -4) {
+  mal("el botón estrecho no se ensancha a 88x40dp conservando el centro: " + JSON.stringify(botonEstrecho[1]));
 }
 // con escala menor que 1 el alto también se escala: una regresión a Math.max(alto, …) lo dejaba a 48
 // cuando el ancho ya valía 50, y rompía la proporción de la pantalla en el emulador
@@ -2078,6 +2093,15 @@ if (!modelo411 || modelo411.pantalla.ancho !== 411 || modelo411.pantalla.alto !=
 if (previaPanel.modeloConPantalla(modeloBase, 360, 640) !== modeloBase) {
   mal("modeloConPantalla clona sin cambiar cuando el tamaño ya es el del modelo");
 }
+// El camino completo del Emulador: mínimos antes de reescalar. A 180×320 el botón de 64×48dp
+// del JSON crudo mide 44×20 px (88×40dp × 0,5) y conserva el centro, en vez de volver a 88×48.
+const modeloMedio = previaPanel.modeloParaEmulador(modeloPrevia, 180, 320);
+const botonMedio = modeloMedio.raiz.hijos[1].rect;
+if (!cerca(botonMedio.ancho, 44) || !cerca(botonMedio.alto, 20) ||
+    !cerca(botonMedio.x, -6) || !cerca(botonMedio.y, 14)) {
+  mal("modeloParaEmulador no aplica los mínimos antes de escalar: " + JSON.stringify(botonMedio));
+}
+if (modeloPrevia.raiz.hijos[1].rect.ancho !== 64) mal("modeloParaEmulador muta el modelo original");
 
 // las vistas que responden a un clic, con su etiqueta tomada del árbol, y la vista bajo un punto del
 // canvas: las dos son puras y son lo que convierte un clic en un `--pulsar`

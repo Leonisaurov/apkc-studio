@@ -893,20 +893,20 @@ const conductor = `(async () => {
   const pixelArte = muestreo(lienzoArte, 360);
   r.temaAparato = { fondo: pixelArte(10, 10), boton: pixelArte(145, 366) };
 
-  // A media pantalla el botón de 88×48 dp debe ocupar 44×24 px. Aquí se rompió el alto con un
-  // Math.max(alto, alto * escala) que lo dejaba en 48: se mide la caja y se muestrean el relleno
-  // de la esquina, el centro de la franja inferior y el blanco justo bajo el borde, que con el
-  // rectángulo sin escalar seguiría siendo gris. Todos los puntos caen en relleno, nunca en el
-  // glifo, para no depender de la fuente que tenga instalada el equipo.
+  // A media pantalla el botón mide 44×20 px: el JSON crudo trae 64×48dp, ART impone 88×40dp
+  // centrados y el selector de 180×320 los escala ×0,5. Antes se pintaba el modelo crudo y el
+  // mínimo se reaplicaba sobre píxeles ya reducidos, dejándolo en 88×48 px y el texto de 22sp en
+  // una caja de 12px. Se pasa por modeloParaEmulador, el mismo camino que usa el panel. Se
+  // muestrean el relleno de la esquina, el centro de la franja inferior y el blanco bajo el borde;
+  // todos caen en relleno, nunca en el glifo, para no depender de la fuente instalada.
+  const panelArte = await import("/previa-panel.js");
   const medirMedia = { ancho: 180, alto: 320 };
+  const modeloMedia = panelArte.modeloParaEmulador(modeloArte, medirMedia.ancho, medirMedia.alto);
   const lienzoMedia = document.createElement("canvas");
-  arte.pintarModelo(lienzoMedia, modeloArte, medirMedia);
+  arte.pintarModelo(lienzoMedia, modeloMedia, medirMedia);
   const pixelMedia = muestreo(lienzoMedia, medirMedia.ancho);
-  const escalaMedia = medirMedia.ancho / modeloArte.pantalla.ancho;
-  const rectBoton = modeloArte.raiz.hijos[1].rect;
-  const cajaEsperada = { x: rectBoton.x * escalaMedia, y: rectBoton.y * escalaMedia,
-    ancho: rectBoton.ancho * escalaMedia, alto: rectBoton.alto * escalaMedia };
-  const botonMedio = arte.rectsEscalados(modeloArte, medirMedia.ancho, medirMedia.alto)
+  const cajaEsperada = modeloMedia.raiz.hijos[1].rect; // ya en píxeles del lienzo (escala 1)
+  const botonMedio = arte.rectsEscalados(modeloMedia, medirMedia.ancho, medirMedia.alto)
     .find((nodo) => nodo.id === "id/pulsar");
   r.temaAparatoMedia = botonMedio ? {
     caja: [botonMedio.ancho, botonMedio.alto],
@@ -1014,11 +1014,14 @@ const pixelCercano = (pix, esperado) => Array.isArray(pix) && pix.length === 3 &
       "el emulador no pinta el fondo blanco y el botón gris del APK real: " +
       JSON.stringify(v.temaAparato));
     const tm = v.temaAparatoMedia || {};
-    comprueba(tm.caja && tm.caja.join(",") === "44,24" &&
+    // 44×20 px = 88×40 dp × 0,5: el alto de 40dp es el medido en Droidloom (y408…460 a density
+    // 213). La aserción anterior esperaba 44×24 por el minHeight=48dp declarado en el tema, que
+    // ART no respeta en el aparato medido.
+    comprueba(tm.caja && tm.caja.join(",") === "44,20" &&
       pixelCercano(tm.esquina, [214, 215, 215]) &&
       pixelCercano(tm.centro, [214, 215, 215]) &&
       pixelCercano(tm.fuera, [255, 255, 255]),
-      "a media pantalla el botón no mide 44x24, no pinta el gris en su relleno o el blanco bajo " +
+      "a media pantalla el botón no mide 44x20, no pinta el gris en su relleno o el blanco bajo " +
       "su borde: " + JSON.stringify(tm));
     comprueba(v.punteroInspector === "none" && v.punteroDetalleModelo === "none",
       "el detalle del modelo no deja pasar el clic al canvas que hay debajo (debe ser transparente " +

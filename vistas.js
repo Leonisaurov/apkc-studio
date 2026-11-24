@@ -8,7 +8,6 @@ import {
   hayDocumentosSucios, confirmarDescartes, limpiarEstadoEditor,
   conBloqueo, publicar, PREVIA_PANEL,
 } from "./pestana.js";
-import { repintarVistaPrevia } from "./vista-previa.js";
 
 (() => {
   // tres vistas: Inicio, Editor y Pantalla (la vista previa del apk a página completa)
@@ -26,11 +25,12 @@ import { repintarVistaPrevia } from "./vista-previa.js";
     }
     document.body.dataset.vista = vista;
     // al entrar en Pantalla se repinta con el último modelo: compilar puede ocurrir con esta
-    // pestaña oculta y entonces el canvas mide cero, así que el primer pintado usa el tamaño de
-    // respaldo. El panel de la vista dividida pinta además su canvas y su consola.
-    if (vista === "vista") {
-      repintarVistaPrevia();
-      if (PREVIA_PANEL && typeof PREVIA_PANEL.repintar === "function") PREVIA_PANEL.repintar();
+    // pestaña oculta y entonces el canvas mide cero. El panel es el ÚNICO dueño de `#vista-previa`
+    // en este momento: antes lo pintaban también `vista-previa.js` y él, con modelos distintos
+    // (el crudo y el reescalado), y a media pantalla ganaba el crudo. `vista-previa.js` sigue
+    // publicando el modelo; su pintado inicial se corrige siempre con el evento del panel.
+    if (vista === "vista" && PREVIA_PANEL && typeof PREVIA_PANEL.repintar === "function") {
+      PREVIA_PANEL.repintar();
     }
     const estado = document.getElementById("estado-general");
     if (estado) estado.textContent = NOMBRES[vista] || vista;

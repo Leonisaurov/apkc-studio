@@ -22,10 +22,14 @@ const NODOS_MAXIMOS = 512;
 // `Widget.Material.Button` sale #d6d7d7. Son del tema de la APP, no del editor: el lienzo
 // representa la pantalla del teléfono aunque quien lo mire esté en tema oscuro.
 const TEMA_APARATO = { fondo: "#ffffff", texto: "#30323a", boton: "#d6d7d7" };
-// Widget.Material.Button (android.jar 34) declara minWidth=88dp y minHeight=48dp. La
-// aproximación de apkc no los aplica, así que el pintor los impone al preparar los rects.
+// Widget.Material.Button (android.jar 34) declara minWidth=88dp; el minHeight declarado es 48dp,
+// pero el gris que ART pinta en el aparato mide 40dp: en la captura de Contador.apk en Droidloom
+// (1920×1080, density 213) el relleno va de y=408 a y=460, es decir 52 px × 160/213 ≈ 39dp.
+// La aproximación de apkc no impone estos mínimos, así que `modeloConMinimos` los aplica al modelo
+// **antes** de reescalarlo y devolviendo el centro: ensanchar sin restituirlo corría el botón 12dp.
 const ANCHO_BOTON_DP = 88;
-const ALTO_BOTON_DP = 48;
+const ALTO_BOTON_DP = 40;
+const RADIO_BOTON_DP = 4;
 // Theme.DeviceDefault.Light usa 14sp por defecto; TextAppearance.Large/Medium/Small son
 // 22/18/14sp. `sp` y `dp` coinciden con la escala de fuente del aparato (factor 1).
 const TEXTO_DP = 14;
@@ -185,9 +189,45 @@ export function escalaPara(modelo, ancho, alto) {
   return caja;
 }
 
+// Aplica los mínimos medidos del botón al MODELO, antes de cualquier reescalado. Es una copia:
+// el contrato de la vista dividida es que mirar no muta el modelo. Restituye el centro en los dos
+// ejes, porque agrandar la caja por la izquierda y arriba desplazaba el botón (y su texto) respecto
+// de ART. Al hacerlo aquí, `modeloConPantalla` de `previa-panel.js` escala ya el rect final: con una
+// pantalla de 180×320 el botón mide 44×20 en vez de volver a 88×48 «porque sí».
+export function modeloConMinimos(modelo) {
+  if (!modelo || typeof modelo !== "object" || !modelo.raiz) return modelo;
+  const copiar = (nodo) => {
+    if (!nodo || typeof nodo !== "object") return nodo;
+    const copia = { ...nodo };
+    if (nodo.rect && typeof nodo.rect === "object") {
+      const { x, y, ancho, alto } = nodo.rect;
+      if ([x, y, ancho, alto].every((v) => aNumeroOFinito(v) !== null)) {
+        const boton = aparienciaDe(nodo).boton;
+        const anchoNuevo = boton ? Math.max(ancho, ANCHO_BOTON_DP) : ancho;
+        // `apkc preview` estima 48dp para un Button wrap_content (el minHeight del tema), pero el
+        // relleno gris que ART pinta mide 40dp. Corregimos esa estimación y conservamos una altura
+        // mayor si el layout la declaró explícitamente.
+        const altoNuevo = boton ? Math.max(alto === 48 ? ALTO_BOTON_DP : alto, ALTO_BOTON_DP) : alto;
+        copia.rect = {
+          ...nodo.rect,
+          x: x - (anchoNuevo - ancho) / 2,
+          y: y - (altoNuevo - alto) / 2,
+          ancho: anchoNuevo,
+          alto: altoNuevo,
+        };
+      }
+    }
+    if (Array.isArray(nodo.hijos)) copia.hijos = nodo.hijos.map(copiar);
+    return copia;
+  };
+  return { ...modelo, raiz: copiar(modelo.raiz) };
+}
+
 // Los rectángulos ya escalados, en el orden de pintado. Un nodo sin `rect` numérico se omite en
 // lugar de pintarse en (0,0): un rectángulo inventado miente más que un hueco. Nunca devuelve un
-// ancho o alto menor que 1 px, para que una view diminuta siga viéndose.
+// ancho o alto menor que 1 px, para que una view diminuta siga viéndose. Los mínimos se aplican en
+// `modeloConMinimos`, antes de llegar aquí: reaplicarlos sobre píxeles ya reducidos era lo que
+// dejaba el botón en 88×48 px a media pantalla.
 export function rectsEscalados(modelo, ancho, alto) {
   const caja = escalaPara(modelo, ancho, alto);
   if (!caja.valida) return [];
@@ -201,10 +241,6 @@ export function rectsEscalados(modelo, ancho, alto) {
     let ancho = aNumeroOFinito(r.ancho), alto = aNumeroOFinito(r.alto);
     if ([x, y, ancho, alto].some((v) => v === null)) continue;
     const apariencia = aparienciaDe(nodo);
-    if (apariencia.boton) {
-      ancho = Math.max(ancho, ANCHO_BOTON_DP);
-      alto = Math.max(alto, ALTO_BOTON_DP);
-    }
     const escalado = {
       x: caja.x + x * caja.escala,
       y: caja.y + y * caja.escala,
@@ -250,10 +286,11 @@ function colorDe(nombre, respaldo) {
   return valor || respaldo;
 }
 
-// El fondo del botón del tema medido: un rectángulo redondeado de 2dp en lugar del hueco
-// transparente que el pintor dibujaba antes. No toca el rect del modelo ni la escala.
+// El fondo del botón del tema medido: un rectángulo redondeado de 4dp, como el que se mide en la
+// captura de ART. No toca el rect del modelo ni la escala; el recorte a la pantalla lo pone quien
+// llama, antes de pintar cualquier nodo.
 function pintarFondoBoton(ctx, r, escala) {
-  const radio = Math.min(2 * escala, r.ancho / 2, r.alto / 2);
+  const radio = Math.min(RADIO_BOTON_DP * escala, r.ancho / 2, r.alto / 2);
   ctx.beginPath();
   if (typeof ctx.roundRect === "function") ctx.roundRect(r.x, r.y, r.ancho, r.alto, radio);
   else ctx.rect(r.x, r.y, r.ancho, r.alto);
@@ -486,6 +523,13 @@ export function pintarModelo(canvas, modelo, medir) {
   const rects = rectsEscalados(modelo, ancho, alto);
   ctx.font = "11px ui-monospace, SFMono-Regular, Menlo, Consolas, monospace";
   ctx.textBaseline = "top";
+  // Todo lo que represente la pantalla va recortado a su marco. Sin este clip, un nodo que se sale
+  // por la derecha (el quinto botón de la plantilla Notas, en x=359…447dp) pintaba su gris sobre
+  // el editor, fuera de los 360dp de la pantalla. El borde del marco se pintó antes, sin recortar.
+  ctx.save();
+  ctx.beginPath();
+  ctx.rect(marcoRect.x, marcoRect.y, marcoRect.ancho, marcoRect.alto);
+  ctx.clip();
   let operacionesPintadas = 0;
   for (const r of rects) {
     // el nodo raíz es el contenedor de toda la pantalla: se marca con el acento, no se rellena,
@@ -518,13 +562,9 @@ export function pintarModelo(canvas, modelo, medir) {
     } else if (r.boton) {
       pintarFondoBoton(ctx, r, marcoRect.escala);
     }
-    // La vista que responde a un clic se marca con el acento (un solo píxel, como ayuda del
-    // emulador). El borde gris que se dibujaba alrededor de TODAS las vistas no existe en ART.
-    if (r.oyente) {
-      ctx.strokeStyle = acento;
-      ctx.lineWidth = 1;
-      ctx.strokeRect(r.x + 0.5, r.y + 0.5, Math.max(1, r.ancho - 1), Math.max(1, r.alto - 1));
-    }
+    // ART no pone ningún borde alrededor de las vistas que tienen oyente: antes se dibujaba aquí
+    // un píxel de acento que en el aparato no existe. La lista de vistas que responden sigue en el
+    // panel de Pulsar y en `r.oyente`; el canvas solo pinta lo que pinta la app.
     ctx.save();
     ctx.beginPath();
     ctx.rect(r.x + 1, r.y + 1, Math.max(1, r.ancho - 2), Math.max(1, r.alto - 2));
@@ -577,6 +617,7 @@ export function pintarModelo(canvas, modelo, medir) {
     }
     ctx.restore();
   }
+  ctx.restore();
   // El tipo y el id de cada nodo quedan accesibles sin dibujarse: en el atributo `data-nodos`
   // del canvas y en el objeto que devuelve esta función.
   const resumen = rects.slice(0, 40).filter((r) => r.tipo).map((r) => (r.id ? r.tipo + " · " + r.id : r.tipo)).join(", ");
@@ -611,8 +652,10 @@ export function pintarVistaPrevia(modelo) {
     return null;
   }
   ultimoModelo = modelo;
+  // Los mínimos y su centro se aplican antes de pintar, igual que en el panel: este primer trazo
+  // deja de dibujar el botón 12dp desplazado mientras el evento avisa y el panel repinta.
   const canvas = canvasDeLaVista();
-  const pintado = pintarModelo(canvas, modelo);
+  const pintado = pintarModelo(canvas, modeloConMinimos(modelo));
   if (pintado && pintado.valida === false) {
     // el modelo llegó, pero su pantalla no es medible: panel vacío y motivo en la línea de estado
     mensajeVistaPrevia("El modelo de vista previa no trae una pantalla medible (ancho o alto no " +

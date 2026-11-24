@@ -36,6 +36,7 @@
 import {
   pintarModelo, modeloActual, EVENTO_PREVIA, modeloDeSalida, pintarVistaPrevia, nodosAplanados,
   textoDeNodo, rectsEscalados, escalaPara, MENSAJE_SIN_MODELO, textoDelModelo,
+  modeloConMinimos, mensajeVistaPrevia,
 } from "./vista-previa.js";
 import { modeloDeLayout, decodificarEntidades, paddingDe, contenedorDe, atributoLocal } from "./vista-xml.js";
 import {
@@ -414,6 +415,15 @@ export function modeloConPantalla(modelo, ancho, alto) {
     },
     raiz: copiarNodo(modelo.raiz),
   };
+}
+
+// El modelo que pinta el Emulador, con el camino completo: primero los mínimos medidos por ART
+// (con el centro restituido) y después el reescalado al tamaño elegido. Es la única entrada al
+// pintor y a la hit-testing: `prueba-navegador.js` la importa para medir el mismo modelo que
+// producción, en vez de pasarle el JSON crudo.
+export function modeloParaEmulador(modelo, ancho, alto) {
+  if (!modelo || typeof modelo !== "object") return modelo;
+  return modeloConPantalla(modeloConMinimos(modelo), ancho, alto);
 }
 
 // Las vistas que responden a un clic, con su aspecto en el modelo. `ejecucion.oyentes` es la fuente
@@ -2299,6 +2309,15 @@ export function crearPreviaPanel({ hospedador, proyecto, estadoPestana, editor, 
     return hay;
   }
 
+  // Un `apkc preview` que falla no puede dejar en pantalla el modelo anterior: se borra el estado
+  // del módulo, se limpia el canvas de Pantalla y se avisa al panel para que limpie también su
+  // canvas y escriba el motivo en las dos líneas de estado. Sin esto, el fallo parecía una ejecución
+  // correcta de otra apk.
+  function fallarPreview(motivo) {
+    mensajeVistaPrevia(motivo);
+    mensajeEmulador(motivo);
+  }
+
   async function ejecutarPreviewDe(ruta) {
     const fuente = ruta === RUTA_ULTIMA_APK ? "ultima" : "build";
     // un build o la última apk reemplazan el modelo: el resultado del arrastre anterior ya no vale
@@ -2311,13 +2330,13 @@ export function crearPreviaPanel({ hospedador, proyecto, estadoPestana, editor, 
       if (!modelo) {
         const lineas = String((r && (r.error || r.consola)) || "").trim().split("\n").filter(Boolean);
         const motivo = lineas.length ? lineas[lineas.length - 1].trim() : "";
-        mensajeEmulador("apkc preview no devolvió un modelo legible" + (motivo ? ": " + motivo : "."));
+        fallarPreview("apkc preview no devolvió un modelo legible" + (motivo ? ": " + motivo : "."));
         return null;
       }
       apkActual = fuente === "ultima" ? RUTA_ULTIMA_APK : "build/app.apk";
       return pintarVistaPrevia(modelo);
     } catch (e) {
-      mensajeEmulador("no se pudo leer la última apk: " + (e && e.message ? e.message : e));
+      fallarPreview("no se pudo leer la última apk: " + (e && e.message ? e.message : e));
       return null;
     } finally {
       origenPrevia = "build";
@@ -2715,7 +2734,7 @@ export function crearPreviaPanel({ hospedador, proyecto, estadoPestana, editor, 
     if (!canvas || !idRef) return null;
     const espacio = canvas.__espacio || { ancho: 0, alto: 0 };
     if (!(espacio.ancho > 0) || !(espacio.alto > 0)) return null;
-    const modelo = modeloParaEmulador();
+    const modelo = modeloDelEmulador();
     if (!modelo) return null;
     return rectsEscalados(modelo, espacio.ancho, espacio.alto).find((r) => r.idRef === idRef) || null;
   }
@@ -2869,7 +2888,7 @@ export function crearPreviaPanel({ hospedador, proyecto, estadoPestana, editor, 
       // el mismo modelo reescalado que se pintó: con el tamaño de pantalla elegido, el modelo
       // original no comparte la caja y el clic caería en otro nodo
       if (apagado) return;
-      const modelo = modeloParaEmulador();
+      const modelo = modeloDelEmulador();
       // Un EditText se queda con el toque: se abre el campo real y NO se entrega el clic al
       // contenedor que pueda tener listener, igual que en el framework.
       const editable = editableEnPunto(modelo, ancho, alto, x, y);
@@ -3031,17 +3050,17 @@ export function crearPreviaPanel({ hospedador, proyecto, estadoPestana, editor, 
     if (canvas.dataset) canvas.dataset.nodos = "";
   }
 
-  function modeloParaEmulador() {
+  function modeloDelEmulador() {
     const modelo = modeloActual();
     if (!modelo) return null;
-    return modeloConPantalla(modelo, pantalla.ancho, pantalla.alto);
+    return modeloParaEmulador(modelo, pantalla.ancho, pantalla.alto);
   }
 
   function pintarRender(motivo) {
     if (!conDocumento()) return null;
     if (apagado) cerrarCampoTexto();
     if (!apagado) ajustarPantallas();
-    const modelo = apagado ? null : modeloParaEmulador();
+    const modelo = apagado ? null : modeloDelEmulador();
     let primero = null;
     for (const superficie of SUPERFICIES) {
       const canvas = el(superficie.canvasRender);
@@ -4955,6 +4974,8 @@ export function crearPreviaPanel({ hospedador, proyecto, estadoPestana, editor, 
     pintarVivo,
     pintarRender,
     repintar,
+    // el mismo modelo escalado que pinta el canvas, para inspeccionarlo desde las pruebas CDP
+    modeloParaEmulador,
     // un clic desde fuera (la prueba de chromium): la misma orden que el puntero del canvas
     pulsar,
     // teclear desde fuera (pruebas y consola): el mismo paso `--escribir` que el campo real
