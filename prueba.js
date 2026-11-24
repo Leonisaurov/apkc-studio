@@ -254,6 +254,34 @@ for (const m of html.matchAll(/<input[^>]*name="([^"]+)"/g))
   if (!new RegExp(`"(f\\.get|f\\.has)\\(\"${m[1]}\"`).test(js) && !js.includes(`"${m[1]}"`))
     mal(`el formulario tiene ${m[1]} y estado() no lo lee`);
 
+// La API elegida se ve en Inicio, antes de crear: el selector y los ocultos que lee `apkc build`
+// viajan juntos en el formulario, y el manejador sigue sincronizando los dos ocultos.
+const inicio = html.slice(html.indexOf('<form id="form"'), html.indexOf("</form>"));
+for (const id of ["api-version", "sdk-version", "codename"])
+  if (!inicio.includes(`id="${id}"`)) mal(`#${id} no está en el formulario de Inicio`);
+if (!/codename\.value = API_NOMBRES\[selector\.value\]/.test(pestana) ||
+    !/sincronizarApi\(false\)/.test(pestana)) {
+  mal("el selector de API ya no sincroniza los ocultos #sdk-version y #codename");
+}
+if (!/"crear\.api"/.test(fs.readFileSync(path.join(__dirname, "idioma.js"), "utf8"))) {
+  mal("la etiqueta de la API visible en Inicio no está traducida");
+}
+// Un clic en el botón «Compilar» de la barra abre la pestaña y enfoca la acción primaria.
+const manejadorCompilar = pestana.slice(pestana.indexOf('en("alternar-panel"'),
+  pestana.indexOf('en("cerrar-panel"'));
+if (!/mostrarPanel\("compilar"\)/.test(manejadorCompilar) ||
+    !/document\.getElementById\("compilar-debug"\)/.test(manejadorCompilar) ||
+    !/boton\.disabled = false/.test(manejadorCompilar) ||
+    !/boton\.focus\(\)/.test(manejadorCompilar)) {
+  mal("el botón Compilar de la barra no deja «Compilar debug» visible y enfocado en un clic");
+}
+// Las pestañas del panel inferior siguen el orden de uso; los ids y nombres de vista no cambian.
+const ordenPanel = [...html.matchAll(/<button class="panel-tab[^"]*"[^>]*data-panel="([^"]+)"/g)]
+  .map((m) => m[1]).join(",");
+if (ordenPanel !== "salida,compilar,diagnostico,historial,firmar,deps") {
+  mal("el orden de las pestañas del panel no es el esperado: " + ordenPanel);
+}
+
 // 6b. la vista previa: el modelo de `apkc preview` y el pintor. Las funciones de modelo son puras
 //     (sin DOM) y esta es su prueba de node; que el canvas pinte se comprueba en chromium. El
 //     modelo es el medido sobre la plantilla Contador (docs/plan-vista-previa.md, Fase 1).

@@ -3484,9 +3484,19 @@ if (typeof document !== "undefined") {
       mostrarFallo(err);
     }
     en("alternar-panel", () => {
+      // Un clic desde la barra del fichero deja la acción de compilar lista: abrir el panel,
+      // seleccionar la pestaña Compilar aunque el panel estuviera en otra y enfocar el botón
+      // primario. El segundo clic de quien usa la página ya es el de «Compilar debug», no el de
+      // buscar la pestaña. Para cerrar siguen sirviendo «×» del panel y Ctrl+`.
       const panel = document.getElementById("panel-inferior");
-      if (panel && panel.hidden) mostrarPanel("compilar");
-      else cerrarPanel();
+      if (!panel) return;
+      mostrarPanel("compilar");
+      const boton = document.getElementById("compilar-debug");
+      if (boton) {
+        boton.disabled = false;
+        boton.focus();
+        boton.scrollIntoView({ block: "nearest" });
+      }
     });
     en("cerrar-panel", cerrarPanel);
     en("abrir-historial", () => mostrarPanel("historial"));

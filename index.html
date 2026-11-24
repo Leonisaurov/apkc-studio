@@ -188,6 +188,22 @@
                 <option value="cronometro">Cronómetro (Handler y vueltas)</option>
               </select>
             </label>
+            <label><span data-i18n="crear.api">API de compilación</span>
+              <select id="api-version" class="ruta">
+                <option value="27">27 · Android 8.1</option>
+                <option value="28">28 · Android 9</option>
+                <option value="29">29 · Android 10</option>
+                <option value="30">30 · Android 11</option>
+                <option value="31">31 · Android 12</option>
+                <option value="32">32 · Android 12L</option>
+                <option value="33">33 · Android 13</option>
+                <option value="34" selected>34 · Android 14</option>
+                <option value="35">35 · Android 15</option>
+              </select>
+            </label>
+            <!-- los ocultos los sigue leyendo `apkc build`; el selector visible los sincroniza -->
+            <input type="hidden" id="sdk-version" value="34">
+            <input type="hidden" id="codename" value="14">
             <div class="acciones">
               <button id="crear-proyecto" class="primario" type="button" data-i18n="crear.boton">Crear proyecto y editar</button>
               <button id="instalar-app" type="button" hidden data-i18n="crear.instalar">Instalar apkc studio</button>
@@ -268,7 +284,7 @@
               <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 5h16v14H4z"/><path d="M14 5v14"/></svg>
               <span class="texto-boton">Previa</span>
             </button>
-            <button id="alternar-panel" type="button" title="Mostrar u ocultar la compilación (Ctrl+`)" aria-label="Compilar"
+            <button id="alternar-panel" type="button" title="Abrir la compilación y enfocar «Compilar debug» (Ctrl+`)" aria-label="Compilar"
                     aria-expanded="false" aria-controls="panel-inferior">
               <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M14 4l6 6-3 3-6-6z"/><path d="M12 10l-8 8 2 2 8-8"/></svg>
               <span class="texto-boton">Compilar</span>
@@ -718,10 +734,10 @@
                 <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 6h16v12H4z"/><path d="M7 10l3 2-3 2"/></svg>
                 Consola
               </button>
+              <button class="panel-tab" type="button" role="tab" aria-selected="false" data-panel="compilar">Compilar</button>
               <button class="panel-tab" type="button" role="tab" aria-selected="false" data-panel="diagnostico">Diagnóstico</button>
               <button class="panel-tab" type="button" role="tab" aria-selected="false" data-panel="historial">Historial</button>
-              <button class="panel-tab" type="button" role="tab" aria-selected="false" data-panel="compilar">Compilar</button>
-              <button class="panel-tab" type="button" role="tab" aria-selected="false" data-panel="firmar">Firmar otra apk</button>
+              <button class="panel-tab" type="button" role="tab" aria-selected="false" data-panel="firmar">Firmar apk o .aab</button>
               <button class="panel-tab" type="button" role="tab" aria-selected="false" data-panel="deps">Dependencias</button>
               <span class="espacio"></span>
               <span id="estado-pestana" class="nota"></span>
@@ -841,21 +857,8 @@
 
                 <details id="detalle-avanzado">
                   <summary>Opciones avanzadas</summary>
-                  <label>API de compilación
-                    <select id="api-version" class="ruta">
-                      <option value="27">27 · Android 8.1</option>
-                      <option value="28">28 · Android 9</option>
-                      <option value="29">29 · Android 10</option>
-                      <option value="30">30 · Android 11</option>
-                      <option value="31">31 · Android 12</option>
-                      <option value="32">32 · Android 12L</option>
-                      <option value="33">33 · Android 13</option>
-                      <option value="34" selected>34 · Android 14</option>
-                      <option value="35">35 · Android 15</option>
-                    </select>
-                  </label>
-                  <input type="hidden" id="sdk-version" value="34">
-                  <input type="hidden" id="codename" value="14">
+                  <p class="nota">La API de compilación se elige en Inicio, antes de crear el
+                    proyecto; aquí solo quedan las opciones del build.</p>
                   <label><input type="checkbox" id="v4-compilar" checked> escribir el <code>.idsig</code> (firma v4)</label>
                   <label><input type="checkbox" id="inc-compilar" checked> compilación incremental (<code>--inc</code>)</label>
                   <p class="nota">Reutiliza las cachés del build anterior; destildarlo fuerza una compilación completa.</p>
