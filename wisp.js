@@ -217,9 +217,9 @@ export async function resolverPorWisp({ relay, coordenada, destino, hospedador, 
     version: CONTRATO_NUCLEO, relay: String(relay).trim(), coordenada: coord,
     destino: destino || destinoDeCoordenada(coord),
   });
-  if (!respuesta || !respuesta.bytes || !respuesta.bytes.length) {
-    throw new Error("el núcleo WISP no devolvió bytes para " + coord);
-  }
+  // La respuesta se contrasta antes de devolverla: la página pinta `bytes`, `sha256` y `ruta`
+  // sin mirarlos, así que un núcleo falso no puede colar aquí un fichero que no sea el que dice.
+  await validarRespuestaNucleo(respuesta);
   return respuesta;
 }
 
@@ -281,6 +281,46 @@ async function huellaSHA256(bytes) {
   const datos = bytes instanceof Uint8Array ? bytes : new Uint8Array(bytes || []);
   const resumen = await globalThis.crypto.subtle.digest("SHA-256", datos);
   return [...new Uint8Array(resumen)].map((b) => b.toString(16).padStart(2, "0")).join("");
+}
+
+// Tope de la respuesta del núcleo. `tope` es un parámetro del helper para poder falsificar el
+// desbordamiento en las pruebas sin asignar 64 MiB; `resolverPorWisp` siempre usa el de producción.
+export const MAX_RESPUESTA_WISP = 64 * 1024 * 1024;
+
+// Contraste de la respuesta del núcleo antes de pintarla. Puro: no escribe nada, no rellena campos
+// y no admite respaldos silenciosos; cualquier campo ausente o coherente solo a medias se lanza
+// como Error con un mensaje literal. El sha256 se exige en minúscula, que es lo que emite
+// `huellaSHA256`, y se compara con el sha256 calculado sobre los bytes recibidos.
+export async function validarRespuestaNucleo(respuesta, tope = MAX_RESPUESTA_WISP) {
+  if (!respuesta || typeof respuesta !== "object") {
+    throw new Error("el núcleo WISP no devolvió una respuesta con bytes, sha256 y ruta");
+  }
+  if (!(respuesta.bytes instanceof Uint8Array)) {
+    throw new Error("el núcleo WISP no devolvió los bytes como Uint8Array");
+  }
+  const bytes = respuesta.bytes;
+  if (bytes.length === 0) {
+    throw new Error("el núcleo WISP devolvió cero bytes");
+  }
+  if (bytes.length > tope) {
+    throw new Error("el núcleo WISP devolvió " + bytes.length + " bytes, por encima del tope de " + tope + " bytes");
+  }
+  if (typeof respuesta.sha256 !== "string" || !SHA256_HEX.test(respuesta.sha256)) {
+    throw new Error("el núcleo WISP no devolvió un sha256 hexadecimal de 64 dígitos: " + recorte(respuesta.sha256));
+  }
+  const huellaReal = await huellaSHA256(bytes);
+  if (respuesta.sha256 !== huellaReal) {
+    throw new Error("el sha256 del núcleo WISP no coincide con los bytes: declarado " +
+      respuesta.sha256 + ", real " + huellaReal);
+  }
+  if (typeof respuesta.ruta !== "string" || !respuesta.ruta.startsWith("/deps/")) {
+    throw new Error("la ruta del núcleo WISP no empieza por /deps/: " + recorte(respuesta.ruta));
+  }
+  if (respuesta.ruta.includes("..") || respuesta.ruta.includes("\\") ||
+      respuesta.ruta.includes("?") || respuesta.ruta.includes("#")) {
+    throw new Error("la ruta del núcleo WISP lleva «..», «\\», «?» o «#»: " + recorte(respuesta.ruta));
+  }
+  return respuesta;
 }
 
 // La huella esperada es opcional. Si viene, se aceptan los 64 hex en minúscula o mayúscula y con

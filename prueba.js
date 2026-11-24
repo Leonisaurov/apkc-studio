@@ -4273,12 +4273,14 @@ public final class R {
       mal("sin núcleo, resolverPorWisp no dice qué falta: " + sinNucleo);
     }
     const visto = {};
+    const bytesBuenos = new Uint8Array([1, 2, 3]);
+    const hashBueno = await depsMod.sha256Hex(bytesBuenos);
     const globalConNucleo = {
       apkcWisp: {
         version: "apkc-wisp/1",
         obtener: async (peticion) => {
           Object.assign(visto, peticion);
-          return { bytes: new Uint8Array([1, 2, 3]), sha256: "ff", ruta: peticion.destino + "prueba-1.0.jar" };
+          return { bytes: bytesBuenos, sha256: hashBueno, ruta: peticion.destino + "prueba-1.0.jar" };
         },
       },
     };
@@ -4291,6 +4293,44 @@ public final class R {
         visto.destino !== "/deps/com.example/prueba/1.0/") {
       mal("el contrato del núcleo no recibe relay, coordenada y destino: " + JSON.stringify(visto));
     }
+
+    // La página pinta la respuesta sin mirarla, así que cada campo se contrasta antes de devolverla.
+    // Un núcleo falso se cierra con su mensaje literal y no entrega respuesta.
+    const nucleoQueDevuelve = (respuesta) => ({
+      apkcWisp: { version: "apkc-wisp/1", obtener: async () => respuesta },
+    });
+    const rechaza = async (hacer, mensaje, etiqueta) => {
+      let devuelto = null;
+      let vistoError = "";
+      try { devuelto = await hacer(); }
+      catch (e) { vistoError = String(e && e.message ? e.message : e); }
+      if (devuelto !== null || vistoError !== mensaje) {
+        mal(etiqueta + ": esperado " + JSON.stringify(mensaje) + ", devuelto " +
+          JSON.stringify(devuelto) + ", error " + JSON.stringify(vistoError));
+      }
+    };
+    const resolverCon = (respuesta) => () => wispMod.resolverPorWisp({
+      relay: "wss://wisp.local/wisp/", coordenada: "com.example:prueba:1.0",
+      hospedador: hospedadorFalso, global: nucleoQueDevuelve(respuesta),
+    });
+    await rechaza(resolverCon({ bytes: 1 }),
+      "el núcleo WISP no devolvió los bytes como Uint8Array", "{bytes:1} sin sha256");
+    const hashMalo = "0".repeat(64);
+    await rechaza(resolverCon({
+      bytes: bytesBuenos, sha256: hashMalo, ruta: "/deps/com.example/prueba/1.0/prueba.jar",
+    }), "el sha256 del núcleo WISP no coincide con los bytes: declarado " + hashMalo + ", real " + hashBueno,
+    "hash erróneo");
+    await rechaza(resolverCon({
+      bytes: bytesBuenos, sha256: hashBueno, ruta: "../../x",
+    }), "la ruta del núcleo WISP no empieza por /deps/: ../../x", "ruta fuera de /deps/");
+    await rechaza(resolverCon({
+      bytes: bytesBuenos, sha256: hashBueno, ruta: "/deps/../../x",
+    }), "la ruta del núcleo WISP lleva «..», «\\», «?» o «#»: /deps/../../x", "ruta con «..»");
+    // El tope se falsifica con el parámetro del helper: no hace falta asignar 64 MiB para probarlo.
+    await rechaza(() => wispMod.validarRespuestaNucleo({
+      bytes: bytesBuenos, sha256: hashBueno, ruta: "/deps/com.example/prueba/1.0/prueba.jar",
+    }, 2), "el núcleo WISP devolvió 3 bytes, por encima del tope de 2 bytes", "bytes sobre el tope");
+
     let relaySinBarra = "";
     try {
       await wispMod.resolverPorWisp({
@@ -4410,10 +4450,14 @@ public final class R {
     }
     // y Resolver carga las CAs antes de abrir el relay: el orden es contrato
     const ordenCA = [];
+    const hashUnByte = await depsMod.sha256Hex(new Uint8Array([1]));
     const globalOrden = {
       apkcWisp: {
         version: "apkc-wisp/1",
-        obtener: async () => { ordenCA.push("obtener"); return { bytes: new Uint8Array([1]), sha256: "ff", ruta: "/deps/x" }; },
+        obtener: async () => {
+          ordenCA.push("obtener");
+          return { bytes: new Uint8Array([1]), sha256: hashUnByte, ruta: "/deps/x" };
+        },
       },
       apkcWispCargarCAs: async () => { ordenCA.push("cas"); return { ok: true }; },
     };
