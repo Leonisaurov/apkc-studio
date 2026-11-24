@@ -631,6 +631,13 @@ const conductor = `(async () => {
   }
   // --- el registro y la consola: lámina sobre el teléfono y Toast que se repite -----------------
   document.querySelector('.pestana-vista[data-vista="pestana"]').click();
+  // El registro y la consola cuelgan de la sección del emulador (#previa-render): en Vista previa
+  // su caja mide cero y no hay nada que medir. Se enciende el emulador aquí, sin depender de haber
+  // compilado: sin wasm no hay modelo, pero el panel y la lámina existen igual y son medibles.
+  // (Sin este clic, la corrida sin APKC_WASM medía una caja oculta y daba dos falsos negativos.)
+  if (document.getElementById("previa-modo-render")) {
+    document.getElementById("previa-modo-render").click();
+  }
   // Las pestañas y los paneles del inspector son una lámina de lectura: si capturaran el puntero, el
   // clic del modelo que cae bajo ellos no llegaría al canvas (f2710a1 dejó fuera solo el detalle del
   // modelo y la pestaña lo volvió a tapar). Acoplada al borde, la capa sí responde entera.
