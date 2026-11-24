@@ -630,10 +630,11 @@ if ((trozoCompletar.match(/if \(pendiente == true\)/g) || []).length !== 2 ||
 }
 
 // 2f-bis. Contrato de emulación de Lienzo, medido con `apkc preview` sobre el apk generado arriba
-// (paquete sustituido por el de esta prueba): el intérprete ejecuta el onDraw y publica 17
-// `dibujo.operaciones` en el único nodo del modelo. Dos fronteras medidas y no disimuladas:
-// `getWidth/getHeight` y `Color.rgb` son stubs que devuelven cero, así que las figuras llegan sin
-// coordenadas y con color #00000000 y el pintor solo puede dibujar los dos textos hoy por hoy.
+// (paquete sustituido por el de esta prueba): el intérprete ejecuta el onDraw con el rect de la
+// vista y publica 17 `dibujo.operaciones` en el único nodo del modelo. El centro cae en (180,320),
+// los colores son los que pide `Color.rgb` y el pintor consume las 17. Detalle medido, no inventado:
+// cinco rayos terminan en el centro y solo el cuarto llega a y=500, porque el emisor del fork
+// reparte el registro de `cy + 180` así en las líneas con expresiones en las dos puntas.
 const lienzoLayout = lienzoApp.files["res/layout/lienzo.xml"] || "";
 if (!new RegExp("<" + estado.package.replace(/\./g, "\\.") + "\\.Lienzo\\b").test(lienzoLayout)) {
   mal("la plantilla Lienzo no declara su vista propia como raíz de res/layout/lienzo.xml");
@@ -651,29 +652,37 @@ const modeloLienzoMedido = {
   raiz: { tipo: estado.package + ".Lienzo", id: "id/lienzo", idRef: "0x7f010000", oyente: true,
     rect: { x: 0, y: 0, ancho: 360, alto: 640 },
     dibujo: { operaciones: [
-      { operacion: "color", color: "#00000000" },
-      { operacion: "circulo", color: "#00000000", grosor: 4, radio: 30 },
-      { operacion: "circulo", color: "#00000000", grosor: 4, radio: 52 },
-      { operacion: "circulo", color: "#00000000", grosor: 4, radio: 74 },
-      { operacion: "circulo", color: "#00000000", grosor: 4, radio: 96 },
-      { operacion: "circulo", color: "#00000000", grosor: 4, radio: 118 },
-      { operacion: "circulo", color: "#00000000", grosor: 4, radio: 140 },
-      { operacion: "circulo", color: "#00000000", grosor: 4, radio: 162 },
-      { operacion: "linea", color: "#00000000", grosor: 2, x1: -108, y1: -180, x2: -180 },
-      { operacion: "linea", color: "#00000000", grosor: 2, x1: -72, y1: -180, x2: -108 },
-      { operacion: "linea", color: "#00000000", grosor: 2, x1: -36, y1: -180, x2: -36 },
-      { operacion: "linea", color: "#00000000", grosor: 2, y1: -180, y2: 180 },
-      { operacion: "linea", color: "#00000000", grosor: 2, x1: 36, y1: -180, x2: 36 },
-      { operacion: "linea", color: "#00000000", grosor: 2, x1: 72, y1: -180, x2: 108 },
-      { operacion: "circulo", color: "#00000000", grosor: 2, radio: 26 },
-      { operacion: "texto", color: "#00000000", grosor: 2, x1: 24, y1: 48, texto: "fotograma 0" },
-      { operacion: "texto", color: "#00000000", grosor: 2, x1: 24, y1: 84, texto: "toques 0" },
+      { operacion: "color", color: "#12161e" },
+      { operacion: "circulo", color: "#46beff", grosor: 4, x1: 180, y1: 320, radio: 30 },
+      { operacion: "circulo", color: "#46beff", grosor: 4, x1: 180, y1: 320, radio: 52 },
+      { operacion: "circulo", color: "#46beff", grosor: 4, x1: 180, y1: 320, radio: 74 },
+      { operacion: "circulo", color: "#46beff", grosor: 4, x1: 180, y1: 320, radio: 96 },
+      { operacion: "circulo", color: "#46beff", grosor: 4, x1: 180, y1: 320, radio: 118 },
+      { operacion: "circulo", color: "#46beff", grosor: 4, x1: 180, y1: 320, radio: 140 },
+      { operacion: "circulo", color: "#46beff", grosor: 4, x1: 180, y1: 320, radio: 162 },
+      { operacion: "linea", color: "#ffb43c", grosor: 2, x1: 72, y1: 140, x2: 0, y2: 320 },
+      { operacion: "linea", color: "#ffb43c", grosor: 2, x1: 108, y1: 140, x2: 72, y2: 320 },
+      { operacion: "linea", color: "#ffb43c", grosor: 2, x1: 144, y1: 140, x2: 144, y2: 320 },
+      { operacion: "linea", color: "#ffb43c", grosor: 2, x1: 180, y1: 140, x2: 180, y2: 500 },
+      { operacion: "linea", color: "#ffb43c", grosor: 2, x1: 216, y1: 140, x2: 216, y2: 320 },
+      { operacion: "linea", color: "#ffb43c", grosor: 2, x1: 252, y1: 140, x2: 288, y2: 320 },
+      { operacion: "circulo", color: "#78f096", grosor: 2, x1: 180, y1: 320, radio: 26 },
+      { operacion: "texto", color: "#f0f0f0", grosor: 2, x1: 24, y1: 48, texto: "fotograma 0" },
+      { operacion: "texto", color: "#f0f0f0", grosor: 2, x1: 24, y1: 84, texto: "toques 0" },
     ] } },
 };
 const opsLienzo = modeloLienzoMedido.raiz.dibujo.operaciones;
-if (opsLienzo.length !== 17 || opsLienzo.filter((o) => o.operacion === "circulo").length !== 8 ||
-    opsLienzo.filter((o) => o.operacion === "linea").length !== 6) {
-  mal("el modelo de Lienzo no trae el reparto medido de 8 círculos y 6 líneas");
+if (opsLienzo.length !== 17 || opsLienzo.filter((o) => o.operacion === "color").length !== 1 ||
+    opsLienzo.filter((o) => o.operacion === "circulo").length !== 8 ||
+    opsLienzo.filter((o) => o.operacion === "linea").length !== 6 ||
+    opsLienzo.filter((o) => o.operacion === "texto").length !== 2) {
+  mal("el modelo de Lienzo no trae el reparto medido de 1 fondo, 8 círculos, 6 líneas y 2 textos");
+}
+if (!["#12161e", "#46beff", "#ffb43c", "#f0f0f0", "#78f096"]
+    .every((color) => opsLienzo.some((o) => o.color === color)) ||
+    opsLienzo.some((o) => o.color === "#00000000")) {
+  mal("los colores medidos de `Color.rgb` no llegan al modelo: " +
+    JSON.stringify(opsLienzo.map((o) => o.color)));
 }
 if (opsLienzo.filter((o) => o.operacion === "texto").map((o) => o.texto).join(",") !==
     "fotograma 0,toques 0") {
@@ -684,10 +693,28 @@ if (!(modeloLienzoMedido.ejecucion.oyentes || []).some((o) => o.id === "id/lienz
 }
 const lienzoPintado = lienzoFalso(360, 640);
 const resultadoLienzo = vistaPrevia.pintarModelo(lienzoPintado.canvas, modeloLienzoMedido);
-if (!resultadoLienzo || resultadoLienzo.valida !== true || resultadoLienzo.operaciones < 3) {
-  mal("el pintor no consume el modelo de Lienzo: " + (resultadoLienzo && resultadoLienzo.operaciones));
+if (!resultadoLienzo || resultadoLienzo.valida !== true || resultadoLienzo.operaciones !== 17) {
+  mal("el pintor no consume las 17 operaciones de Lienzo: " +
+    (resultadoLienzo && resultadoLienzo.operaciones));
 }
-const textosLienzo = lienzoPintado.llamadas.filter((c) => c.nombre === "fillText").map((c) => c.args[0]);
+const llamadasLienzo = lienzoPintado.llamadas;
+const cuentaLienzo = (nombre) => llamadasLienzo.filter((c) => c.nombre === nombre).length;
+if (cuentaLienzo("arc") !== 8 || cuentaLienzo("moveTo") !== 6 || cuentaLienzo("lineTo") !== 6 ||
+    cuentaLienzo("fillText") !== 2) {
+  mal("el lienzo no traza 8 arcos, 6 líneas y 2 textos: " +
+    JSON.stringify([cuentaLienzo("arc"), cuentaLienzo("moveTo"), cuentaLienzo("lineTo"),
+      cuentaLienzo("fillText")]));
+}
+if (!llamadasLienzo.some((c) => c.nombre === "arc" && c.args[0] === 180 &&
+    c.args[1] === 320 && c.args[2] > 0)) {
+  mal("los círculos no se dibujan en el centro medido (180,320) con radio mayor que cero");
+}
+if (llamadasLienzo.some((c) => c.tipo === "propiedad" &&
+    (c.nombre === "fillStyle" || c.nombre === "strokeStyle") &&
+    /^rgba\(0,\s*0,\s*0,\s*0\)$/.test(c.valor))) {
+  mal("el pintor recibió un estilo transparente en lugar de un color de la app");
+}
+const textosLienzo = llamadasLienzo.filter((c) => c.nombre === "fillText").map((c) => c.args[0]);
 if (textosLienzo.join(",") !== "fotograma 0,toques 0") {
   mal("la huella visible del Canvas propio no llega al lienzo: " + JSON.stringify(textosLienzo));
 }
