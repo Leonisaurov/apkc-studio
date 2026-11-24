@@ -2883,6 +2883,27 @@ export function crearPreviaPanel({ hospedador, proyecto, estadoPestana, editor, 
       if (focoTexto) { focoTexto.valor = campo.value; programarEscritura(); }
     });
     campo.addEventListener("blur", () => { if (focoTexto) cerrarCampoTexto(); });
+    // El campo se agranda hasta 24×18 px para poder teclear en rects diminutos. Ese margen no debe
+    // robarle el toque al EditText vecino: si el puntero cae fuera del rect dibujado, se cierra el
+    // campo una sola vez y se entrega el mismo pointerdown al canvas para que reparta el toque.
+    campo.addEventListener("pointerdown", (e) => {
+      if (!focoTexto) return;
+      const canvas = focoTexto.canvas;
+      const r = rectDeIdRef(canvas, focoTexto.idRef);
+      const espacio = canvas.__espacio || { ancho: 0, alto: 0 };
+      const caja = typeof canvas.getBoundingClientRect === "function" ? canvas.getBoundingClientRect() : null;
+      if (!r || !caja || !(caja.width > 0) || !(caja.height > 0) ||
+          !(espacio.ancho > 0) || !(espacio.alto > 0)) return;
+      const x = (e.clientX - caja.left) * (espacio.ancho / caja.width);
+      const y = (e.clientY - caja.top) * (espacio.alto / caja.height);
+      if (x >= r.x && x <= r.x + r.ancho && y >= r.y && y <= r.y + r.alto) return;
+      e.preventDefault();
+      cerrarCampoTexto();
+      canvas.dispatchEvent(new PointerEvent("pointerdown", {
+        bubbles: true, cancelable: true, clientX: e.clientX, clientY: e.clientY,
+        pointerId: e.pointerId, pointerType: e.pointerType,
+      }));
+    });
     campoTexto = campo;
   }
 
@@ -2901,10 +2922,11 @@ export function crearPreviaPanel({ hospedador, proyecto, estadoPestana, editor, 
       if (!(ancho > 0) || !(alto > 0) || !caja || !(caja.width > 0) || !(caja.height > 0)) return;
       const x = (e.clientX - caja.left) * (ancho / caja.width);
       const y = (e.clientY - caja.top) * (alto / caja.height);
-      // el mismo modelo reescalado que se pintó: con el tamaño de pantalla elegido, el modelo
-      // original no comparte la caja y el clic caería en otro nodo
+      // Un solo espacio de escalado para el toque: el del lienzo. El modelo se reescala aquí con
+      // las medidas del canvas, las mismas con que se convirtieron x e y; usar el tamaño de pantalla
+      // elegido mezclaba dos cajas y el toque caía en el EditText anterior.
       if (apagado) return;
-      const modelo = modeloDelEmulador();
+      const modelo = modeloParaEmulador(modeloActual(), ancho, alto);
       // Un EditText se queda con el toque: se abre el campo real y NO se entrega el clic al
       // contenedor que pueda tener listener, igual que en el framework.
       const editable = editableEnPunto(modelo, ancho, alto, x, y);
