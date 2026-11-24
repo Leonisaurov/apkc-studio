@@ -6,6 +6,10 @@ La pestaña **Dependencias** tiene dos vías y ninguna habla con Maven en tiempo
   `.jar`/`.aar` del índice, comprueba tamaño y SHA-256 y lo escribe en OPFS bajo `/deps/`.
 - **Importar desde disco** mete `.jar`/`.aar`/`.zip` del disco en `/proyecto/` sin red.
 
+Hay una tercera vía, **opt-in y apagada**: el módulo WISP, que puede pedir un artefacto por un
+relay de terceros cuando el índice no lo trae. Sin aceptar su aviso no se hace ni una petición
+fuera del origen; se documenta entero más abajo.
+
 El índice y los artefactos **no se versionan** (regla 2: nada de binarios en el repo). Este
 documento fija cómo se generan, cómo se sirven en un origen propio y cómo se publican.
 
@@ -132,3 +136,92 @@ APKC_WASM=… APK_EJEMPLO=… KS_EJEMPLO=… node prueba-pestana.js
 y `fecha`, que el índice valida y que la página lo importa. `prueba-pestana.js` comprueba que
 Resolver hace exactamente dos peticiones al mismo origen y que, sin índice, el panel dice el 404
 en vez de inventar datos.
+
+## El módulo WISP: opt-in, apagado por defecto
+
+**Por qué existe.** Maven Central hoy exige TLS y no manda cabeceras CORS, así que una página no
+puede leer sus respuestas. WISP es un proxy de sockets TCP sobre un WebSocket: un relay de terceros
+abre la conexión TCP desde su servidor y devuelve los bytes por el WebSocket, y el CORS deja de ser
+un muro. Eso rompe la regla 4 (nada fuera del origen) y por eso es un módulo **opcional** con
+aviso; el modo por defecto sigue con **cero peticiones ajenas**.
+
+**El aviso.** Al pulsar **Resolver** con el módulo sin decidir, se abre `#wisp-aviso` sin tocar la
+red. Dice las cuatro cosas que importan: (1) sirve para saltarse el CORS abriendo TCP desde el
+relay; (2) descarga **archivos extra del módulo** desde este mismo origen —el binario del núcleo
+`wasm` y la lista de relays—; (3) si el **TLS propio del núcleo** no está en esta compilación, el
+contenido viaja **en claro** por el relay y cualquiera en su camino puede leerlo o sustituirlo:
+el TLS del núcleo es la opción segura y, sin él, esto es solo para pruebas; (4) los relays son de
+**terceros y no están auditados**. Ofrece «Activar para esta sesión» y «Cancelar», con la casilla
+**«Recordar elección»** desmarcada. Cancelar deja el módulo apagado, no guarda nada y esa misma
+pulsación sigue por `deps-index.json` del propio origen.
+
+| elección | `localStorage["apkc-studio/wisp"]` | qué hace Resolver |
+| --- | --- | --- |
+| sin decidir | sin clave | abre el aviso; cero peticiones |
+| activar sin recordar | sin clave | vía WISP en esta sesión |
+| activar y recordar | `activo` | vía WISP también en próximas visitas |
+| cancelar y recordar | `inactivo` | índice del propio origen, sin volver a preguntar |
+| **Desactivar** | se borra | índice del propio origen; la próxima visita vuelve a preguntar |
+
+La elección se escribe **solo** si se marcó «Recordar elección»; por defecto no se guarda nada.
+`Desactivar` apaga el módulo y borra la clave, para que una elección vieja no resucite.
+
+**El selector de relays.** `#wisp-selector` nace **oculto** y se muestra al activar el módulo; sus
+controles están dentro de ese bloque. La lista se pide **al activar** (`./wisp-relays.json`, una
+sola petición del propio origen, nunca antes) y muestra host, latencia y «tercero». El campo de
+**URL personalizada** manda sobre la lista cuando no está vacío: es la puerta para el WISP propio
+(el local futuro). Se valida con la spec v1.2 —`wss://`, o `ws://` para uno local, y **acabar en
+«/»**— y el motivo del rechazo se pinta en `#wisp-url-estado`.
+
+**`wisp-relays.json`** (versionado; nada de binarios, es texto). Campos: `version`, `generated`
+(fecha de la medición, sin hora inventada), `note`, `spec`, `bufferPackets` y `relays`. Cada relay
+lleva `url`, `verified: true` (handshake real), `latencyMs`, `protocol: "v1"` y `bufferPackets`.
+`bufferPackets` va en **`null`** a propósito: no se midió por relay, solo se observó que el
+`CONTINUE` inicial varía entre **128 y 2147483647**, así que el cliente lo lee al conectar y nunca
+asume 128; el fichero lo declara en `bufferPackets.medidoPorRelay: false` con el rango observado.
+Ni los hosts ni las latencias se inventan: los seis salen del `§254` de `docs/evidencia.md` y son
+**pruebas, no auditoría**. La lista se **re-mide en el gate del modo externo** (el que abre un
+relay de verdad), porque la latencia de un handshake cambia y un host puede caerse.
+
+**El contrato con el núcleo.** Esta página **no** implementa WISP ni TLS: el framing v1 y el
+`crypto/tls` viven en `apkc/`, compilados a `GOOS=js`. Cuando la compilación los incluya, registrarán
+
+```js
+globalThis.apkcWisp = {
+  version: "apkc-wisp/1",
+  // relay ya validado (acaba en «/»); coordenada = grupo:artefacto:versión;
+  // destino = carpeta de OPFS donde escribir el artefacto
+  obtener({ relay, coordenada, destino }) =>
+    Promise<{ bytes: Uint8Array, sha256: string, ruta: string }>
+};
+```
+
+`destino` es `/deps/<grupo>/<artefacto>/<versión>/` (la misma forma que la vía del índice) y el
+nombre del fichero lo decide el núcleo, porque sin índice no se sabe si es `.jar` o `.aar`. Si el
+objeto no existe, `resolverPorWisp()` falla con **«núcleo WISP no disponible en esta compilación»**
+y no abre ningún socket; después de esa decisión de la persona, el panel no inventa un respaldo
+silencioso. El puente puede registrarlo la página o el worker (`hospedador.js`) por `postMessage`:
+lo que **no** cambia es la forma de llamada, que es `wisp.js`.
+
+**Qué queda del núcleo y los gates.** El framing v1 (`CONNECT`/`DATA`/`CONTINUE`/`CLOSE`, el
+`CONTINUE` inicial con `streamID` 0 y el `bufferPackets` leído), `crypto/tls` sobre el `net.Conn`
+con las CAs embebidas (`js/wasm` no trae `SystemCertPool`), el puente desde la página o el worker,
+y **dos gates**: el de por defecto, con cero peticiones ajenas, y el del modo externo, que abre un
+relay de verdad y re-mide `wisp-relays.json`. La publicación del sitio sigue pendiente de orden.
+
+**Pruebas del módulo.**
+
+- `node prueba.js`: el JSON de relays (seis, latencias medidas, sin `bufferPackets` por relay) y su
+  validador (sin handshake, sin latencia, sin barra final o con `v2`, fuera); la elección —sin
+  recordar no escribe nada, con recordar persiste activo e inactivo—; el contrato (sin núcleo dice
+  qué falta, con un núcleo de mentira recibe relay, coordenada y destino); el texto del aviso,
+  comprobado **contra el HTML que se pinta**, no contra una copia; y el panel: sin opt-in va al
+  índice del propio origen, con opt-in y sin núcleo no hace ni una petición.
+- `node prueba-pestana.js`: sin opt-in, el selector no se muestra y Resolver abre el aviso con
+  **cero** peticiones; el aviso contiene CORS, archivos extra, «en claro»/MITM y terceros;
+  «Cancelar» sigue por el índice; activar sin recordar no escribe en `localStorage` y lista los 6
+  relays con su latencia en **una** petición al propio origen; con el módulo activo y sin núcleo,
+  Resolver falla con el motivo y **cero** peticiones; una URL sin barra final se rechaza con el
+  motivo de la spec; «Recordar elección» persiste y la recarga deja el módulo activo sin volver a
+  preguntar; y la comprobación global cierra con **cero peticiones fuera del origen**.
+

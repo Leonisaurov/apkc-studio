@@ -1,0 +1,410 @@
+// Módulo WISP de apkc-studio: la puerta, el aviso y la lista de relays.
+//
+// WISP es un proxy de sockets TCP sobre un WebSocket: un relay de terceros abre la conexión TCP
+// desde su servidor, así que la respuesta de Maven llega como texto del WebSocket y el CORS deja
+// de ser un muro. Eso rompe la regla 4 (nada fuera del origen) y por eso aquí no hay nada activo
+// por defecto: la sección de dependencias sigue leyendo solo `./deps-index.json` del propio origen
+// hasta que la persona acepta el aviso.
+//
+// Este fichero NO habla WISP ni TLS. El framing v1 y el `crypto/tls` viven en el núcleo de
+// `apkc/`; aquí están el aviso, la elección de la persona, la lista de relays y el contrato con
+// ese núcleo, que se documenta en DEPS.md.
+
+export const RUTA_RELAYS = "./wisp-relays.json";
+export const CLAVE_ELECCION = "apkc-studio/wisp";
+export const VERSION_RELAYS = 1;
+// Identificador del contrato con el núcleo. Cambiarlo obliga a cambiar el núcleo y esta página a
+// la vez: no se negocia una forma a medias.
+export const CONTRATO_NUCLEO = "apkc-wisp/1";
+
+const ESQUEMA_RELAY = /^wss?:\/\//i;
+const COORDENADA = /^[^:\s]+:[^:\s]+:[^:\s]+$/;
+
+// La URL de un relay tiene que acabar en «/» (spec v1.2) y no puede llevar espacios. Se admiten
+// `wss://` (lo normal) y `ws://` para un WISP local en esta misma máquina.
+export function urlRelayValida(url) {
+  const texto = String(url == null ? "" : url).trim();
+  if (!texto) return "la URL del relay está vacía";
+  if (!ESQUEMA_RELAY.test(texto)) return "la URL del relay tiene que empezar por wss:// (o ws:// para uno local)";
+  if (/\s/.test(texto)) return "la URL del relay lleva espacios";
+  let analizada;
+  try { analizada = new URL(texto); }
+  catch (e) { return "la URL del relay no se puede analizar: " + texto; }
+  if (!analizada.host) return "la URL del relay no lleva servidor: " + texto;
+  if (!texto.endsWith("/")) return "la URL del relay tiene que acabar en «/» (spec v1.2), no en «" + texto.slice(-1) + "»";
+  return "";
+}
+
+export function hostDeRelay(url) {
+  try { return new URL(String(url || "")).host || ""; } catch (e) { return ""; }
+}
+
+// Una entrada de `wisp-relays.json` no se arregla: si falta la verificación por handshake, la
+// latencia o el protocolo, se rechaza el fichero entero en vez de pintar un relay a ojo.
+export function validarRelay(relay) {
+  if (!relay || typeof relay !== "object" || Array.isArray(relay)) return "relay vacío";
+  const problema = urlRelayValida(relay.url);
+  if (problema) return problema;
+  if (relay.verified !== true) return "el relay no consta verificado por handshake: " + relay.url;
+  if (relay.protocol !== "v1") return "protocolo no admitido: " + JSON.stringify(relay.protocol);
+  if (!Number.isInteger(relay.latencyMs) || relay.latencyMs < 0) {
+    return "latencia no medida en " + relay.url + ": " + JSON.stringify(relay.latencyMs);
+  }
+  // `bufferPackets` puede ser null: el CONTINUE inicial varía de 128 a 2147483647 y solo se conoce
+  // al abrir la conexión. Si viene medido, tiene que ser un entero positivo.
+  if (relay.bufferPackets != null &&
+      (!Number.isInteger(relay.bufferPackets) || relay.bufferPackets < 1)) {
+    return "bufferPackets no válido en " + relay.url + ": " + JSON.stringify(relay.bufferPackets);
+  }
+  return "";
+}
+
+// Lee el JSON ya parseado. Las URLs repetidas se rechazan: dos filas iguales en el selector serían
+// una elección ambigua.
+export function leerRelays(datos) {
+  if (!datos || typeof datos !== "object" || Array.isArray(datos)) throw new Error("wisp-relays.json está vacío");
+  if (datos.version !== VERSION_RELAYS) {
+    throw new Error("wisp-relays.json no tiene version " + VERSION_RELAYS);
+  }
+  if (!Array.isArray(datos.relays) || !datos.relays.length) {
+    throw new Error("wisp-relays.json no trae relays");
+  }
+  const relays = [];
+  const vistas = new Set();
+  for (const relay of datos.relays) {
+    const problema = validarRelay(relay);
+    if (problema) throw new Error("wisp-relays.json no válido: " + problema);
+    if (vistas.has(relay.url)) throw new Error("wisp-relays.json repite el relay " + relay.url);
+    vistas.add(relay.url);
+    relays.push({
+      url: relay.url, verified: relay.verified, latencyMs: relay.latencyMs,
+      protocol: relay.protocol, bufferPackets: relay.bufferPackets == null ? null : relay.bufferPackets,
+    });
+  }
+  return {
+    version: datos.version, generado: String(datos.generado || ""), nota: String(datos.note || ""),
+    spec: String(datos.spec || ""), relays,
+  };
+}
+
+// La lista se pide al propio origen y solo cuando el módulo se activa: sin opt-in no hay ni una
+// petición. `ruta` existe para la prueba; la página siempre usa `./wisp-relays.json`.
+export async function cargarRelays({ fetchImpl, ruta } = {}) {
+  const pedir = fetchImpl || globalThis.fetch;
+  const destino = ruta || RUTA_RELAYS;
+  const respuesta = await pedir(destino, { cache: "no-store", credentials: "same-origin" });
+  if (!respuesta || !respuesta.ok) {
+    throw new Error("no se pudo leer wisp-relays.json del propio origen" +
+      (respuesta && respuesta.status ? " (" + respuesta.status + ")" : ""));
+  }
+  const tipo = String((respuesta.headers && respuesta.headers.get && respuesta.headers.get("content-type")) || "");
+  if (/text\/html/i.test(tipo)) throw new Error("el origen devolvió HTML en vez de wisp-relays.json");
+  let datos;
+  try { datos = JSON.parse(await respuesta.text()); }
+  catch (e) { throw new Error("wisp-relays.json no es JSON válido"); }
+  return leerRelays(datos);
+}
+
+// --- la elección de la persona ----------------------------------------------------------------
+
+// Solo hay dos valores guardados, y solo si la persona marcó «recordar»: por defecto no se escribe
+// nada en localStorage.
+export function leerEleccion(almacen) {
+  if (!almacen || typeof almacen.getItem !== "function") return "";
+  try {
+    const valor = almacen.getItem(CLAVE_ELECCION);
+    return valor === "activo" || valor === "inactivo" ? valor : "";
+  } catch (e) { return ""; }
+}
+
+function guardarEleccion(almacen, valor) {
+  if (!almacen || typeof almacen.setItem !== "function") return false;
+  try { almacen.setItem(CLAVE_ELECCION, valor); return true; }
+  catch (e) { return false; }
+}
+
+function borrarEleccion(almacen) {
+  if (!almacen || typeof almacen.removeItem !== "function") return false;
+  try { almacen.removeItem(CLAVE_ELECCION); return true; }
+  catch (e) { return false; }
+}
+
+// El estado del módulo en esta pestaña. `decidir` fija la elección de la sesión y, solo si
+// `recordar`, la deja escrita para la próxima visita.
+export function crearEleccion({ almacen } = {}) {
+  const guardada = leerEleccion(almacen);
+  const estado = {
+    decidido: !!guardada,
+    activo: guardada === "activo",
+    origen: guardada ? "recordada en este navegador" : "sin decisión",
+  };
+  return {
+    estado,
+    activo: () => estado.activo,
+    decidido: () => estado.decidido,
+    decidir(usar, { recordar = false } = {}) {
+      estado.activo = !!usar;
+      estado.decidido = true;
+      estado.origen = recordar ? "recordada en este navegador" : "solo esta sesión";
+      if (recordar) guardarEleccion(almacen, estado.activo ? "activo" : "inactivo");
+      return estado.activo;
+    },
+    // «Desactivar» apaga el módulo y borra lo recordado: si la persona lo apagó a mano, la próxima
+    // visita vuelve a preguntar en vez de resucitar la elección vieja.
+    desactivar() {
+      estado.activo = false;
+      estado.decidido = true;
+      estado.origen = "solo esta sesión";
+      borrarEleccion(almacen);
+      return false;
+    },
+    olvidar() {
+      borrarEleccion(almacen);
+      estado.decidido = false;
+      estado.activo = false;
+      estado.origen = "sin decisión";
+    },
+    guardada: () => leerEleccion(almacen),
+  };
+}
+
+// --- el contrato con el núcleo ----------------------------------------------------------------
+
+export function nucleoDisponible(global = globalThis) {
+  const nucleo = global && global.apkcWisp;
+  return !!nucleo && nucleo.version === CONTRATO_NUCLEO && typeof nucleo.obtener === "function";
+}
+
+// La carpeta de OPFS donde el núcleo deja el artefacto, con la misma forma que usa la vía del
+// índice (`/deps/<grupo>/<artefacto>/<versión>/`). El nombre del fichero lo decide el núcleo,
+// porque sin índice no se sabe si el artefacto es `.jar` o `.aar`.
+export function destinoDeCoordenada(coordenada) {
+  const partes = String(coordenada == null ? "" : coordenada).trim().split(":");
+  if (partes.length !== 3 || partes.some((p) => !/^[A-Za-z0-9][A-Za-z0-9._+-]*$/.test(p) || p.includes(".."))) {
+    throw new Error("la coordenada no tiene la forma grupo:artefacto:versión: " + JSON.stringify(coordenada));
+  }
+  return "/deps/" + partes.join("/") + "/";
+}
+
+// La llamada al núcleo. Sin él, el error dice exactamente qué falta y no se abre ningún socket:
+// esta página no trae cliente WISP ni cliente TLS en JavaScript (ver DEPS.md).
+export async function resolverPorWisp({ relay, coordenada, destino, hospedador, global = globalThis } = {}) {
+  const problema = urlRelayValida(relay);
+  if (problema) throw new Error(problema);
+  const coord = String(coordenada == null ? "" : coordenada).trim();
+  if (!coord) throw new Error("escribe una coordenada Maven: grupo:artefacto:versión");
+  if (!COORDENADA.test(coord)) throw new Error("la coordenada no tiene la forma grupo:artefacto:versión: " + JSON.stringify(coord));
+  if (!hospedador || typeof hospedador.escribir !== "function") {
+    throw new Error("no hay OPFS donde guardar el artefacto");
+  }
+  if (!nucleoDisponible(global)) {
+    throw new Error("núcleo WISP no disponible en esta compilación: el módulo no está construido en " +
+      "esta página, así que no se abre ningún relay; Resolver sigue limitado a deps-index.json del propio origen");
+  }
+  const respuesta = await global.apkcWisp.obtener({
+    version: CONTRATO_NUCLEO, relay: String(relay).trim(), coordenada: coord,
+    destino: destino || destinoDeCoordenada(coord),
+  });
+  if (!respuesta || !respuesta.bytes || !respuesta.bytes.length) {
+    throw new Error("el núcleo WISP no devolvió bytes para " + coord);
+  }
+  return respuesta;
+}
+
+// --- el aviso ---------------------------------------------------------------------------------
+
+// Lo que el aviso tiene que decir, en el orden en que importa. La prueba comprueba las cuatro
+// ideas sobre el texto que se pinta en `index.html`, no sobre una copia: si alguien suaviza el
+// aviso, la comprobación falla.
+export const AVISO = [
+  "El módulo WISP es opcional y está apagado.",
+  "Sirve para saltarse el CORS: Maven no manda cabeceras CORS y un relay WISP abre la conexión TCP desde su servidor, así que la respuesta llega por el WebSocket como si fuera del mismo origen.",
+  "Descarga archivos extra del módulo desde este mismo origen: el binario del núcleo WISP (wasm) y su lista de relays.",
+  "Si el núcleo TLS propio no está en esta compilación, el contenido viaja en claro por el relay: el relay, y cualquiera en su camino, puede leerlo y sustituirlo (MITM).",
+  "Los relays de la lista son de terceros y no están auditados: nadie revisó quién los opera.",
+];
+
+// --- el panel ---------------------------------------------------------------------------------
+
+// Engancha el bloque del panel y el diálogo del aviso. Devuelve una API pequeña para que el panel
+// de dependencias decida antes de tocar la red:
+//   asegurarDecision() -> Promise<boolean>   (abre el aviso solo si no hay decisión)
+//   activo() / relayActual() / desactivar()
+export function crearPanelWisp({ hospedador, almacen, fetchImpl, documento } = {}) {
+  const doc = documento || (typeof document === "undefined" ? null : document);
+  const porId = (id) => (doc && typeof doc.getElementById === "function" ? doc.getElementById(id) : null);
+  const eleccion = crearEleccion({ almacen: almacen || (typeof localStorage === "undefined" ? null : localStorage) });
+
+  const estadoTexto = porId("wisp-estado");
+  const botonActivar = porId("wisp-activar");
+  const botonDesactivar = porId("wisp-desactivar");
+  const selector = porId("wisp-selector");
+  const lista = porId("wisp-relay");
+  const urlPropia = porId("wisp-url");
+  const urlEstado = porId("wisp-url-estado");
+  const aviso = porId("wisp-aviso");
+  const recordar = porId("wisp-recordar");
+
+  let relays = null;
+  let cargando = null;
+  let cargaError = "";
+  let resolverAviso = null;
+
+  const decir = (texto, clase) => {
+    if (!estadoTexto) return;
+    estadoTexto.textContent = texto;
+    estadoTexto.classList.toggle("mal", clase === "mal");
+    estadoTexto.classList.toggle("bien", clase === "bien");
+  };
+
+  const pintar = () => {
+    const activo = eleccion.activo();
+    if (selector) selector.hidden = !activo;
+    if (botonDesactivar) botonDesactivar.hidden = !activo;
+    if (botonActivar) botonActivar.hidden = activo;
+    if (!activo) {
+      decir("módulo desactivado: Resolver solo lee deps-index.json del propio origen y no hace " +
+        "ninguna petición fuera de él");
+      return;
+    }
+    if (cargaError) {
+      decir("módulo activo (" + eleccion.estado.origen + "), pero no se pudo leer wisp-relays.json: " +
+        cargaError, "mal");
+      return;
+    }
+    const nota = relays
+      ? relays.relays.length + " relays conocidos, de terceros y sin auditar; la latencia es la de " +
+        "un handshake de prueba y cambia"
+      : "cargando la lista de relays del propio origen…";
+    decir("módulo activo (" + eleccion.estado.origen + "): " + nota, "bien");
+  };
+
+  // La lista se pide una sola vez, al activar el módulo. Si el fichero no está, el módulo queda
+  // activo y el panel lo dice: no se inventan relays.
+  const cargar = () => {
+    if (relays) return Promise.resolve(relays);
+    if (cargando) return cargando;
+    cargando = (async () => {
+      try {
+        const leidos = await cargarRelays({ fetchImpl });
+        relays = leidos;
+        cargaError = "";
+        if (lista) {
+          lista.textContent = "";
+          if (doc && typeof doc.createElement === "function") {
+            for (const relay of leidos.relays) {
+              const opcion = doc.createElement("option");
+              opcion.value = relay.url;
+              opcion.textContent = hostDeRelay(relay.url) + " · " + relay.latencyMs + " ms · tercero";
+              lista.appendChild(opcion);
+            }
+          }
+        }
+        return leidos;
+      } catch (e) {
+        relays = null;
+        cargaError = String((e && e.message) || e);
+        throw e;
+      } finally {
+        cargando = null;
+        pintar();
+      }
+    })();
+    return cargando;
+  };
+
+  const cerrarAviso = (usar) => {
+    const persistir = !!(recordar && recordar.checked);
+    if (usar) eleccion.decidir(true, { recordar: persistir });
+    else eleccion.decidir(false, { recordar: persistir });
+    if (aviso && typeof aviso.close === "function" && aviso.open) aviso.close();
+    const pendiente = resolverAviso;
+    resolverAviso = null;
+    pintar();
+    if (usar) cargar().catch(() => { /* el aviso ya lo dice */ });
+    if (typeof pendiente === "function") pendiente(usar);
+    return usar;
+  };
+
+  // Si no hay diálogo en el documento (la prueba de node, un panel suelto), la decisión segura es
+  // no activar el módulo: el modo por defecto no puede romperse por un elemento que falta.
+  const abrirAviso = () => {
+    if (!aviso || typeof aviso.showModal !== "function") {
+      return Promise.resolve(false);
+    }
+    if (recordar) recordar.checked = false;
+    return new Promise((resolver) => {
+      resolverAviso = resolver;
+      try { aviso.showModal(); }
+      catch (e) { resolverAviso = null; resolver(false); }
+    });
+  };
+
+  const asegurarDecision = async () => {
+    if (eleccion.decidido()) return eleccion.activo();
+    return abrirAviso();
+  };
+
+  const relayActual = () => {
+    const propia = urlPropia && typeof urlPropia.value === "string" ? urlPropia.value.trim() : "";
+    if (propia) {
+      const problema = urlRelayValida(propia);
+      if (problema) throw new Error(problema);
+      return propia;
+    }
+    const elegida = lista && typeof lista.value === "string" ? lista.value.trim() : "";
+    if (!elegida) throw new Error("elige un relay de la lista o escribe la URL de tu WISP");
+    const problema = urlRelayValida(elegida);
+    if (problema) throw new Error(problema);
+    return elegida;
+  };
+
+  const alEscribirUrl = () => {
+    if (!urlEstado) return;
+    const propia = urlPropia && typeof urlPropia.value === "string" ? urlPropia.value.trim() : "";
+    if (!propia) {
+      urlEstado.textContent = "vacío: se usa el relay elegido en la lista";
+      urlEstado.classList.remove("mal", "bien");
+      return;
+    }
+    const problema = urlRelayValida(propia);
+    urlEstado.textContent = problema || "URL válida: se usará esta y no la de la lista";
+    urlEstado.classList.toggle("mal", !!problema);
+    urlEstado.classList.toggle("bien", !problema);
+  };
+
+  if (botonActivar) botonActivar.addEventListener("click", () => { abrirAviso(); });
+  if (botonDesactivar) botonDesactivar.addEventListener("click", () => {
+    eleccion.desactivar();
+    pintar();
+  });
+  if (urlPropia) urlPropia.addEventListener("input", alEscribirUrl);
+  const botonAceptar = porId("wisp-aviso-activar");
+  const botonCancelar = porId("wisp-aviso-cancelar");
+  if (botonAceptar) botonAceptar.addEventListener("click", (evento) => { if (evento) evento.preventDefault(); cerrarAviso(true); });
+  if (botonCancelar) botonCancelar.addEventListener("click", (evento) => { if (evento) evento.preventDefault(); cerrarAviso(false); });
+  if (aviso) aviso.addEventListener("cancel", (evento) => { evento.preventDefault(); cerrarAviso(false); });
+
+  // Antes de pintar, la lista puede venir de «recordar elección»: se carga ya, y sigue siendo una
+  // petición del propio origen (el módulo está activo por decisión previa de la persona).
+  pintar();
+  if (eleccion.activo()) cargar().catch(() => { /* el aviso ya lo dice */ });
+
+  return {
+    asegurarDecision, abrirAviso, relayActual, cargar,
+    activo: () => eleccion.activo(),
+    decidido: () => eleccion.decidido(),
+    desactivar: () => { eleccion.desactivar(); pintar(); },
+    relays: () => relays,
+    eleccion,
+    pintar,
+    // Fija la elección sin pasar por el diálogo: lo usan las pruebas de node, y sirve para un
+    // enganche futuro que ya haya preguntado por su cuenta.
+    decidir: (usar, opciones) => {
+      const activo = eleccion.decidir(usar, opciones);
+      pintar();
+      if (activo) cargar().catch(() => { /* el panel ya lo dice */ });
+      return activo;
+    },
+  };
+}

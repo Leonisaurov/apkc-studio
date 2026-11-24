@@ -1099,6 +1099,12 @@ o lo cierra, y ``Ctrl + ` `` conserva la pestaña activa.
   `.github/workflows/deps-maven.yml` en el runner y se sirve estático. Si el índice no existe,
   `#deps-estado` lo dice y manda al workflow; no se inventan coordenadas ni hashes. La sección no
   resuelve el grafo: importa lo que el índice publicó, sin transitivas.
+  Al pulsar con el **módulo WISP sin decidir** se abre `#wisp-aviso` antes de tocar la red: es
+  opt-in y está apagado (`#wisp-estado`, `#wisp-activar`, `#wisp-desactivar`, `#wisp-selector`,
+  `#wisp-relay`, `#wisp-url`, `#wisp-url-estado`, `#wisp-recordar`, `#wisp-aviso-activar`,
+  `#wisp-aviso-cancelar`). «Cancelar» deja esa pulsación en el índice del propio origen; activar
+  enseña el selector con `./wisp-relays.json`, que es del propio origen, y sin el núcleo de
+  `apkc/` Resolver falla con «núcleo WISP no disponible en esta compilación». Detalle en `DEPS.md`.
   La segunda vía es **local y sin red**: `#deps-ficheros` (`.jar`/`.aar` múltiples) o soltar un
   `.zip` en `#deps-soltar`; el progreso va en `#deps-progreso`, el aviso en `#deps-importar-estado`
   y el resultado en `#deps-importado` (`#deps-importado-ficheros`, `#deps-importado-bytes`,

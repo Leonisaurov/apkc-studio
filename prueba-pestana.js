@@ -5778,13 +5778,46 @@ async function conductor() {
       peticiones.length === antesAbrir,
       JSON.stringify(abierta) + " | " + (peticiones.length - antesAbrir) + " peticiones al abrir");
 
-    // un clic importa el artefacto del índice falso y lo deja en OPFS bajo /deps/
+    // un clic ya no va directo a la red: con el módulo WISP sin decidir, abre su aviso. Sin
+    // opt-in el selector de relays ni se ve y el panel dice que está apagado.
+    const sinOptIn = await evaluar(`(() => ({
+      selectorOculto: document.getElementById("wisp-selector").hidden,
+      relays: document.getElementById("wisp-relay").children.length,
+      estado: document.getElementById("wisp-estado").textContent,
+      recordar: document.getElementById("wisp-recordar").checked,
+    }))()`);
+    comprueba("sin opt-in el selector de relays no se muestra y el panel dice que está apagado",
+      sinOptIn.selectorOculto === true && sinOptIn.relays === 0 &&
+      /desactivado/.test(String(sinOptIn.estado)) && sinOptIn.recordar === false,
+      JSON.stringify(sinOptIn).slice(0, 260));
+
     const antesResolver = peticiones.length;
     await evaluar(`(() => {
       document.getElementById("deps-coordenada").value = ${JSON.stringify(coordFalsa)};
       document.getElementById("deps-resolver").click();
       return true;
     })()`);
+    let aviso = null;
+    for (let i = 0; i < 60; i++) {
+      aviso = await evaluar(`(() => {
+        const d = document.getElementById("wisp-aviso");
+        return { abierto: d.open === true, texto: document.getElementById("wisp-aviso-cuerpo").textContent };
+      })()`);
+      if (aviso.abierto) break;
+      await esperar(200);
+    }
+    comprueba("Resolver con el módulo apagado abre el aviso sin hacer ni una petición",
+      aviso && aviso.abierto === true && peticiones.length === antesResolver,
+      JSON.stringify({ abierto: aviso && aviso.abierto,
+        peticiones: peticiones.length - antesResolver }).slice(0, 260));
+    comprueba("el aviso dice CORS, archivos extra del módulo, contenido en claro y terceros",
+      /CORS/.test(String(aviso && aviso.texto)) && /archivos extra/.test(String(aviso && aviso.texto)) &&
+      /en claro/.test(String(aviso && aviso.texto)) && /MITM/.test(String(aviso && aviso.texto)) &&
+      /auditados/.test(String(aviso && aviso.texto)),
+      String(aviso && aviso.texto).slice(0, 300));
+
+    // Cancelar deja el módulo apagado y esta misma pulsación sigue por el índice del propio origen
+    await evaluar(`(() => { document.getElementById("wisp-aviso-cancelar").click(); return true; })()`);
     let resuelto = null;
     for (let i = 0; i < 120; i++) {
       resuelto = await evaluar(`(() => ({
@@ -5887,6 +5920,190 @@ async function conductor() {
       !u.startsWith("http://127.0.0.1:" + PUERTO) && !/^(?:data|blob):/.test(u));
     comprueba("la sección de dependencias no pide nada fuera del origen",
       ajenasDeps.length === 0, ajenasDeps.slice(0, 3).join(", ") || "cero peticiones ajenas");
+  }
+
+  // 31. el módulo WISP: el aviso, la elección, el selector de relays y el cable al núcleo. Aquí no
+  //     hay núcleo TLS, así que activar el módulo tiene que acabar en un error explícito y en cero
+  //     peticiones ajenas: la lista de relays es del propio origen.
+  {
+    const claveWisp = "apkc-studio/wisp";
+    const antesWisp = peticiones.length;
+    const contarRelays = () => peticiones.filter((u) => {
+      try { return new URL(u).pathname === "/wisp-relays.json"; } catch (e) { return false; }
+    }).length;
+    const relaysAntes = contarRelays();
+
+    // el botón del panel abre el mismo aviso, con «recordar» siempre desmarcado al abrir
+    await evaluar(`(() => {
+      document.getElementById("wisp-recordar").checked = true;
+      document.getElementById("wisp-activar").click();
+      return true;
+    })()`);
+    let avisoBoton = null;
+    for (let i = 0; i < 60; i++) {
+      avisoBoton = await evaluar(`(() => {
+        const d = document.getElementById("wisp-aviso");
+        return { abierto: d.open === true, recordar: document.getElementById("wisp-recordar").checked };
+      })()`);
+      if (avisoBoton.abierto) break;
+      await esperar(200);
+    }
+    comprueba("el botón del panel abre el aviso y no hereda un «recordar» viejo",
+      avisoBoton && avisoBoton.abierto === true && avisoBoton.recordar === false,
+      JSON.stringify(avisoBoton).slice(0, 200));
+
+    // activar sin recordar: el selector aparece con los seis relays y su latencia, y no se guarda
+    await evaluar(`(() => { document.getElementById("wisp-aviso-activar").click(); return true; })()`);
+    let activo = null;
+    for (let i = 0; i < 60; i++) {
+      activo = await evaluar(`(() => {
+        const lista = document.getElementById("wisp-relay");
+        return {
+          abierto: document.getElementById("wisp-aviso").open,
+          selectorVisible: !document.getElementById("wisp-selector").hidden,
+          opciones: [...lista.options].map((o) => o.textContent),
+          estado: document.getElementById("wisp-estado").textContent,
+          guardado: localStorage.getItem(${JSON.stringify(claveWisp)}),
+        };
+      })()`);
+      if (activo.opciones.length === 6) break;
+      await esperar(300);
+    }
+    comprueba("activar sin recordar muestra los 6 relays con su latencia y no guarda la elección",
+      activo && activo.abierto === false && activo.selectorVisible === true &&
+      activo.opciones.length === 6 && /400 ms/.test(String(activo.opciones[0])) &&
+      /tercero/.test(String(activo.opciones[0])) && activo.guardado === null &&
+      /activo/.test(String(activo.estado)),
+      JSON.stringify({ opciones: activo && activo.opciones.slice(0, 2), guardado: activo && activo.guardado,
+        estado: String(activo && activo.estado).slice(0, 140) }).slice(0, 360));
+    comprueba("la lista de relays es una sola petición y del propio origen",
+      contarRelays() - relaysAntes === 1 &&
+      peticiones.slice(antesWisp).every((u) => u.startsWith("http://127.0.0.1:" + PUERTO)),
+      (contarRelays() - relaysAntes) + " peticiones a /wisp-relays.json");
+
+    // con el módulo activo y sin núcleo, Resolver lo dice y no abre ningún relay
+    const antesNucleo = peticiones.length;
+    await evaluar(`(() => {
+      document.getElementById("deps-coordenada").value = ${JSON.stringify(coordFalsa)};
+      document.getElementById("deps-resolver").click();
+      return true;
+    })()`);
+    let sinNucleo = null;
+    for (let i = 0; i < 60; i++) {
+      sinNucleo = await evaluar(`(() => ({
+        estado: document.getElementById("deps-estado").textContent,
+        visible: !document.getElementById("deps-resultado").hidden,
+      }))()`);
+      if (/^error/.test(String(sinNucleo.estado))) break;
+      await esperar(300);
+    }
+    comprueba("con el módulo activo y sin núcleo, Resolver falla con el motivo y sin peticiones",
+      /^error/.test(String(sinNucleo.estado)) &&
+      /núcleo WISP no disponible en esta compilación/.test(String(sinNucleo.estado)) &&
+      sinNucleo.visible === false && peticiones.length === antesNucleo,
+      JSON.stringify({ estado: String(sinNucleo.estado).slice(0, 200),
+        peticiones: peticiones.length - antesNucleo }).slice(0, 320));
+
+    // una URL personalizada sin barra final se rechaza con el motivo de la spec, antes de la red
+    const conUrlPropia = await evaluar(`(() => {
+      document.getElementById("wisp-url").value = "wss://mi-wisp.local/wisp";
+      document.getElementById("wisp-url").dispatchEvent(new Event("input"));
+      const malo = document.getElementById("wisp-url-estado").textContent;
+      document.getElementById("wisp-url").value = "wss://mi-wisp.local/wisp/";
+      document.getElementById("wisp-url").dispatchEvent(new Event("input"));
+      const bueno = document.getElementById("wisp-url-estado").textContent;
+      return { malo, bueno, bienMarcado: document.getElementById("wisp-url-estado").classList.contains("bien") };
+    })()`);
+    comprueba("la URL personalizada avisa de la barra final que exige la spec v1.2",
+      /acabar en «\/»/.test(String(conUrlPropia.malo)) && /válida/.test(String(conUrlPropia.bueno)) &&
+      conUrlPropia.bienMarcado === true,
+      JSON.stringify(conUrlPropia).slice(0, 300));
+
+    // Desactivar apaga y olvida: no queda nada guardado
+    const trasApagar = await evaluar(`(() => {
+      document.getElementById("wisp-desactivar").click();
+      return {
+        selectorVisible: !document.getElementById("wisp-selector").hidden,
+        guardado: localStorage.getItem(${JSON.stringify(claveWisp)}),
+        estado: document.getElementById("wisp-estado").textContent,
+      };
+    })()`);
+    comprueba("Desactivar oculta el selector y no deja elección guardada",
+      trasApagar.selectorVisible === false && trasApagar.guardado === null &&
+      /desactivado/.test(String(trasApagar.estado)),
+      JSON.stringify(trasApagar).slice(0, 260));
+
+    // «Recordar elección» sí persiste, y se recupera al recargar sin volver a preguntar
+    await evaluar(`(() => {
+      document.getElementById("wisp-activar").click();
+      return true;
+    })()`);
+    for (let i = 0; i < 60 && !(await evaluar(`document.getElementById("wisp-aviso").open`)); i++) {
+      await esperar(200);
+    }
+    await evaluar(`(() => {
+      document.getElementById("wisp-recordar").checked = true;
+      document.getElementById("wisp-aviso-activar").click();
+      return true;
+    })()`);
+    let recordada = null;
+    for (let i = 0; i < 60; i++) {
+      recordada = await evaluar(`(() => ({
+        guardado: localStorage.getItem(${JSON.stringify(claveWisp)}),
+        selectorVisible: !document.getElementById("wisp-selector").hidden,
+      }))()`);
+      if (recordada.guardado === "activo") break;
+      await esperar(200);
+    }
+    comprueba("«Recordar elección» guarda el módulo activo en localStorage",
+      recordada && recordada.guardado === "activo" && recordada.selectorVisible === true,
+      JSON.stringify(recordada).slice(0, 200));
+
+    await exec("Page.navigate", { url: URL_PAGINA });
+    let trasRecarga = null;
+    for (let i = 0; i < 100; i++) {
+      try {
+        trasRecarga = await evaluar(`({
+          listo: typeof abrir === "function",
+          selectorVisible: !document.getElementById("wisp-selector").hidden,
+          estado: document.getElementById("wisp-estado").textContent,
+          guardado: localStorage.getItem(${JSON.stringify(claveWisp)}),
+        })`);
+        if (trasRecarga.listo) break;
+      } catch (e) { /* aún carga */ }
+      await esperar(300);
+    }
+    comprueba("al recargar, la elección recordada deja el módulo activo sin volver a preguntar",
+      trasRecarga && trasRecarga.listo === true && trasRecarga.selectorVisible === true &&
+      trasRecarga.guardado === "activo" && /activo/.test(String(trasRecarga.estado)),
+      JSON.stringify(trasRecarga).slice(0, 260));
+
+    // y una URL propia seguida de un Resolver sigue sin abrir nada sin núcleo: el aviso ya no
+    // aparece porque la elección está recordada
+    const antesFinal = peticiones.length;
+    await evaluar(`(() => {
+      document.getElementById("deps-coordenada").value = ${JSON.stringify(coordFalsa)};
+      document.getElementById("deps-resolver").click();
+      return true;
+    })()`);
+    let finalWisp = null;
+    for (let i = 0; i < 60; i++) {
+      finalWisp = await evaluar(`(() => ({
+        estado: document.getElementById("deps-estado").textContent,
+        aviso: document.getElementById("wisp-aviso").open,
+      }))()`);
+      if (/^(listo|error)/.test(String(finalWisp.estado))) break;
+      await esperar(300);
+    }
+    comprueba("con la elección recordada, Resolver no vuelve a pedir permiso y falla por el núcleo",
+      finalWisp && finalWisp.aviso === false &&
+      /núcleo WISP no disponible en esta compilación/.test(String(finalWisp.estado)) &&
+      peticiones.length === antesFinal,
+      JSON.stringify({ aviso: finalWisp && finalWisp.aviso,
+        estado: String(finalWisp && finalWisp.estado).slice(0, 200) }).slice(0, 320));
+
+    // limpieza: la prueba no deja una elección que cambie el resto del navegador
+    await evaluar(`(() => { document.getElementById("wisp-desactivar").click(); localStorage.removeItem(${JSON.stringify(claveWisp)}); return true; })()`);
   }
 
   // requisito del proyecto, escrito como comprobación: la pestaña no puede pedir nada fuera de

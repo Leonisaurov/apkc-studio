@@ -1,0 +1,55 @@
+{
+  "version": 1,
+  "generated": "2026-11-23",
+  "note": "Relays WISP de terceros, verificados con un handshake real y NO auditados: nadie revisó quién los opera. Están aquí para probar el módulo opt-in; el uso normal es un WISP propio, con la URL personalizada del panel.",
+  "spec": "wisp v1.2 (CC-BY-4.0, github.com/MercuryWorkshop/wisp-protocol, rama v1)",
+  "bufferPackets": {
+    "medidoPorRelay": false,
+    "rangoObservado": [128, 2147483647],
+    "nota": "El CONTINUE inicial varía entre relays y no se midió por relay: el cliente lee el valor y se gobierna por él; aquí nunca se asume 128."
+  },
+  "relays": [
+    {
+      "url": "wss://wisp.mercurywork.shop/wisp/",
+      "verified": true,
+      "latencyMs": 400,
+      "protocol": "v1",
+      "bufferPackets": null
+    },
+    {
+      "url": "wss://terbiumon.top/wisp/",
+      "verified": true,
+      "latencyMs": 430,
+      "protocol": "v1",
+      "bufferPackets": null
+    },
+    {
+      "url": "wss://anura.pro/wisp/",
+      "verified": true,
+      "latencyMs": 447,
+      "protocol": "v1",
+      "bufferPackets": null
+    },
+    {
+      "url": "wss://lichology.com/wisp/",
+      "verified": true,
+      "latencyMs": 509,
+      "protocol": "v1",
+      "bufferPackets": null
+    },
+    {
+      "url": "wss://wisp.waved.site/w/",
+      "verified": true,
+      "latencyMs": 515,
+      "protocol": "v1",
+      "bufferPackets": null
+    },
+    {
+      "url": "wss://gointospace.app/wisp/",
+      "verified": true,
+      "latencyMs": 519,
+      "protocol": "v1",
+      "bufferPackets": null
+    }
+  ]
+}

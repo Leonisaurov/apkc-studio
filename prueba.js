@@ -17,6 +17,7 @@ import * as xmlEditor from "./xml-editor.js";
 import * as vistaXml from "./vista-xml.js";
 import * as layoutEditor from "./layout-editor.js";
 import * as depsMod from "./deps.js";
+import * as wispMod from "./wisp.js";
 import { bufferDelManifiesto } from "./ajustes.js";
 import { crearFs } from "./fs-fragmento.js";
 
@@ -234,7 +235,8 @@ const pestana = fs.readFileSync(path.join(__dirname, "pestana.js"), "utf8");
 for (const m of pestana.matchAll(/getElementById\("([^"]+)"\)/g))
   if (!ids.has(m[1])) mal(`pestana.js pide #${m[1]} y index.html no lo tiene`);
 for (const fichero of ["diagnostico.js", "temas.js", "historial.js", "vista-previa.js",
-  "previa-panel.js", "autocompletado.js", "diagnostico-vivo.js", "layout-editor.js", "deps.js"]) {
+  "previa-panel.js", "autocompletado.js", "diagnostico-vivo.js", "layout-editor.js", "deps.js",
+  "wisp.js"]) {
   const fuente = fs.readFileSync(path.join(__dirname, fichero), "utf8");
   for (const m of fuente.matchAll(/getElementById\("([^"]+)"\)/g))
     if (!ids.has(m[1])) mal(`${fichero} pide #${m[1]} y index.html no lo tiene`);
@@ -3322,6 +3324,276 @@ public final class R {
         if (!yml.includes(pieza)) mal("deps-maven.yml no menciona " + pieza);
       }
       if (/deps-proxy/.test(yml)) mal("deps-maven.yml habla de un proxy en tiempo de ejecución");
+    }
+  }
+
+  // 13b. el módulo WISP es opcional y apagado: la puerta, el aviso, la lista de relays y el
+  //      contrato con el núcleo. Aquí no se abre ningún socket: el núcleo no existe en esta
+  //      compilación y `resolverPorWisp` tiene que decirlo, no intentarlo.
+  {
+    // la lista versionada: seis relays medidos el 2026-11-23, con su latencia y sin auditoría
+    const crudoRelays = JSON.parse(fs.readFileSync(path.join(__dirname, "wisp-relays.json"), "utf8"));
+    if (!/^\d{4}-\d{2}-\d{2}/.test(String(crudoRelays.generated))) {
+      mal("wisp-relays.json no lleva la fecha de la medición");
+    }
+    if (!/terceros/i.test(String(crudoRelays.note)) || !/auditad/i.test(String(crudoRelays.note))) {
+      mal("wisp-relays.json no avisa de que los relays son de terceros y no están auditados");
+    }
+    if (!crudoRelays.bufferPackets || crudoRelays.bufferPackets.medidoPorRelay !== false) {
+      mal("wisp-relays.json no declara que bufferPackets no se midió por relay");
+    }
+    const rango = crudoRelays.bufferPackets && crudoRelays.bufferPackets.rangoObservado;
+    if (!Array.isArray(rango) || rango[0] !== 128 || rango[1] !== 2147483647) {
+      mal("wisp-relays.json no registra el rango observado de bufferPackets (128..2147483647)");
+    }
+    const verificado = wispMod.leerRelays(crudoRelays);
+    if (verificado.relays.length !== 6) {
+      mal("wisp-relays.json debería traer los 6 relays medidos: " + verificado.relays.length);
+    }
+    const latencias = {
+      "wss://wisp.mercurywork.shop/wisp/": 400, "wss://terbiumon.top/wisp/": 430,
+      "wss://anura.pro/wisp/": 447, "wss://lichology.com/wisp/": 509,
+      "wss://wisp.waved.site/w/": 515, "wss://gointospace.app/wisp/": 519,
+    };
+    for (const relay of verificado.relays) {
+      if (latencias[relay.url] !== relay.latencyMs) {
+        mal("la latencia de " + relay.url + " no es la medida: " + relay.latencyMs);
+      }
+      if (!relay.url.endsWith("/") || relay.protocol !== "v1" || relay.verified !== true ||
+          relay.bufferPackets !== null) {
+        mal("relay mal descrito en wisp-relays.json: " + JSON.stringify(relay));
+      }
+    }
+
+    // el validador no arregla nada: sin handshake, sin latencia, sin barra final o con v2, fuera
+    for (const roto of [
+      { ...verificado.relays[0], url: "wss://wisp.mercurywork.shop/wisp" },
+      { ...verificado.relays[0], verified: false },
+      { ...verificado.relays[0], latencyMs: null },
+      { ...verificado.relays[0], protocol: "v2" },
+      { ...verificado.relays[0], bufferPackets: 0 },
+    ]) {
+      if (!wispMod.validarRelay(roto)) mal("validarRelay acepta un relay roto: " + JSON.stringify(roto).slice(0, 120));
+    }
+    for (const malo of ["wss://x/wisp", "http://x/wisp/", "wss:// /wisp/", "", "x"]) {
+      if (!wispMod.urlRelayValida(malo)) mal("urlRelayValida acepta una URL rota: " + JSON.stringify(malo));
+    }
+    if (wispMod.urlRelayValida("wss://wisp.local/wisp/") !== "" ||
+        wispMod.urlRelayValida("ws://127.0.0.1:8080/") !== "") {
+      mal("urlRelayValida rechaza un relay que la spec v1.2 admite");
+    }
+    let relaysRepetidos = "";
+    try { wispMod.leerRelays({ version: 1, relays: [verificado.relays[0], verificado.relays[0]] }); }
+    catch (e) { relaysRepetidos = String(e && e.message ? e.message : e); }
+    if (!/repite/.test(relaysRepetidos)) mal("wisp-relays.json acepta dos veces el mismo relay");
+
+    // la elección: por defecto no se guarda nada; «recordar» es lo único que escribe
+    const almacen = {
+      datos: new Map(),
+      getItem(k) { return this.datos.has(k) ? this.datos.get(k) : null; },
+      setItem(k, v) { this.datos.set(k, v); },
+      removeItem(k) { this.datos.delete(k); },
+    };
+    const eleccion = wispMod.crearEleccion({ almacen });
+    if (eleccion.decidido() || eleccion.activo() || eleccion.guardada() !== "") {
+      mal("el módulo WISP arranca decidido o activo sin preguntar");
+    }
+    if (!/sin decisión/.test(eleccion.estado.origen)) mal("el estado inicial del módulo no es «sin decisión»");
+    eleccion.decidir(true, { recordar: false });
+    if (!eleccion.activo() || almacen.datos.size !== 0) {
+      mal("«activar para esta sesión» escribe en localStorage: " + JSON.stringify([...almacen.datos]));
+    }
+    if (wispMod.crearEleccion({ almacen }).decidido()) {
+      mal("una elección sin recordar se lee como si estuviera guardada");
+    }
+    eleccion.decidir(true, { recordar: true });
+    if (almacen.datos.get(wispMod.CLAVE_ELECCION) !== "activo") {
+      mal("«recordar elección» no guarda el módulo activo");
+    }
+    const recordada = wispMod.crearEleccion({ almacen });
+    if (!recordada.decidido() || !recordada.activo() || !/recordada/.test(recordada.estado.origen)) {
+      mal("una elección recordada no se recupera al arrancar");
+    }
+    recordada.decidir(false, { recordar: true });
+    if (almacen.datos.get(wispMod.CLAVE_ELECCION) !== "inactivo") {
+      mal("«recordar» no guarda también la decisión de no usar el módulo");
+    }
+    recordada.desactivar();
+    if (almacen.datos.size !== 0 || recordada.decidido() !== true) {
+      mal("«Desactivar» no borra la elección recordada y la deja decidida en la sesión");
+    }
+
+    // el contrato con el núcleo: sin él no se abre nada; con él se le pasan relay, coordenada y
+    // destino de OPFS, sin que esta página hable WISP
+    const hospedadorFalso = { escribir: async () => ({ tipo: "escrito" }), leer: async () => null };
+    if (wispMod.nucleoDisponible()) mal("nucleoDisponible ve un núcleo que esta compilación no tiene");
+    let sinNucleo = "";
+    try {
+      await wispMod.resolverPorWisp({
+        relay: "wss://wisp.local/wisp/", coordenada: "com.example:prueba:1.0", hospedador: hospedadorFalso,
+      });
+    } catch (e) { sinNucleo = String(e && e.message ? e.message : e); }
+    if (!/núcleo WISP no disponible en esta compilación/.test(sinNucleo)) {
+      mal("sin núcleo, resolverPorWisp no dice qué falta: " + sinNucleo);
+    }
+    const visto = {};
+    const globalConNucleo = {
+      apkcWisp: {
+        version: "apkc-wisp/1",
+        obtener: async (peticion) => {
+          Object.assign(visto, peticion);
+          return { bytes: new Uint8Array([1, 2, 3]), sha256: "ff", ruta: peticion.destino + "prueba-1.0.jar" };
+        },
+      },
+    };
+    const conNucleo = await wispMod.resolverPorWisp({
+      relay: "wss://wisp.local/wisp/", coordenada: "com.example:prueba:1.0",
+      hospedador: hospedadorFalso, global: globalConNucleo,
+    });
+    if (!conNucleo || conNucleo.bytes.length !== 3 ||
+        visto.relay !== "wss://wisp.local/wisp/" || visto.coordenada !== "com.example:prueba:1.0" ||
+        visto.destino !== "/deps/com.example/prueba/1.0/") {
+      mal("el contrato del núcleo no recibe relay, coordenada y destino: " + JSON.stringify(visto));
+    }
+    let relaySinBarra = "";
+    try {
+      await wispMod.resolverPorWisp({
+        relay: "wss://wisp.local/wisp", coordenada: "com.example:prueba:1.0",
+        hospedador: hospedadorFalso, global: globalConNucleo,
+      });
+    } catch (e) { relaySinBarra = String(e && e.message ? e.message : e); }
+    if (!/acabar en «\/»/.test(relaySinBarra)) mal("el relay sin barra final no se rechaza: " + relaySinBarra);
+    for (const mala of ["com.example:", "com.example:prueba", "../x:y:1.0", "a:b:1.0:extra"]) {
+      let fallo = "";
+      try { wispMod.destinoDeCoordenada(mala); } catch (e) { fallo = String(e && e.message ? e.message : e); }
+      if (!fallo) mal("destinoDeCoordenada acepta una coordenada rota: " + JSON.stringify(mala));
+    }
+
+    // el aviso dice las cuatro cosas que importan, y las dice el HTML que se pinta, no una copia
+    const desdeAviso = html.indexOf('id="wisp-aviso"');
+    const hastaAviso = desdeAviso < 0 ? -1 : html.indexOf("</dialog>", desdeAviso);
+    const textoAviso = (desdeAviso >= 0 && hastaAviso > desdeAviso)
+      ? html.slice(desdeAviso, hastaAviso).replace(/<[^>]+>/g, "").replace(/\s+/g, " ").trim() : "";
+    if (!textoAviso) mal("index.html no tiene el diálogo #wisp-aviso");
+    for (const frase of wispMod.AVISO) {
+      if (!textoAviso.includes(frase.replace(/\s+/g, " ").trim())) {
+        mal("el aviso de WISP no dice: «" + frase + "»");
+      }
+    }
+    for (const id of ["wisp-aviso", "wisp-aviso-activar", "wisp-aviso-cancelar", "wisp-recordar",
+      "wisp-estado", "wisp-activar", "wisp-desactivar", "wisp-selector", "wisp-relay", "wisp-url",
+      "wisp-url-estado"]) {
+      if (!ids.has(id)) mal("index.html no tiene el id del módulo WISP #" + id);
+    }
+    // el selector nace plegado: sin opt-in no hay nada que elegir
+    const bloqueWisp = html.slice(html.indexOf('id="deps-wisp"'), desdeAviso);
+    if (!/id="wisp-selector" hidden/.test(bloqueWisp)) {
+      mal("el selector de relays no nace oculto en index.html");
+    }
+    const fuenteWisp = fs.readFileSync(path.join(__dirname, "wisp.js"), "utf8");
+    const swFuente = fs.readFileSync(path.join(__dirname, "sw.js"), "utf8");
+    for (const pieza of ['"./wisp.js"', '"./wisp-relays.json"']) {
+      if (!swFuente.includes(pieza)) mal("sw.js no cachea " + pieza + " en el shell");
+    }
+    // y no se cuela un cliente en JS: el framing y el TLS son del núcleo
+    if (/new WebSocket|createWebSocket|crypto\.subtle\.sign|subtle\.encrypt/i.test(fuenteWisp)) {
+      mal("wisp.js abre un socket o hace criptografía: ese trabajo es del núcleo");
+    }
+
+    // el panel: sin opt-in Resolver sigue por el índice del propio origen; con opt-in y sin
+    // núcleo, dice qué falta y no pide nada
+    const anteriorDocumento = globalThis.document;
+    const nodo = (extra) => Object.assign({
+      textContent: "", value: "", hidden: false, disabled: false, children: [],
+      classList: { toggle() {}, remove() {}, add() {} },
+      addEventListener() {}, appendChild(hijo) { this.children.push(hijo); },
+    }, extra || {});
+    const porId = {};
+    for (const id of ["deps-coordenada", "deps-resolver", "deps-estado", "deps-resultado",
+      "deps-nombre", "deps-bytes", "deps-hash", "deps-ruta", "deps-indice", "deps-licencia",
+      "deps-fecha", "deps-ficheros", "deps-soltar", "deps-progreso", "deps-importar-estado",
+      "deps-importado", "deps-importado-ficheros", "deps-importado-bytes",
+      "deps-importado-destino", "deps-importado-descriptor"]) {
+      porId[id] = nodo();
+    }
+    for (const id of ["wisp-estado", "wisp-activar", "wisp-desactivar", "wisp-selector",
+      "wisp-relay", "wisp-url", "wisp-url-estado", "wisp-aviso", "wisp-recordar"]) {
+      porId[id] = nodo();
+    }
+    porId["wisp-aviso"].open = false;
+    porId["wisp-relay"].appendChild = function (hijo) { this.children.push(hijo); };
+    globalThis.document = {
+      getElementById: (id) => porId[id] || null,
+      createElement: () => nodo(),
+      addEventListener() {}, dispatchEvent() { return true; },
+    };
+    try {
+      // (a) el selector no se ve con el módulo apagado, y se ve al decidirlo sin recordar
+      const panelWisp = wispMod.crearPanelWisp({
+        hospedador: hospedadorFalso, almacen: null,
+        fetchImpl: async () => ({
+          ok: true, status: 200, headers: { get: () => "application/json" },
+          text: async () => JSON.stringify(crudoRelays),
+        }),
+      });
+      if (!porId["wisp-selector"].hidden) mal("el selector de relays se pinta con el módulo apagado");
+      const decision = await panelWisp.asegurarDecision();
+      if (decision !== false || porId["wisp-selector"].hidden !== true) {
+        mal("sin diálogo en el documento, «asegurarDecision» no cae al modo seguro (apagado)");
+      }
+      panelWisp.decidir(true);
+      await new Promise((r) => setTimeout(r, 0));
+      if (porId["wisp-selector"].hidden) mal("al activar el módulo no aparece el selector de relays");
+      if (porId["wisp-relay"].children.length !== 6) {
+        mal("el selector de relays no lista los 6 conocidos: " + porId["wisp-relay"].children.length);
+      }
+      if (!/400 ms/.test(String(porId["wisp-relay"].children[0].textContent))) {
+        mal("el selector no muestra la latencia medida del primer relay");
+      }
+
+      // (b) sin opt-in, el panel de dependencias sigue pidiendo el índice del propio origen
+      const llamadas = [];
+      const fetchContador = async (url) => {
+        llamadas.push(String(url));
+        return { ok: false, status: 404, headers: { get: () => null }, text: async () => "" };
+      };
+      porId["deps-coordenada"].value = "com.example:prueba:1.0";
+      const panelLocal = depsMod.crearPanelDeps({
+        hospedador: hospedadorFalso,
+        wisp: { asegurarDecision: async () => false, relayActual() { throw new Error("no se debe llamar"); } },
+      });
+      globalThis.fetchOriginal = globalThis.fetch;
+      globalThis.fetch = fetchContador;
+      try { await panelLocal.resolver(); } finally { globalThis.fetch = globalThis.fetchOriginal; }
+      if (llamadas.length !== 1 || llamadas[0] !== "./deps-index.json") {
+        mal("sin opt-in, Resolver no fue solo al índice del propio origen: " + JSON.stringify(llamadas));
+      }
+      if (!/no hay deps-index\.json/.test(String(porId["deps-estado"].textContent))) {
+        mal("sin opt-in, Resolver no dice que falta el índice: " + porId["deps-estado"].textContent);
+      }
+
+      // (c) con opt-in y sin núcleo, Resolver no abre ningún relay y lo dice
+      const llamadasWisp = [];
+      const fetchWisp = async (url) => { llamadasWisp.push(String(url)); throw new Error("no hay red en esta compilación"); };
+      const panelWispDeps = depsMod.crearPanelDeps({
+        hospedador: hospedadorFalso,
+        wisp: { asegurarDecision: async () => true, relayActual: () => "wss://wisp.local/wisp/" },
+      });
+      globalThis.fetchOriginal = globalThis.fetch;
+      globalThis.fetch = fetchWisp;
+      try { await panelWispDeps.resolver(); } finally { globalThis.fetch = globalThis.fetchOriginal; }
+      if (llamadasWisp.length !== 0) {
+        mal("con el módulo activo y sin núcleo se hizo una petición: " + JSON.stringify(llamadasWisp));
+      }
+      if (!/núcleo WISP no disponible en esta compilación/.test(String(porId["deps-estado"].textContent))) {
+        mal("con el módulo activo y sin núcleo, el panel no dice qué falta: " + porId["deps-estado"].textContent);
+      }
+      if (!/^error/.test(String(porId["deps-estado"].textContent))) {
+        mal("el fallo del núcleo no se pinta como error en el panel");
+      }
+    } finally {
+      globalThis.document = anteriorDocumento;
+      if (globalThis.fetchOriginal) { globalThis.fetch = globalThis.fetchOriginal; delete globalThis.fetchOriginal; }
     }
   }
 

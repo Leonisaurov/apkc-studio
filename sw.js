@@ -63,7 +63,8 @@ function compararVersiones(a, b) {
 const SHELL = [
   "./", "./index.html", "./style.css", "./main.js", "./offline.js",
   "./app.js", "./historial.js", "./fusion.js", "./pestana.js", "./vistas.js",
-  "./diagnostico.js", "./temas.js", "./vista-previa.js", "./deps.js", "./apkc.wasm", "./wasm_exec.js",
+  "./diagnostico.js", "./temas.js", "./vista-previa.js", "./deps.js", "./wisp.js",
+  "./wisp-relays.json", "./apkc.wasm", "./wasm_exec.js",
   "./manifest.webmanifest", "./icons/icon-192.png", "./icons/icon-512.png", "./apkc.wasm.gz",
   "./wasm-manifest.json",
 ];

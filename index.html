@@ -902,6 +902,25 @@
                   </div>
                   <p class="nota" id="deps-estado" role="status" aria-live="polite">sin resolver todavía</p>
                 </div>
+                <div id="deps-wisp" class="deps-wisp">
+                  <h3 class="deps-subtitulo">Relays WISP (módulo opcional)</h3>
+                  <p class="nota" id="wisp-estado" role="status" aria-live="polite">módulo desactivado:
+                    Resolver solo lee <code>deps-index.json</code> del propio origen y no hace ninguna
+                    petición fuera de él.</p>
+                  <div class="acciones">
+                    <button id="wisp-activar" type="button">Activar el módulo WISP…</button>
+                    <button id="wisp-desactivar" type="button" hidden>Desactivar</button>
+                  </div>
+                  <div id="wisp-selector" hidden>
+                    <label>relay conocido <select id="wisp-relay"></select></label>
+                    <label>URL personalizada (tu WISP local)
+                      <input type="text" id="wisp-url" placeholder="wss://mi-wisp.local/wisp/"
+                             autocomplete="off" spellcheck="false" class="ruta"></label>
+                    <p class="nota" id="wisp-url-estado">vacío: se usa el relay elegido en la lista</p>
+                    <p class="nota">Relays de terceros, sin auditar; la latencia es la de un
+                      handshake de prueba y cambia. La URL de un WISP propio tiene que acabar en «/».</p>
+                  </div>
+                </div>
                 <dl id="deps-resultado" class="deps-datos" hidden>
                   <dt>artefacto</dt><dd id="deps-nombre"></dd>
                   <dt>tamaño</dt><dd id="deps-bytes"></dd>
@@ -1240,6 +1259,35 @@
     <button id="sdk-cerrar" type="button">Cerrar</button>
   </div>
   <p class="nota">No se descarga nada automáticamente al abrir este diálogo.</p>
+</dialog>
+
+<dialog id="wisp-aviso" class="dialogo-sdk" aria-labelledby="wisp-aviso-titulo"
+        aria-describedby="wisp-aviso-cuerpo">
+  <h2 id="wisp-aviso-titulo">Antes de activar el módulo WISP</h2>
+  <div id="wisp-aviso-cuerpo">
+    <p>El módulo WISP es opcional y está apagado.</p>
+    <p>Sirve para saltarse el CORS: Maven no manda cabeceras CORS y un relay WISP abre la conexión
+      TCP desde su servidor, así que la respuesta llega por el WebSocket como si fuera del mismo
+      origen. Nada de eso ocurre hasta que lo actives aquí.</p>
+    <p>Descarga archivos extra del módulo desde este mismo origen: el binario del núcleo WISP
+      (<code>wasm</code>) y su lista de relays. Sin red externa no se descarga nada más.</p>
+    <p>Si el núcleo TLS propio no está en esta compilación, el contenido viaja en claro por el
+      relay: el relay, y cualquiera en su camino, puede leerlo y sustituirlo (MITM). El TLS del
+      propio núcleo es la opción segura; sin él, esto sirve para pruebas, no para dependencias
+      reales.</p>
+    <p>Los relays de la lista son de terceros y no están auditados: nadie revisó quién los opera.
+      Si levantas tu propio WISP, escribe su URL en el campo de URL personalizada.</p>
+  </div>
+  <label class="dialogo-check">
+    <input type="checkbox" id="wisp-recordar">
+    Recordar elección: sin marcar, la decisión vale solo para esta sesión y no se guarda nada.
+  </label>
+  <div class="acciones">
+    <button id="wisp-aviso-activar" class="primario" type="button">Activar para esta sesión</button>
+    <button id="wisp-aviso-cancelar" type="button">Cancelar</button>
+  </div>
+  <p class="nota">Cancelar deja el módulo apagado y Resolver sigue leyendo solo
+    <code>deps-index.json</code> del propio origen.</p>
 </dialog>
 
 <div id="paleta" class="paleta" hidden role="dialog" aria-modal="true" aria-label="Paleta de comandos">

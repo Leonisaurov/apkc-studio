@@ -11,8 +11,13 @@
 // petición que hace este módulo —y solo cuando la persona pulsa «Resolver»— va a
 // `.<origen>/deps-index.json` y a `.<origen>/deps/...`, que son ficheros del propio sitio. Si el
 // índice no existe, se dice tal cual: no se inventan coordenadas, tamaños ni hashes.
+//
+// Desde el módulo WISP (opt-in, apagado por defecto) hay una tercera vía que NO está aquí: si la
+// persona acepta el aviso, `wisp.js` pide un artefacto por un relay de terceros y quien habla es el
+// núcleo de `apkc/`. Sin aceptar el aviso no se toca nada de eso; sin núcleo, el error lo dice.
 
 import { leerZip } from "./proyecto.js";
+import { crearPanelWisp, destinoDeCoordenada, hostDeRelay, resolverPorWisp } from "./wisp.js";
 
 export const RUTA_INDICE = "./deps-index.json";
 const VERSION_INDICE = 1;
@@ -414,7 +419,10 @@ export async function importarDependencias({ plan, hospedador, conBloqueo, alPro
 
 // Engancha el panel. No pide nada al cargar: solo el clic en `#deps-resolver` (o Enter en el
 // campo) llama a `resolverDependencia`. `ocupado` evita que un doble clic haga dos importaciones.
-export function crearPanelDeps({ hospedador, conBloqueo, alImportar } = {}) {
+// `wisp` permite inyectar el módulo (las pruebas); con `wisp: null` el panel se queda como estaba,
+// sin aviso. Por omisión el módulo se crea aquí, apagado, y solo abre su diálogo si la persona
+// pulsa «Resolver» sin haber decidido todavía.
+export function crearPanelDeps({ hospedador, conBloqueo, alImportar, wisp } = {}) {
   if (typeof document === "undefined") return null;
   const entrada = document.getElementById("deps-coordenada");
   const boton = document.getElementById("deps-resolver");
@@ -438,6 +446,8 @@ export function crearPanelDeps({ hospedador, conBloqueo, alImportar } = {}) {
   const importadoDescriptor = document.getElementById("deps-importado-descriptor");
   if (!entrada || !boton || !estado || !caja) return null;
 
+  const modulo = wisp === null ? null : (wisp || crearPanelWisp({ hospedador }));
+
   let ocupado = false;
   const decir = (texto, clase) => {
     estado.textContent = texto;
@@ -456,17 +466,46 @@ export function crearPanelDeps({ hospedador, conBloqueo, alImportar } = {}) {
     if (fecha) fecha.textContent = r.fecha || "sin declarar";
     caja.hidden = false;
   };
+  // Pinta lo que devuelve el núcleo WISP con los mismos campos que la vía del índice. Por el relay
+  // no hay índice ni licencia: se dice «sin declarar» en vez de inventar datos.
+  const pintarWisp = (r, relay) => {
+    const trozos = String(r.ruta || "").split("/");
+    if (nombre) nombre.textContent = trozos[trozos.length - 1] || "";
+    if (bytes) bytes.textContent = textoDeBytes(r.bytes.length) + " (" + r.bytes.length + " bytes)";
+    if (hash) hash.textContent = r.sha256 || "sin sha256 del núcleo";
+    if (ruta) ruta.textContent = r.ruta || "";
+    if (origen) origen.textContent = "relay " + hostDeRelay(relay);
+    if (licencia) licencia.textContent = "sin declarar (vía relay, sin índice)";
+    if (fecha) fecha.textContent = new Date().toISOString();
+    caja.hidden = false;
+  };
   const resolver = async () => {
     if (ocupado) return;
     ocupado = true;
     boton.disabled = true;
     entrada.disabled = true;
     caja.hidden = true;
-    decir("buscando «" + entrada.value.trim() + "» en el índice…");
     try {
-      const r = await resolverDependencia({ coord: entrada.value, hospedador, conBloqueo });
-      pintar(r);
-      decir("listo: importado desde el propio origen a " + r.ruta, "bien");
+      // La puerta: sin decisión, primero el aviso (sin red). Si la persona cancela, el módulo
+      // queda apagado y esta misma pulsación sigue por el índice del propio origen, que es el modo
+      // por defecto: la página no se queda sin poder resolver nada.
+      const usarWisp = modulo ? await modulo.asegurarDecision() : false;
+      if (usarWisp) {
+        const relay = modulo.relayActual();
+        const coord = entrada.value.trim();
+        decir("módulo WISP: pidiendo «" + coord + "» por " + hostDeRelay(relay) + "…");
+        const r = await resolverPorWisp({
+          relay, coordenada: coord, destino: destinoDeCoordenada(coord), hospedador,
+        });
+        pintarWisp(r, relay);
+        decir("listo: «" + coord + "» traído por el relay " + hostDeRelay(relay) +
+          " y escrito en " + r.ruta, "bien");
+      } else {
+        decir("buscando «" + entrada.value.trim() + "» en el índice…");
+        const r = await resolverDependencia({ coord: entrada.value, hospedador, conBloqueo });
+        pintar(r);
+        decir("listo: importado desde el propio origen a " + r.ruta, "bien");
+      }
     } catch (e) {
       decir("error: " + (e && e.message ? e.message : e), "mal");
     } finally {
@@ -566,5 +605,5 @@ export function crearPanelDeps({ hospedador, conBloqueo, alImportar } = {}) {
       if (datos && datos.files) importar([...datos.files]);
     });
   }
-  return { resolver, importar, entrada, boton };
+  return { resolver, importar, entrada, boton, wisp: modulo };
 }
