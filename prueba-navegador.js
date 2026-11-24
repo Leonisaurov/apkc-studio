@@ -869,15 +869,43 @@ const conductor = `(async () => {
         rect: { x: 100, y: 290, ancho: 160, alto: 48 } },
       { tipo: "Button", id: "id/pulsar", texto: "Pulsar",
         rect: { x: 136, y: 358, ancho: 88, alto: 48 } }] } };
+  // Un solo muestreo para los dos tamaños: el factor sale del lienzo ya pintado, así que sirve
+  // igual con escala 1 que con la media pantalla, sin depender del devicePixelRatio del host.
+  const muestreo = (lienzo, anchoModelo) => {
+    const ctx = lienzo.getContext("2d");
+    const factor = lienzo.width / anchoModelo;
+    return (x, y) => {
+      const d = ctx.getImageData(Math.round(x * factor), Math.round(y * factor), 1, 1).data;
+      return [d[0], d[1], d[2]];
+    };
+  };
   const lienzoArte = document.createElement("canvas");
   arte.pintarModelo(lienzoArte, modeloArte, { ancho: 360, alto: 640 });
-  const contextoArte = lienzoArte.getContext("2d");
-  const factorArte = lienzoArte.width / 360;
-  const pixelArte = (x, y) => {
-    const d = contextoArte.getImageData(Math.round(x * factorArte), Math.round(y * factorArte), 1, 1).data;
-    return [d[0], d[1], d[2]];
-  };
+  const pixelArte = muestreo(lienzoArte, 360);
   r.temaAparato = { fondo: pixelArte(10, 10), boton: pixelArte(145, 366) };
+
+  // A media pantalla el botón de 88×48 dp debe ocupar 44×24 px. Aquí se rompió el alto con un
+  // Math.max(alto, alto * escala) que lo dejaba en 48: se mide la caja y se muestrean el relleno
+  // de la esquina, el centro de la franja inferior y el blanco justo bajo el borde, que con el
+  // rectángulo sin escalar seguiría siendo gris. Todos los puntos caen en relleno, nunca en el
+  // glifo, para no depender de la fuente que tenga instalada el equipo.
+  const medirMedia = { ancho: 180, alto: 320 };
+  const lienzoMedia = document.createElement("canvas");
+  arte.pintarModelo(lienzoMedia, modeloArte, medirMedia);
+  const pixelMedia = muestreo(lienzoMedia, medirMedia.ancho);
+  const escalaMedia = medirMedia.ancho / modeloArte.pantalla.ancho;
+  const rectBoton = modeloArte.raiz.hijos[1].rect;
+  const cajaEsperada = { x: rectBoton.x * escalaMedia, y: rectBoton.y * escalaMedia,
+    ancho: rectBoton.ancho * escalaMedia, alto: rectBoton.alto * escalaMedia };
+  const botonMedio = arte.rectsEscalados(modeloArte, medirMedia.ancho, medirMedia.alto)
+    .find((nodo) => nodo.id === "id/pulsar");
+  r.temaAparatoMedia = botonMedio ? {
+    caja: [botonMedio.ancho, botonMedio.alto],
+    esquina: pixelMedia(cajaEsperada.x + 3, cajaEsperada.y + 3),
+    centro: pixelMedia(cajaEsperada.x + cajaEsperada.ancho / 2,
+      cajaEsperada.y + cajaEsperada.alto - 3),
+    fuera: pixelMedia(cajaEsperada.x + 3, cajaEsperada.y + cajaEsperada.alto + 3),
+  } : { falta: true };
   return r;
 })()`;
 
@@ -968,6 +996,13 @@ function comprueba(cond, msg) { if (!cond) { fallos++; console.log("  FALLO:", m
       v.temaAparato.boton.join(",") === "214,215,215",
       "el emulador no pinta el fondo blanco y el botón gris del APK real: " +
       JSON.stringify(v.temaAparato));
+    const tm = v.temaAparatoMedia || {};
+    comprueba(tm.caja && tm.caja.join(",") === "44,24" &&
+      tm.esquina && tm.esquina.join(",") === "214,215,215" &&
+      tm.centro && tm.centro.join(",") === "214,215,215" &&
+      tm.fuera && tm.fuera.join(",") === "255,255,255",
+      "a media pantalla el botón no mide 44x24, no pinta el gris en su relleno o el blanco bajo " +
+      "su borde: " + JSON.stringify(tm));
     comprueba(v.punteroInspector === "none" && v.punteroDetalleModelo === "none",
       "el detalle del modelo no deja pasar el clic al canvas que hay debajo (debe ser transparente " +
       "al puntero, como la caja del inspector): " +
