@@ -4897,6 +4897,90 @@ public final class R {
     }
   }
 
+  // 6z-bis. la plantilla «menú» no solo compila: se emula. Dos etiquetas: (a) estructural, con el
+  //         JSON medido con `apkc preview --menu --menu-item menu/0` y el modelo de la pestaña;
+  //         (b) de fixture, si APKC y APK_MENU apuntan al binario y a una apk real de esta plantilla.
+  const menu = a.buildProject({ name: "Hola apkc", package: "com.hola.menu", minsdk: "21",
+    targetsdk: "34", hello: "Hello World!", template: "menu", button: false, kotlin: false,
+    libs: false, native: false, assets: false, device: false });
+  const actividadMenu = menu.files["src/com/hola/menu/MainActivity.java"] || "";
+  if (!/onCreateOptionsMenu\(Menu menu\)/.test(actividadMenu) ||
+      !/menu\.add\("Opciones"\)/.test(actividadMenu) ||
+      !/MenuItem\.OnMenuItemClickListener/.test(actividadMenu) ||
+      !/Toast\.makeText\([^;]*"Menu pulsado"/.test(actividadMenu)) {
+    mal("menú (estructural): la actividad no añade «Opciones» con su oyente y su Toast");
+  }
+
+  // Medido el 2026-11-24 con el apkc nativo de ~/.cache/apkc-web/ejemplos/apkc sobre la apk
+  // generada desde esta rama (build --linker go --compiler go): el menú se publica en
+  // ejecucion.menu y pulsar menu/0 deja huella en ejecucion.toast y ejecucion.consola.
+  const salidaMenu = '{"paquete":"com.hola.menu","version":"0.1","actividad":".MainActivity",' +
+    '"layout":"res/layout/main.xml","pantalla":{"x":0,"y":0,"ancho":360,"alto":640},' +
+    '"aproximado":true,"nodos":2,"ejecucion":{"actividad":"com.hola.menu.MainActivity",' +
+    '"metodo":"onCreate","pasos":25,"interacciones":1,' +
+    '"consola":[{"origen":"Toast","texto":"Menu pulsado","secuencia":1}],' +
+    '"pantallas":["com.hola.menu.MainActivity"],' +
+    '"ciclo":["com.hola.menu.MainActivity.onCreate"],' +
+    '"menu":{"items":[{"id":"menu/0","titulo":"Opciones"}],"seleccionado":"menu/0"},' +
+    '"toast":"Menu pulsado"},"raiz":{"tipo":"LinearLayout","ancho":"match_parent",' +
+    '"alto":"match_parent","gravity":"center","rect":{"x":0,"y":0,"ancho":360,"alto":640},' +
+    '"hijos":[{"tipo":"TextView","texto":"Hello World!","estilo":"@0x01030042",' +
+    '"ancho":"wrap_content","alto":"wrap_content",' +
+    '"rect":{"x":124,"y":308,"ancho":112,"alto":24}}]}}';
+  const modeloMenu = vistaPrevia.modeloDeSalida(salidaMenu);
+  if (!modeloMenu) mal("menú (estructural): modeloDeSalida rechaza el JSON de apkc preview con menú");
+  else {
+    const pantallaMenu = modeloMenu.pantalla || {};
+    if (!(pantallaMenu.ancho > 0 && pantallaMenu.alto > 0) || !(modeloMenu.nodos > 0) ||
+        !((modeloMenu.ejecucion || {}).pasos > 0) || modeloMenu.avisos || modeloMenu.error) {
+      mal(`menú (estructural): pantalla/nodos/pasos o avisos/error: ${JSON.stringify(modeloMenu.ejecucion)}`);
+    }
+    const itemsMenu = previaPanel.menuDeModelo(modeloMenu);
+    if (!itemsMenu || itemsMenu.items.length !== 1 || itemsMenu.items[0].id !== "menu/0" ||
+        itemsMenu.items[0].titulo !== "Opciones" || itemsMenu.seleccionado !== "menu/0") {
+      mal(`menú (estructural): menuDeModelo no publica el ítem pulsado: ${JSON.stringify(itemsMenu)}`);
+    }
+    const resumenMenu = previaPanel.resumenEjecucion(modeloMenu);
+    if (!resumenMenu || resumenMenu.toast !== "Menu pulsado" ||
+        !resumenMenu.consola.some((l) => l.origen === "Toast" && l.texto === "Menu pulsado")) {
+      mal(`menú (estructural): el Toast del ítem no llega al resumen: ${JSON.stringify(resumenMenu && resumenMenu.consola)}`);
+    }
+    const argvMenu = previaPanel.argvDePrevia([
+      { tipo: "menu" }, { tipo: "menu-item", valor: "menu/0" },
+    ], "build/app.apk");
+    if (argvMenu.join(" ") !== "preview --menu --menu-item menu/0 build/app.apk") {
+      mal("menú (estructural): argvDePrevia no entrega --menu y --menu-item: " + JSON.stringify(argvMenu));
+    }
+  }
+
+  // (b) de fixture: opcional, porque prueba.js corre sin binario. Con APKC y APK_MENU se repite
+  // la misma comprobación contra una apk real generada por buildProject desde esta rama.
+  if (process.env.APKC && process.env.APK_MENU) {
+    const salidaReal = execFileSync(process.env.APKC,
+      ["preview", "--menu", "--menu-item", "menu/0", process.env.APK_MENU],
+      { encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] });
+    const modeloReal = vistaPrevia.modeloDeSalida(salidaReal);
+    if (!modeloReal) mal("menú (fixture): apkc preview no devolvió un modelo JSON");
+    else {
+      const menuReal = previaPanel.menuDeModelo(modeloReal);
+      const resumenReal = previaPanel.resumenEjecucion(modeloReal);
+      if (!menuReal || !(menuReal.items || []).some((i) => i.id === "menu/0" && i.titulo === "Opciones") ||
+          menuReal.seleccionado !== "menu/0") {
+        mal(`menú (fixture): el menú o su ítem no aparecen: ${JSON.stringify(menuReal)}`);
+      }
+      if (!resumenReal || resumenReal.toast !== "Menu pulsado" ||
+          !(resumenReal.consola || []).some((l) => l.origen === "Toast" && l.texto === "Menu pulsado")) {
+        mal(`menú (fixture): pulsar menu/0 no dejó huella: ${JSON.stringify(resumenReal && resumenReal.consola)}`);
+      }
+      if (!((modeloReal.ejecucion || {}).pasos > 0) || modeloReal.avisos || modeloReal.error) {
+        mal("menú (fixture): ejecución sin pasos o con avisos/error");
+      }
+    }
+    console.log("menú (fixture): comprobado con apkc preview sobre", process.env.APK_MENU);
+  } else {
+    console.log("menú (fixture): sin APKC/APK_MENU, se omite");
+  }
+
   console.log(fallos ? `PRUEBA FALLA: ${fallos} problemas` : "prueba: todo en orden");
   process.exit(fallos ? 1 : 0);
 })();
