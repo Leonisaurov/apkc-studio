@@ -82,6 +82,8 @@ if (await puertoOcupado(Number(CDP))) falta("el puerto CDP " + CDP + " ya está 
       coordenada: coordFalsa, grupo: "com.example", artefacto: "prueba", version: "1.0",
       extension: "jar", fichero: "deps/com.example/prueba/1.0/prueba-1.0.jar",
       bytes: depFalso.length, sha256: hashDepFalso,
+      licencia: "Apache-2.0", licencia_url: "https://www.apache.org/licenses/LICENSE-2.0",
+      fecha: "2026-11-22T00:00:00Z",
     }],
   }, null, 2));
   const envServidor = { ...process.env, SITIO_DIR: SITIO_PRUEBA,
@@ -5790,6 +5792,7 @@ async function conductor() {
         nombre: document.getElementById("deps-nombre").textContent,
         bytes: document.getElementById("deps-bytes").textContent,
         hash: document.getElementById("deps-hash").textContent,
+        licencia: document.getElementById("deps-licencia").textContent,
         ruta: document.getElementById("deps-ruta").textContent,
         indice: document.getElementById("deps-indice").textContent,
         visible: !document.getElementById("deps-resultado").hidden,
@@ -5805,9 +5808,10 @@ async function conductor() {
       rutasResolver[1] === "/deps/com.example/prueba/1.0/prueba-1.0.jar" &&
       delResolver.every((u) => u.startsWith("http://127.0.0.1:" + PUERTO)),
       rutasResolver.join(", ") || "sin peticiones");
-    comprueba("el artefacto importado muestra nombre, tamaño y hash del índice",
+    comprueba("el artefacto importado muestra nombre, tamaño, hash y licencia del índice",
       resuelto && resuelto.visible === true && resuelto.nombre === "prueba-1.0.jar" &&
       /2052 bytes/.test(String(resuelto.bytes)) && resuelto.hash === hashDepFalso &&
+      resuelto.licencia === "Apache-2.0" &&
       resuelto.ruta === "/deps/com.example/prueba/1.0/prueba-1.0.jar" &&
       /2026-11-22/.test(String(resuelto.indice)),
       JSON.stringify(resuelto).slice(0, 360));
@@ -5852,6 +5856,30 @@ async function conductor() {
     comprueba("una coordenada ausente del índice se rechaza con el motivo, sin datos inventados",
       /^error/.test(String(ausente.estado)) && /no está en deps-index\.json/.test(String(ausente.estado)) &&
       ausente.visible === false, JSON.stringify(ausente).slice(0, 300));
+
+    // Falsificación: sin índice, Resolver no inventa nada. Se sirve el mismo origen y se borra
+    // `deps-index.json` a mitad de la prueba; el servidor responde 404 y el panel lo dice. Este es
+    // el estado del sitio publicado que todavía no lleva el paquete.
+    fs.rmSync(path.join(SITIO_PRUEBA, "deps-index.json"), { force: true });
+    await evaluar(`(() => {
+      document.getElementById("deps-coordenada").value = ${JSON.stringify(coordFalsa)};
+      document.getElementById("deps-resolver").click();
+      return true;
+    })()`);
+    let sinIndice = null;
+    for (let i = 0; i < 60; i++) {
+      sinIndice = await evaluar(`(() => ({
+        estado: document.getElementById("deps-estado").textContent,
+        visible: !document.getElementById("deps-resultado").hidden,
+      }))()`);
+      if (/^error/.test(String(sinIndice.estado))) break;
+      await esperar(300);
+    }
+    comprueba("sin deps-index.json Resolver da el 404 y no inventa coordenadas",
+      /^error/.test(String(sinIndice.estado)) &&
+      /no hay deps-index\.json/.test(String(sinIndice.estado)) &&
+      /workflow/.test(String(sinIndice.estado)) && sinIndice.visible === false,
+      JSON.stringify(sinIndice).slice(0, 300));
 
     // y nada de esto ha sacado una petición del origen (el gate global lo repite al final)
     const ajenasDeps = peticiones.slice(antesDeps).filter((u) =>

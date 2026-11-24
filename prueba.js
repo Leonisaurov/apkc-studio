@@ -2,6 +2,7 @@
 // disco; después python zipfile y zipcheck.py del harness tienen que estar de acuerdo.
 import fs from "node:fs";
 import path from "node:path";
+import { execFileSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import { buildProject, makeZip, analyze, RULES, crc32 } from "./app.js";
 import * as pestanaMod from "./pestana.js";
@@ -3201,9 +3202,65 @@ public final class R {
       mal("el fallo de cuota de OPFS no se explica");
     }
 
+    // el generador local sin red produce un índice que la página acepta y consume. Se lee del
+    // disco con un fetch de mentira para no depender de un servidor en node.
+    const dirIndice = fs.mkdtempSync(path.join(tmp, "deps-index-"));
+    const fechaFija = "2026-11-22T00:00:00Z";
+    execFileSync(process.execPath, [path.join(__dirname, "deps-index-local.mjs"),
+      "--salida", dirIndice, "--licencia", "Apache-2.0", "--fecha", fechaFija], { stdio: "pipe" });
+    const indiceLocal = JSON.parse(fs.readFileSync(path.join(dirIndice, "deps-index.json"), "utf8"));
+    const entLocal = indiceLocal.artefactos[0];
+    const artefactoLocal = fs.readFileSync(path.join(dirIndice, entLocal.fichero));
+    const hashLocal = await depsMod.sha256Hex(new Uint8Array(artefactoLocal));
+    if (indiceLocal.version !== 1 || !entLocal ||
+        entLocal.coordenada !== "com.example:prueba:1.0" ||
+        !depsMod.ficheroDelOrigenSeguro(entLocal.fichero) ||
+        entLocal.bytes !== artefactoLocal.length || entLocal.sha256 !== hashLocal ||
+        entLocal.licencia !== "Apache-2.0" || entLocal.fecha !== fechaFija) {
+      mal("el generador local no deja coordenada, ruta, bytes, sha256, licencia y fecha: " +
+        JSON.stringify({ ent: entLocal && { coordenada: entLocal.coordenada, fichero: entLocal.fichero,
+          bytes: entLocal.bytes, sha: entLocal.sha256, licencia: entLocal.licencia, fecha: entLocal.fecha },
+          real: artefactoLocal.length, hash: hashLocal }).slice(0, 360));
+    }
+    if (depsMod.validarEntrada(entLocal) !== "") mal("el índice del generador local no valida: " + depsMod.validarEntrada(entLocal));
+    const fetchDisco = async (ruta) => {
+      if (ruta === "./deps-index.json") {
+        return { ok: true, status: 200,
+          headers: { get: (n) => (String(n).toLowerCase() === "content-type" ? "application/json" : null) },
+          text: async () => fs.readFileSync(path.join(dirIndice, "deps-index.json"), "utf8") };
+      }
+      const rel = String(ruta).replace(/^\.\//, "");
+      const datos = fs.readFileSync(path.join(dirIndice, rel));
+      return { ok: true, status: 200,
+        headers: { get: (n) => (String(n).toLowerCase() === "content-type" ? "application/java-archive" : null) },
+        arrayBuffer: async () => datos.buffer.slice(datos.byteOffset, datos.byteOffset + datos.byteLength) };
+    };
+    const escritoLocal = new Map();
+    const importadoLocalGen = await depsMod.resolverDependencia({
+      coord: entLocal.coordenada, fetchImpl: fetchDisco,
+      hospedador: { escribir: async (r, d) => { escritoLocal.set(r, d); return { tipo: "montado", bytes: d.length }; } },
+    });
+    if (importadoLocalGen.hash !== hashLocal || importadoLocalGen.licencia !== "Apache-2.0" ||
+        !escritoLocal.has("/deps/com.example/prueba/1.0/prueba-1.0.jar")) {
+      mal("la página no importa el índice del generador local: " + JSON.stringify({
+        hash: importadoLocalGen.hash, licencia: importadoLocalGen.licencia }).slice(0, 240));
+    }
+    // y el mismo generador indexa un jar real (--jar): el sha es el del fichero de entrada
+    const dirJar = fs.mkdtempSync(path.join(tmp, "deps-jar-"));
+    execFileSync(process.execPath, [path.join(__dirname, "deps-index-local.mjs"),
+      "--salida", dirJar, "--jar", path.join(dirIndice, entLocal.fichero),
+      "--coordenada", "com.example:real:2.0", "--licencia", "MIT"], { stdio: "pipe" });
+    const indiceJar = JSON.parse(fs.readFileSync(path.join(dirJar, "deps-index.json"), "utf8"));
+    const entJar = indiceJar.artefactos[0];
+    if (entJar.coordenada !== "com.example:real:2.0" || entJar.sha256 !== hashLocal ||
+        entJar.bytes !== artefactoLocal.length || entJar.licencia !== "MIT" ||
+        entJar.fichero !== "deps/com.example/real/2.0/real-2.0.jar") {
+      mal("el generador no indexa un jar real con su coordenada: " + JSON.stringify(entJar).slice(0, 240));
+    }
+
     // ids contrato de la sección, y la pestaña propia separada de Compilar/Diagnóstico/Historial
     for (const id of ["deps-coordenada", "deps-resolver", "deps-estado", "deps-resultado",
-      "deps-nombre", "deps-bytes", "deps-hash", "deps-ruta", "deps-indice",
+      "deps-nombre", "deps-bytes", "deps-hash", "deps-licencia", "deps-ruta", "deps-indice",
       "deps-ficheros", "deps-soltar", "deps-progreso", "deps-importar-estado", "deps-importado",
       "deps-importado-ficheros", "deps-importado-bytes", "deps-importado-destino",
       "deps-importado-descriptor"]) {
@@ -3231,7 +3288,7 @@ public final class R {
     } else {
       const yml = fs.readFileSync(workflow, "utf8");
       for (const pieza of ["workflow_dispatch", "deps-index.json", "sha256sum", "repo1.maven.org",
-        "dl.google.com", "upload-artifact"]) {
+        "dl.google.com", "upload-artifact", "licencia"]) {
         if (!yml.includes(pieza)) mal("deps-maven.yml no menciona " + pieza);
       }
       if (/deps-proxy/.test(yml)) mal("deps-maven.yml habla de un proxy en tiempo de ejecución");

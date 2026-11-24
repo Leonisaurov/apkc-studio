@@ -76,6 +76,10 @@ export function validarEntrada(entrada) {
   if (!ficheroDelOrigenSeguro(entrada.fichero)) return "fichero fuera de deps/: " + JSON.stringify(entrada.fichero);
   if (!Number.isInteger(entrada.bytes) || entrada.bytes <= 0) return "bytes no válidos: " + entrada.bytes;
   if (typeof entrada.sha256 !== "string" || !SHA256.test(entrada.sha256)) return "sha256 no válido";
+  // `licencia` y `fecha` son opcionales: un índice viejo sin ellas sigue sirviendo. Si vienen, se
+  // exige que sean texto, porque el panel las pinta tal cual y no se completa un dato a ojo.
+  if (entrada.licencia != null && typeof entrada.licencia !== "string") return "licencia no válida";
+  if (entrada.fecha != null && typeof entrada.fecha !== "string") return "fecha no válida";
   return "";
 }
 
@@ -147,7 +151,8 @@ export async function resolverDependencia({ coord, hospedador, fetchImpl, rutaIn
   const ruta = "/deps/" + entrada.grupo + "/" + entrada.artefacto + "/" + entrada.version + "/" + nombre;
   const descriptor = {
     coordenada: entrada.coordenada, fichero: entrada.fichero, bytes: bytes.length,
-    sha256: hash, tipo, indice: indice.generado || "sin fecha en el índice",
+    sha256: hash, tipo, licencia: entrada.licencia || null,
+    indice: indice.generado || "sin fecha en el índice",
     fecha: new Date().toISOString(),
   };
   // El artefacto y su descriptor entran en OPFS con el mismo bloqueo que usan las ventanas del
@@ -167,7 +172,8 @@ export async function resolverDependencia({ coord, hospedador, fetchImpl, rutaIn
   }
   return {
     coordenada: entrada.coordenada, nombre, bytes: bytes.length, textoBytes: textoDeBytes(bytes.length),
-    hash, ruta, fichero: entrada.fichero, indice: indice.generado || "", descriptor,
+    hash, ruta, fichero: entrada.fichero, indice: indice.generado || "",
+    licencia: entrada.licencia || "", fecha: entrada.fecha || "", descriptor,
   };
 }
 
@@ -419,6 +425,7 @@ export function crearPanelDeps({ hospedador, conBloqueo, alImportar } = {}) {
   const hash = document.getElementById("deps-hash");
   const ruta = document.getElementById("deps-ruta");
   const origen = document.getElementById("deps-indice");
+  const licencia = document.getElementById("deps-licencia");
   const seleccion = document.getElementById("deps-ficheros");
   const zonaSoltar = document.getElementById("deps-soltar");
   const progreso = document.getElementById("deps-progreso");
@@ -442,6 +449,8 @@ export function crearPanelDeps({ hospedador, conBloqueo, alImportar } = {}) {
     if (hash) hash.textContent = r.hash;
     if (ruta) ruta.textContent = r.ruta;
     if (origen) origen.textContent = "índice: " + (r.indice || "sin fecha");
+    // La licencia solo se pinta si el índice la trae; un índice viejo sin ella no inventa texto.
+    if (licencia) licencia.textContent = r.licencia || "sin declarar";
     caja.hidden = false;
   };
   const resolver = async () => {
