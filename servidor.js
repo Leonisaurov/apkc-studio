@@ -31,6 +31,12 @@ if (!GOROOT) {
   try { GOROOT = execSync("go env GOROOT", { encoding: "utf8" }).trim(); } catch (e) { GOROOT = ""; }
 }
 const EJECUTA = path.join(GOROOT, "lib", "wasm", "wasm_exec.js");
+// Preview con índice local: solo si DEPS_INDICE_LOCAL=1 se sirve el par que deja
+// deps-index-local.mjs en ~/.cache/apkc-web/deps-index/sitio. Sin la variable el sitio sigue
+// enseñando su estado real (publicado con el workflow deps-maven, o el 404 que falsifica
+// prueba-pestana.js): este servidor no debe inventar dependencias donde no las hay.
+const INDICE_LOCAL = process.env.DEPS_INDICE_LOCAL === "1"
+  ? path.join(process.env.HOME || "", ".cache", "apkc-web", "deps-index", "sitio") : "";
 
 // El android.jar no se puede versionar (26 MB y licencia de la SDK), pero sí se puede leer del
 // SDK que ya está instalado en la máquina. Se busca en ANDROID_JAR, ANDROID_HOME, ANDROID_SDK_ROOT
@@ -69,7 +75,8 @@ const MIME = {
   ".wasm": "application/wasm", ".apk": "application/vnd.android.package-archive",
   ".aab": "application/octet-stream", ".idsig": "application/octet-stream",
   ".png": "image/png", ".svg": "image/svg+xml", ".ico": "image/x-icon",
-  ".webmanifest": "application/manifest+json",
+  ".webmanifest": "application/manifest+json", ".jar": "application/java-archive",
+  ".aar": "application/octet-stream", ".pom": "text/xml; charset=utf-8",
 };
 
 // El service worker de desarrollo. Se genera aquí para no versionar un fichero más ni depender de
@@ -250,6 +257,28 @@ const servidor = http.createServer((req, res) => {
       return void res.end("no hay android.jar del SDK local; usa el selector de fichero o tools/entorno.sh jar\n");
     }
     fichero = jar;                                          // el jar del SDK, por su origen: la pestaña no habla con nadie más
+  } else if (INDICE_LOCAL && ruta === "/deps-index.json") {
+    // Ejemplo local generado por deps-index-local.mjs, no la salida del workflow deps-maven del
+    // sitio publicado. El propio JSON lo dice en `origen`; se sirve tal cual, sin reescribirlo.
+    const indice = path.join(INDICE_LOCAL, "deps-index.json");
+    if (!fs.existsSync(indice)) {
+      res.writeHead(404, { "Content-Type": "text/plain; charset=utf-8" });
+      return void res.end("no hay índice local: genera el par con deps-index-local.mjs\n");
+    }
+    fichero = indice;
+  } else if (INDICE_LOCAL && ruta.startsWith("/deps/")) {
+    // Mismo arraigo que los estáticos, pero dentro de `sitio/deps/`: un `..` no puede sacar el
+    // artefacto del par generado ni leer otro sitio del disco.
+    const raiz = path.join(INDICE_LOCAL, "deps");
+    const rel = ruta.slice("/deps/".length);
+    const dentro = path.normalize(path.join(raiz, rel));
+    if (rel.includes("\\") || (dentro !== raiz && !dentro.startsWith(raiz + path.sep))) {
+      res.writeHead(403); return void res.end("fuera\n");
+    }
+    if (!fs.existsSync(dentro) || fs.statSync(dentro).isDirectory()) {
+      res.writeHead(404); return void res.end("no existe\n");
+    }
+    fichero = dentro;
   } else {
     const dentro = path.normalize(path.join(RAIZ_SITIO, ruta === "/" ? "index.html" : ruta));
     // startsWith(RAIZ_SITIO) dejaría pasar un hermano como /studio-viejo; con el separador, no
@@ -276,4 +305,8 @@ servidor.listen(PUERTO, "127.0.0.1", () => {
   console.log(jar
     ? `android.jar del SDK local: ${jar} (${fs.statSync(jar).size} bytes)`
     : "sin android.jar local: usa el selector de fichero o tools/entorno.sh jar");
+  if (INDICE_LOCAL) {
+    console.log(`índice de dependencias: ejemplo local desde ${INDICE_LOCAL} ` +
+      "(deps-index-local.mjs; no es salida del workflow deps-maven)");
+  }
 });

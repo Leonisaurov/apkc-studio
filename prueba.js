@@ -4096,6 +4096,19 @@ public final class R {
           real: artefactoLocal.length, hash: hashLocal }).slice(0, 360));
     }
     if (depsMod.validarEntrada(entLocal) !== "") mal("el índice del generador local no valida: " + depsMod.validarEntrada(entLocal));
+    // La ficha del índice declara su procedencia: ejemplo del generador local, no la salida del
+    // workflow deps-maven que publica el sitio. Y el servidor de la preview solo lo sirve con
+    // DEPS_INDICE_LOCAL=1: sin la variable debe seguir enseñando el estado real del origen.
+    if (!/generador local/.test(String(indiceLocal.origen || "")) ||
+        /deps-maven/.test(String(indiceLocal.origen || ""))) {
+      mal("el índice local no se identifica como ejemplo local: " + JSON.stringify(indiceLocal.origen));
+    }
+    const fuenteServidor = fs.readFileSync(path.join(__dirname, "servidor.js"), "utf8");
+    if (!fuenteServidor.includes('DEPS_INDICE_LOCAL === "1"') ||
+        !fuenteServidor.includes('INDICE_LOCAL && ruta === "/deps-index.json"') ||
+        !fuenteServidor.includes('INDICE_LOCAL && ruta.startsWith("/deps/")')) {
+      mal("las rutas del índice local no están tras DEPS_INDICE_LOCAL en servidor.js");
+    }
     const fetchDisco = async (ruta) => {
       if (ruta === "./deps-index.json") {
         return { ok: true, status: 200,
