@@ -715,6 +715,46 @@ const conductor = `(async () => {
       secciones: puntero(secciones), pestana: puntero(pestana), panel: puntero(panel), acoplado,
     };
   })();
+  // La capa flotante se acopla a los cuatro bordes, se suelta y se redimensiona con tiradores. El
+  // tamaño y el borde se leen de localStorage, que es lo que una recarga volvería a aplicar.
+  r.consolaAcoplable = (() => {
+    const inspector = document.getElementById("previa-inspector");
+    if (!inspector) return null;
+    const estado = () => {
+      const caja = inspector.getBoundingClientRect();
+      return {
+        modo: inspector.dataset.modo || "", borde: inspector.dataset.borde || "",
+        ancho: Math.round(parseFloat(inspector.style.width) || caja.width),
+        alto: Math.round(parseFloat(inspector.style.height) || caja.height),
+        arriba: inspector.style.top, abajo: inspector.style.bottom,
+        guardado: localStorage.getItem("apkc-studio/previa-inspector-borde"),
+        guardadoAncho: localStorage.getItem("apkc-studio/previa-inspector-ancho"),
+      };
+    };
+    const clic = (id) => { const b = document.getElementById(id); if (b) b.click(); };
+    clic("previa-inspector-acoplar-arriba");
+    const arriba = estado();
+    clic("previa-inspector-acoplar-abajo");
+    const abajo = estado();
+    clic("previa-inspector-soltar");
+    const suelta = estado();
+    const tirador = document.getElementById("previa-inspector-tirador-este");
+    const caja = inspector.getBoundingClientRect();
+    const x = Math.round(caja.right - 2);
+    const y = Math.round(caja.top + caja.height / 2);
+    if (tirador) {
+      tirador.dispatchEvent(new PointerEvent("pointerdown", { bubbles: true, button: 0, pointerId: 77,
+        clientX: x, clientY: y }));
+      document.dispatchEvent(new PointerEvent("pointermove", { bubbles: true, pointerId: 77,
+        clientX: x + 40, clientY: y }));
+      document.dispatchEvent(new PointerEvent("pointerup", { bubbles: true, pointerId: 77,
+        clientX: x + 40, clientY: y }));
+    }
+    const trasTamano = estado();
+    clic("previa-inspector-acoplar-abajo");
+    const acopladoConTamano = estado();
+    return { arriba, abajo, suelta, trasTamano, acopladoConTamano };
+  })();
   // Un Toast repetido con el mismo texto reinicia su cuenta atrás. Se emite a t=0 y otra vez a los
   // 2,9 s: a los 3,1 s del primero tiene que seguir visible (antes se ocultaba con el reloj del
   // primero porque la firma no distinguía una emisión de un repintado). Un repintado del mismo
@@ -1172,6 +1212,22 @@ function comprueba(cond, msg) { if (!cond) { fallos++; console.log("  FALLO:", m
       "pestañas y su texto: " + JSON.stringify(il.acoplado));
     comprueba(il.encima === "previa-lateral-canvas",
       "el punto de la pestaña no cae sobre el canvas del panel: " + JSON.stringify(il.encima));
+    const ca = v.consolaAcoplable || {};
+    comprueba(ca.arriba && ca.arriba.modo === "acoplado" && ca.arriba.borde === "arriba" &&
+      ca.arriba.arriba === "8px" && ca.arriba.abajo === "auto" && ca.arriba.guardado === "arriba",
+      "la consola no se acopla arriba ni recuerda el borde: " + JSON.stringify(ca.arriba));
+    comprueba(ca.abajo && ca.abajo.borde === "abajo" && ca.abajo.abajo === "8px" &&
+      ca.abajo.arriba === "auto" && ca.abajo.guardado === "abajo",
+      "la consola no se acopla abajo ni recuerda el borde: " + JSON.stringify(ca.abajo));
+    comprueba(ca.suelta && ca.suelta.modo === "libre",
+      "el botón de soltar no devuelve la consola al modo flotante: " + JSON.stringify(ca.suelta));
+    comprueba(ca.trasTamano && ca.trasTamano.ancho === ca.suelta.ancho + 40 &&
+      Number(ca.trasTamano.guardadoAncho) === ca.trasTamano.ancho,
+      "el tirador no cambia el ancho de la capa ni lo guarda: " +
+      JSON.stringify({ antes: ca.suelta, despues: ca.trasTamano }));
+    comprueba(ca.acopladoConTamano && ca.acopladoConTamano.ancho === ca.trasTamano.ancho,
+      "acoplar no conserva el tamaño que eligió el tirador: " +
+      JSON.stringify({ suelta: ca.trasTamano, acoplada: ca.acopladoConTamano }));
     const tr = v.toastRepetido || {};
     comprueba(tr.alPrincipio && tr.alPrincipio.texto === "Repetido" && tr.alPrincipio.oculto === false,
       "el Toast sintético no se pintó sobre el panel: " + JSON.stringify(tr.alPrincipio));

@@ -698,6 +698,8 @@ kbd {
    texto y scroll—, que es cuando el usuario la maneja como una ventana. La cabecera, el asa y sus
    botones no cambian: siguen capturando para mover, minimizar, acoplar y cerrar. */
 .previa-inspector > :not(.previa-inspector-cab):not(.previa-detalle-modelo) { pointer-events: none; }
+/* los tiradores son la excepción: sin este reparto el borde de la capa no recibiría el puntero */
+.previa-inspector > .tirador-previa { pointer-events: auto; }
 .previa-inspector > .previa-seccion > .previa-oyentes,
 .previa-inspector > .previa-seccion > .previa-oyentes * { pointer-events: auto; }
 .previa-inspector[data-modo="acoplado"] > .previa-secciones,

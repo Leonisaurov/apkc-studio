@@ -79,6 +79,30 @@ const MODO_LIBRE = "libre";
 const MODO_ACOPLADO = "acoplado";
 const MODO_MINIMIZADO = "minimizado";
 const BORDE_POR_DEFECTO = "derecha";
+// la consola se puede acoplar a los cuatro bordes de la ventana; el borde elegido se guarda con el
+// modo, así que una recarga devuelve la capa al mismo sitio y con el mismo tamaño
+const BORDES = ["izquierda", "derecha", "arriba", "abajo"];
+export function bordeValido(pedido) {
+  return BORDES.includes(pedido) ? pedido : BORDE_POR_DEFECTO;
+}
+// Geometría de una capa acoplada, pura y probada en node: el ancho y el alto son los que eligió el
+// usuario (o los de siempre), recortados a la ventana, y solo el borde elegido se pega al margen.
+export function cajaAcoplada(borde, ancho, alto, medidas, margen = 8) {
+  const anchoVentana = Number.isFinite(medidas && medidas.ancho) ? medidas.ancho : 1024;
+  const altoVentana = Number.isFinite(medidas && medidas.alto) ? medidas.alto : 768;
+  const anchoUtil = Math.max(LADO_MINIMO, anchoVentana - margen * 2);
+  const altoUtil = Math.max(LADO_ALTO_MINIMO, altoVentana - margen * 2);
+  const caja = {
+    ancho: Math.round(medidaValida(ancho, LADO_MINIMO, anchoUtil, LADO_POR_DEFECTO)),
+    alto: Math.round(medidaValida(alto, LADO_ALTO_MINIMO, altoUtil, altoUtil)),
+    arriba: "auto", abajo: "auto", izquierda: "auto", derecha: "auto",
+  };
+  if (borde === "arriba") caja.arriba = margen;
+  else if (borde === "abajo") caja.abajo = margen;
+  else if (borde === "izquierda") caja.izquierda = margen;
+  else caja.derecha = margen;
+  return caja;
+}
 
 const ANCHO_POR_DEFECTO = 340;
 const ANCHO_MINIMO = 240;
@@ -448,6 +472,10 @@ function guardarClave(clave, valor) {
   try { localStorage.setItem(clave, String(valor)); } catch (e) { /* preferencia, no dato */ }
 }
 
+function borrarClave(clave) {
+  try { localStorage.removeItem(clave); } catch (e) { /* preferencia, no dato */ }
+}
+
 // El tamaño elegido: un preset de `PANTALLAS` o un par ancho×alto en dp. Se guarda como JSON para
 // que el personalizado sobreviva a recargar sin una segunda clave por eje.
 function leerPantalla() {
@@ -726,8 +754,8 @@ export function crearPreviaPanel({ hospedador, proyecto, estadoPestana, editor, 
     y: null,
     anterior: MODO_LIBRE,
   };
-  // El registro y la consola del panel del editor: el mismo estado y su propio tamaño libre. Al no
-  // tener tiradores propios, ancho y alto se toman de su caja la primera vez que pasa a capa.
+  // El registro y la consola del panel del editor: el mismo estado y su propio tamaño libre, que
+  // ahora se ajusta con sus ocho tiradores y se guarda en sus propias claves.
   const inspector = {
     modo: MODO_LIBRE,
     borde: BORDE_POR_DEFECTO,
@@ -746,7 +774,9 @@ export function crearPreviaPanel({ hospedador, proyecto, estadoPestana, editor, 
       claves: { modo: CLAVE_PANEL_MODO, borde: CLAVE_PANEL_BORDE, x: CLAVE_PANEL_X, y: CLAVE_PANEL_Y,
         ancho: CLAVE_PANEL_ANCHO, alto: CLAVE_PANEL_ALTO },
       ids: { asidero: "previa-inspector-asidero", minimizar: "previa-inspector-minimizar",
-        izquierda: "previa-inspector-acoplar-izquierda", derecha: "previa-inspector-acoplar-derecha" },
+        izquierda: "previa-inspector-acoplar-izquierda", derecha: "previa-inspector-acoplar-derecha",
+        arriba: "previa-inspector-acoplar-arriba", abajo: "previa-inspector-acoplar-abajo",
+        soltar: "previa-inspector-soltar", tiradores: "previa-inspector-tirador-" },
       ancho: () => (Number.isFinite(inspector.ancho) ? inspector.ancho : ANCHO_POR_DEFECTO),
       alto: () => inspector.alto,
       anchoPropio: true,
@@ -760,7 +790,9 @@ export function crearPreviaPanel({ hospedador, proyecto, estadoPestana, editor, 
       claves: { modo: CLAVE_LADO_MODO, borde: CLAVE_LADO_BORDE, x: CLAVE_LADO_X, y: CLAVE_LADO_Y,
         ancho: null, alto: null },
       ids: { asidero: "vista-lado-asidero", minimizar: "vista-lado-minimizar",
-        izquierda: "vista-lado-acoplar-izquierda", derecha: "vista-lado-acoplar-derecha" },
+        izquierda: "vista-lado-acoplar-izquierda", derecha: "vista-lado-acoplar-derecha",
+        arriba: "vista-lado-acoplar-arriba", abajo: "vista-lado-acoplar-abajo",
+        soltar: "vista-lado-soltar", tiradores: "vista-tirador-" },
       ancho: () => cajaLado.ancho,
       alto: () => cajaLado.alto,
       anchoPropio: false,
@@ -951,17 +983,19 @@ export function crearPreviaPanel({ hospedador, proyecto, estadoPestana, editor, 
     const estado = f.estado;
     const modo = leerClave(f.claves.modo, MODO_LIBRE);
     estado.modo = modo === MODO_ACOPLADO || modo === MODO_MINIMIZADO ? modo : MODO_LIBRE;
-    estado.borde = leerClave(f.claves.borde, BORDE_POR_DEFECTO) === "izquierda" ? "izquierda" : "derecha";
+    estado.borde = bordeValido(leerClave(f.claves.borde, BORDE_POR_DEFECTO));
     const x = numeroOpcional(leerClave(f.claves.x, ""), 0, 100000);
     const y = numeroOpcional(leerClave(f.claves.y, ""), 0, 100000);
     estado.x = Number.isFinite(x) ? x : null;
     estado.y = Number.isFinite(y) ? y : null;
     if (f.claves.ancho) {
-      const ancho = numeroOpcional(leerClave(f.claves.ancho, ""), LADO_MINIMO, LADO_MAXIMO);
+      const limites = limitesFlotante();
+      const ancho = numeroOpcional(leerClave(f.claves.ancho, ""), limites.anchoMin, limites.anchoMax);
       if (f.anchoPropio) estado.ancho = Number.isFinite(ancho) ? ancho : null;
     }
     if (f.claves.alto) {
-      const alto = numeroOpcional(leerClave(f.claves.alto, ""), LADO_ALTO_MINIMO, LADO_ALTO_MINIMO * 8);
+      const limites = limitesFlotante();
+      const alto = numeroOpcional(leerClave(f.claves.alto, ""), limites.altoMin, limites.altoMax);
       if (f.altoPropio) estado.alto = Number.isFinite(alto) ? alto : null;
     }
     estado.anterior = estado.modo === MODO_MINIMIZADO ? MODO_LIBRE : estado.modo;
@@ -979,8 +1013,14 @@ export function crearPreviaPanel({ hospedador, proyecto, estadoPestana, editor, 
     guardarClave(f.claves.borde, estado.borde);
     if (Number.isFinite(estado.x)) guardarClave(f.claves.x, estado.x);
     if (Number.isFinite(estado.y)) guardarClave(f.claves.y, estado.y);
-    if (f.claves.ancho && Number.isFinite(estado.ancho)) guardarClave(f.claves.ancho, estado.ancho);
-    if (f.claves.alto && Number.isFinite(estado.alto)) guardarClave(f.claves.alto, estado.alto);
+    if (f.claves.ancho) {
+      if (Number.isFinite(estado.ancho)) guardarClave(f.claves.ancho, estado.ancho);
+      else borrarClave(f.claves.ancho);
+    }
+    if (f.claves.alto) {
+      if (Number.isFinite(estado.alto)) guardarClave(f.claves.alto, estado.alto);
+      else borrarClave(f.claves.alto);
+    }
   }
 
   // El alto de la capa libre: el que eligió el usuario o uno razonable para la ventana. En modo
@@ -1004,11 +1044,21 @@ export function crearPreviaPanel({ hospedador, proyecto, estadoPestana, editor, 
       minimizar.title = titulo;
       minimizar.setAttribute("aria-label", titulo);
     }
-    for (const [id, borde] of [[f.ids.izquierda, "izquierda"], [f.ids.derecha, "derecha"]]) {
-      const boton = el(id);
+    for (const borde of BORDES) {
+      const boton = el(f.ids[borde]);
       if (boton) {
-        boton.setAttribute("aria-pressed", String(estado.modo === MODO_ACOPLADO && estado.borde === borde));
+        const puesto = estado.modo === MODO_ACOPLADO && estado.borde === borde;
+        boton.setAttribute("aria-pressed", String(puesto));
+        const titulo = puesto ? "Soltar la consola y dejarla flotante"
+          : "Acoplar la consola al borde " + borde;
+        boton.title = titulo;
+        boton.setAttribute("aria-label", titulo);
       }
+    }
+    const soltar = el(f.ids.soltar);
+    if (soltar) {
+      soltar.setAttribute("aria-pressed", String(estado.modo === MODO_LIBRE));
+      soltar.hidden = estado.modo !== MODO_ACOPLADO;
     }
   }
 
@@ -1044,12 +1094,16 @@ export function crearPreviaPanel({ hospedador, proyecto, estadoPestana, editor, 
     contenedor.classList.toggle("minimizado", estado.modo === MODO_MINIMIZADO);
     contenedor.style.position = "fixed";
     if (estado.modo === MODO_ACOPLADO) {
-      contenedor.style.width = Math.round(f.ancho()) + "px";
-      contenedor.style.height = "auto";
-      contenedor.style.top = "8px";
-      contenedor.style.bottom = "8px";
-      contenedor.style.left = estado.borde === "izquierda" ? "8px" : "auto";
-      contenedor.style.right = estado.borde === "izquierda" ? "auto" : "8px";
+      // El tamaño es el mismo que en la capa libre: sus ocho tiradores lo cambian también aquí y
+      // el resultado se guarda en las claves propias de cada superficie. El borde solo decide qué
+      // arista se pega; el alto deja de ser `auto` para que el tirador sur tenga efecto.
+      const caja = cajaAcoplada(estado.borde, f.ancho(), altoLibreFlotante(nombre), medidas);
+      contenedor.style.width = caja.ancho + "px";
+      contenedor.style.height = caja.alto + "px";
+      contenedor.style.top = caja.arriba;
+      contenedor.style.bottom = caja.abajo;
+      contenedor.style.left = caja.izquierda;
+      contenedor.style.right = caja.derecha;
     } else if (estado.modo === MODO_MINIMIZADO) {
       // la pastilla va abajo a la derecha: el título sigue a la vista y el emulador queda libre
       contenedor.style.width = "auto";
@@ -1090,6 +1144,62 @@ export function crearPreviaPanel({ hospedador, proyecto, estadoPestana, editor, 
   // compatibilidad con los llamadores que ya hablaban de la consola de Pantalla
   function aplicarModoLado(persistir) { aplicarModoFlotante("vista", persistir); }
 
+  // Límites de una capa desprendida: la ventana es su espacio, tanto flotando como acoplada. Sirven
+  // a los tiradores de las dos superficies, que antes solo tenía la de Pantalla.
+  function limitesFlotante() {
+    const medidas = ventana();
+    return {
+      anchoMin: LADO_MINIMO,
+      anchoMax: Math.max(LADO_MINIMO, medidas.ancho - 16),
+      altoMin: LADO_ALTO_MINIMO,
+      altoMax: Math.max(LADO_ALTO_MINIMO, medidas.alto - 16),
+    };
+  }
+
+  // Caja que se entrega al tirador: el ancho y el alto que se ve, nunca indefinidos.
+  function cajaFlotante(nombre) {
+    const f = FLOTANTES[nombre];
+    return {
+      ancho: f.ancho(),
+      alto: altoLibreFlotante(nombre),
+      arriba: 0,
+    };
+  }
+
+  // Un tirador de la capa flotante del panel escribe en su propio estado; los de Pantalla siguen
+  // pasando por `fijarLado`, que ya guarda `CLAVE_LADO`/`CLAVE_LADO_ALTO`. En los dos casos se
+  // reaplica el modo con `persistir=false` y se guarda una sola vez al soltar.
+  function fijarFlotante(nombre, caja, altura) {
+    if (nombre === "panel") {
+      inspector.ancho = caja.ancho;
+      if (altura) inspector.alto = caja.alto;
+      aplicarModoFlotante("panel", false);
+    } else {
+      fijarLado(caja, altura);
+    }
+  }
+
+  function montarTiradoresFlotantes(nombre) {
+    const f = FLOTANTES[nombre];
+    const contenedor = f.contenedor();
+    if (!contenedor) return;
+    const tiradores = [...contenedor.querySelectorAll(".tirador-previa")];
+    if (!tiradores.length) return;
+    montarMarco(contenedor, {
+      caja: () => cajaFlotante(nombre),
+      limites: limitesFlotante,
+      fijar: (caja, altura) => fijarFlotante(nombre, caja, altura),
+      aplicar: (persistir) => {
+        aplicarModoFlotante(nombre, persistir);
+        if (nombre === "panel" && persistir) guardarFlotante("panel");
+      },
+      reiniciar: () => {
+        if (nombre === "panel") { inspector.ancho = ANCHO_POR_DEFECTO; inspector.alto = null; }
+        else { queridaLado.ancho = LADO_POR_DEFECTO; queridaLado.alto = null; queridaLado.arriba = 0; }
+      },
+    });
+  }
+
   function actualizarAria() {
     const panel = limitesPanel();
     const oeste = el("separador-previa");
@@ -1127,14 +1237,16 @@ export function crearPreviaPanel({ hospedador, proyecto, estadoPestana, editor, 
 
   function soltar() {
     if (!arrastre) return;
-    const { tirador } = arrastre;
+    const { tirador, aplicar } = arrastre;
     arrastre = null;
     if (tirador) tirador.classList.remove("arrastrando");
     document.body.classList.remove("separando-previa");
     delete document.body.dataset.eje;
-    // el guardado se hace una vez al soltar, no en cada movimiento del puntero
+    // el guardado se hace una vez al soltar, no en cada movimiento del puntero. `aplicar` solo lo
+    // trae el marco de una capa flotante: persiste su tamaño en sus propias claves.
     aplicarPanel(true);
     aplicarLado(true);
+    if (aplicar) aplicar(true);
     programarPintado();
   }
 
@@ -1233,6 +1345,7 @@ export function crearPreviaPanel({ hospedador, proyecto, estadoPestana, editor, 
           base: cajaDelArrastre(marco, config.caja()),
           limites: config.limites,
           fijar: config.fijar,
+          aplicar: config.aplicar,
         };
         try { tirador.setPointerCapture(e.pointerId); } catch (err) { /* puntero sintético */ }
         tirador.classList.add("arrastrando");
@@ -2400,7 +2513,15 @@ export function crearPreviaPanel({ hospedador, proyecto, estadoPestana, editor, 
       pausarAjusteCanvas();
       aplicarModoFlotante(nombre, true);
     };
-    const acoplar = (borde) => aplicarModoFlotantePorModo(nombre, MODO_ACOPLADO, borde);
+    // El mismo botón es reversible: si la capa ya está en ese borde, vuelve a flotar. El botón
+    // «Soltar» hace lo mismo sin necesidad de acordarse de dónde estaba acoplada.
+    const acoplar = (borde) => {
+      if (estado.modo === MODO_ACOPLADO && estado.borde === borde) {
+        aplicarModoFlotantePorModo(nombre, MODO_LIBRE);
+      } else {
+        aplicarModoFlotantePorModo(nombre, MODO_ACOPLADO, borde);
+      }
+    };
 
     asa.addEventListener("pointerdown", (e) => {
       if (e.button !== undefined && e.button !== 0) return;
@@ -2464,10 +2585,14 @@ export function crearPreviaPanel({ hospedador, proyecto, estadoPestana, editor, 
         if (estado.modo === MODO_MINIMIZADO) restaurar(); else minimizar();
       });
     }
-    const izquierda = el(f.ids.izquierda);
-    if (izquierda) izquierda.addEventListener("click", () => acoplar("izquierda"));
-    const derecha = el(f.ids.derecha);
-    if (derecha) derecha.addEventListener("click", () => acoplar("derecha"));
+    for (const borde of BORDES) {
+      const boton = el(f.ids[borde]);
+      if (boton) boton.addEventListener("click", () => acoplar(borde));
+    }
+    const botonSoltar = el(f.ids.soltar);
+    if (botonSoltar) {
+      botonSoltar.addEventListener("click", () => aplicarModoFlotantePorModo(nombre, MODO_LIBRE));
+    }
 
     // al cambiar el tamaño de la ventana, la capa libre se recorta a los bordes nuevos
     if (typeof window !== "undefined") {
@@ -4513,6 +4638,9 @@ export function crearPreviaPanel({ hospedador, proyecto, estadoPestana, editor, 
         queridaLado.arriba = 0;
       },
     });
+    // la capa del panel comparte tiradores con los marcos: los suyos son nuevos y viven dentro de
+    // `#previa-inspector`; los de Pantalla ya están montados arriba y no se duplican
+    montarTiradoresFlotantes("panel");
 
     // el movimiento se sigue en el documento: el puntero puede salirse del tirador sin soltar
     document.addEventListener("pointermove", (e) => {
@@ -4640,6 +4768,13 @@ export function crearPreviaPanel({ hospedador, proyecto, estadoPestana, editor, 
       intercambios: guion.filter((p) => p.tipo === "intercambiar").map((p) => p.ruta),
       menuAbierto: menuDesplegado,
       seccionPanel: seccion.panel, seccionVista: seccion.vista,
+      // estado acoplable de las dos capas, para las pruebas de navegador sin leer estilos
+      flotantes: {
+        panel: { modo: inspector.modo, borde: inspector.borde,
+          ancho: inspector.ancho, alto: inspector.alto },
+        vista: { modo: lado.modo, borde: lado.borde,
+          ancho: cajaLado.ancho, alto: cajaLado.alto },
+      },
       seleccion: seleccion ? seleccion.slice() : null,
     }),
   };

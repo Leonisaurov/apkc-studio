@@ -648,6 +648,32 @@
                   </div>
                 </div>
                 <div id="previa-inspector" class="previa-inspector">
+                  <div id="previa-inspector-tirador-oeste" class="tirador-previa tirador-oeste" data-eje="oeste"
+                       role="separator" tabindex="0" aria-orientation="vertical"
+                       aria-label="Borde izquierdo del registro y la consola: ancho"
+                       aria-controls="previa-inspector" aria-valuemin="220" aria-valuemax="900" aria-valuenow="340"></div>
+                  <div id="previa-inspector-tirador-este" class="tirador-previa tirador-este" data-eje="este"
+                       role="separator" tabindex="-1" aria-orientation="vertical"
+                       aria-label="Borde derecho del registro y la consola" aria-controls="previa-inspector"></div>
+                  <div id="previa-inspector-tirador-norte" class="tirador-previa tirador-norte" data-eje="norte"
+                       role="separator" tabindex="-1" aria-orientation="horizontal"
+                       aria-label="Borde superior del registro y la consola" aria-controls="previa-inspector"></div>
+                  <div id="previa-inspector-tirador-sur" class="tirador-previa tirador-sur" data-eje="sur"
+                       role="separator" tabindex="0" aria-orientation="horizontal"
+                       aria-label="Borde inferior del registro y la consola: alto"
+                       aria-controls="previa-inspector" aria-valuemin="240" aria-valuenow="480"></div>
+                  <div id="previa-inspector-tirador-noroeste" class="tirador-previa tirador-noroeste" data-eje="noroeste"
+                       role="separator" tabindex="-1" aria-label="Esquina superior izquierda del registro y la consola"
+                       aria-controls="previa-inspector"></div>
+                  <div id="previa-inspector-tirador-noreste" class="tirador-previa tirador-noreste" data-eje="noreste"
+                       role="separator" tabindex="-1" aria-label="Esquina superior derecha del registro y la consola"
+                       aria-controls="previa-inspector"></div>
+                  <div id="previa-inspector-tirador-suroeste" class="tirador-previa tirador-suroeste" data-eje="suroeste"
+                       role="separator" tabindex="-1" aria-label="Esquina inferior izquierda del registro y la consola"
+                       aria-controls="previa-inspector"></div>
+                  <div id="previa-inspector-tirador-sureste" class="tirador-previa tirador-sureste" data-eje="sureste"
+                       role="separator" tabindex="-1" aria-label="Esquina inferior derecha del registro y la consola"
+                       aria-controls="previa-inspector"></div>
                   <div class="previa-inspector-cab">
                     <button id="previa-inspector-asidero" class="icono-boton previa-inspector-asidero" type="button"
                             title="Arrastra para mover el registro y la consola"
@@ -669,6 +695,21 @@
                             title="Acoplar el registro y la consola al borde derecho"
                             aria-label="Acoplar al borde derecho" aria-pressed="false">
                       <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 4h16v16H4z"/><path d="M15 4v16"/></svg>
+                    </button>
+                    <button id="previa-inspector-acoplar-arriba" class="icono-boton" type="button"
+                            title="Acoplar el registro y la consola al borde superior"
+                            aria-label="Acoplar al borde superior" aria-pressed="false">
+                      <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 4h16v16H4z"/><path d="M4 9h16"/></svg>
+                    </button>
+                    <button id="previa-inspector-acoplar-abajo" class="icono-boton" type="button"
+                            title="Acoplar el registro y la consola al borde inferior"
+                            aria-label="Acoplar al borde inferior" aria-pressed="false">
+                      <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 4h16v16H4z"/><path d="M4 15h16"/></svg>
+                    </button>
+                    <button id="previa-inspector-soltar" class="icono-boton" type="button" hidden
+                            title="Soltar el registro y la consola y dejarla flotante"
+                            aria-label="Soltar y dejar flotante" aria-pressed="false">
+                      <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3v12M7 10l5 5 5-5M5 20h14"/></svg>
                     </button>
                     <button id="previa-inspector-cerrar" class="icono-boton" type="button"
                             title="Cerrar el registro y la consola" aria-label="Cerrar el registro y la consola">
@@ -1122,6 +1163,21 @@
                           title="Acoplar el registro y la consola al borde derecho" aria-label="Acoplar al borde derecho"
                           aria-pressed="true">
                     <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 4h16v16H4z"/><path d="M15 4v16"/></svg>
+                  </button>
+                  <button id="vista-lado-acoplar-arriba" class="icono-boton" type="button"
+                          title="Acoplar el registro y la consola al borde superior"
+                          aria-label="Acoplar al borde superior" aria-pressed="false">
+                    <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 4h16v16H4z"/><path d="M4 9h16"/></svg>
+                  </button>
+                  <button id="vista-lado-acoplar-abajo" class="icono-boton" type="button"
+                          title="Acoplar el registro y la consola al borde inferior"
+                          aria-label="Acoplar al borde inferior" aria-pressed="false">
+                    <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 4h16v16H4z"/><path d="M4 15h16"/></svg>
+                  </button>
+                  <button id="vista-lado-soltar" class="icono-boton" type="button" hidden
+                          title="Soltar el registro y la consola y dejarla flotante"
+                          aria-label="Soltar y dejar flotante" aria-pressed="false">
+                    <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3v12M7 10l5 5 5-5M5 20h14"/></svg>
                   </button>
                   <button id="vista-inspector-cerrar" class="icono-boton" type="button"
                           title="Cerrar el registro y la consola" aria-label="Cerrar el registro y la consola">

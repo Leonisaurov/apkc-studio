@@ -653,6 +653,31 @@ for (const clave of ["apkc-studio/previa-inspector-modo", "apkc-studio/previa-in
     mal(`previa-panel.js no persiste el registro desprendido del panel (${clave})`);
   }
 }
+// Los cuatro botones de acoplamiento y el de soltar son contrato en las dos capas; los tiradores del
+// panel son nuevos y no sustituyen a los ocho que ya tenía la vista Pantalla.
+for (const prefijo of ["previa-inspector", "vista-lado"]) {
+  for (const sufijo of ["acoplar-izquierda", "acoplar-derecha", "acoplar-arriba", "acoplar-abajo", "soltar"]) {
+    const id = prefijo + "-" + sufijo;
+    if (!new RegExp(`id="${id}"`).test(html)) mal(`falta en index.html el control acoplable ${id}`);
+    if (!fuentePreviaEstado.includes(`f.ids.${sufijo.replace(/-([a-z])/g, (_, c) => c.toUpperCase())}`) &&
+        !fuentePreviaEstado.includes(`f.ids[borde]`)) {
+      mal(`previa-panel.js no conecta el control acoplable ${id}`);
+    }
+  }
+}
+if (!/const BORDES = \["izquierda", "derecha", "arriba", "abajo"\]/.test(fuentePreviaEstado)) {
+  mal("previa-panel.js no ofrece los cuatro bordes de acoplamiento");
+}
+if (!/\.previa-inspector > \.tirador-previa \{ pointer-events: auto; \}/.test(fuenteEstilo)) {
+  mal("style.css no deja arrastrar los tiradores de la capa flotante del panel");
+}
+for (const eje of ["oeste", "este", "norte", "sur", "noroeste", "noreste", "suroeste", "sureste"]) {
+  const id = "previa-inspector-tirador-" + eje;
+  if (!new RegExp(`id="${id}"`).test(html)) mal(`falta en index.html el tirador ${id}`);
+}
+if (!/montarTiradoresFlotantes\("panel"\)/.test(fuentePreviaEstado)) {
+  mal("previa-panel.js no monta los tiradores de la capa flotante del panel");
+}
 // Un gesto de la consola no reescala el lienzo. El `ResizeObserver` de la fila se despierta con el
 // cambio de la capa, así que el ajuste se salta mientras dura el gesto y `ajustarCanvas` es
 // idempotente para la misma caja y el mismo par de dp. El ajuste por ventana o por preset sigue
@@ -689,6 +714,32 @@ if (ancho(10, 240, 900) !== 240 || ancho(5000, 240, 900) !== 900) mal("anchoVali
 if (ancho(NaN, 240, 900) !== 340 || ancho("basura", 240, 900) !== 340) mal("anchoValido no cae al respaldo");
 if (ancho(500, 600, 400) !== 600) mal("anchoValido no corrige un máximo menor que el mínimo");
 if (ancho(300, 240, 900) !== 300) mal("anchoValido redondea mal");
+
+// 6d-alt. la consola flotante se acopla a cuatro bordes. La preferencia se valida y la geometría es
+//         pura: solo se pega el borde elegido y el tamaño elegido se respeta dentro de la ventana.
+const bordeValido = previaPanel.bordeValido;
+for (const borde of ["izquierda", "derecha", "arriba", "abajo"]) {
+  if (bordeValido(borde) !== borde) mal(`bordeValido rechaza el borde ${borde}`);
+}
+if (bordeValido("basura") !== "derecha" || bordeValido(null) !== "derecha") {
+  mal("bordeValido no cae al borde por defecto");
+}
+const cajaAcoplada = previaPanel.cajaAcoplada;
+const medidas = { ancho: 1000, alto: 700 };
+const acopladaIzquierda = cajaAcoplada("izquierda", 380, 420, medidas);
+const acopladaArriba = cajaAcoplada("arriba", 500, 240, medidas);
+if (acopladaIzquierda.izquierda !== 8 || acopladaIzquierda.derecha !== "auto" ||
+    acopladaIzquierda.arriba !== "auto" || acopladaIzquierda.abajo !== "auto") {
+  mal("cajaAcoplada no pega solo el borde izquierdo: " + JSON.stringify(acopladaIzquierda));
+}
+if (acopladaArriba.arriba !== 8 || acopladaArriba.izquierda !== "auto" ||
+    acopladaArriba.ancho !== 500 || acopladaArriba.alto !== 240) {
+  mal("cajaAcoplada no pega arriba respetando el tamaño: " + JSON.stringify(acopladaArriba));
+}
+const recortada = cajaAcoplada("abajo", 5000, 9000, medidas);
+if (recortada.ancho !== 984 || recortada.alto !== 684 || recortada.abajo !== 8) {
+  mal("cajaAcoplada no recorta el tamaño a la ventana: " + JSON.stringify(recortada));
+}
 
 // 6d-bis. el reparto de una esquina o una arista: la arista que se mueve sigue al puntero y la de
 //        enfrente se queda; el alto no deja hueco fuera del marco. Puro, probado aquí.
@@ -1671,6 +1722,11 @@ for (const [id, donde] of [
   ["previa-inspector-minimizar", "el botón que minimiza y restaura el registro y consola del panel"],
   ["previa-inspector-acoplar-izquierda", "el botón que acopla el panel al borde izquierdo"],
   ["previa-inspector-acoplar-derecha", "el botón que acopla el panel al borde derecho"],
+  ["previa-inspector-acoplar-arriba", "el botón que acopla el panel al borde superior"],
+  ["previa-inspector-acoplar-abajo", "el botón que acopla el panel al borde inferior"],
+  ["previa-inspector-soltar", "el botón que suelta el panel y lo deja flotante"],
+  ...["oeste", "este", "norte", "sur", "noroeste", "noreste", "suroeste", "sureste"]
+    .map((eje) => ["previa-inspector-tirador-" + eje, `el tirador ${eje} del panel flotante`]),
   ["previa-inspector-cerrar", "el botón que cierra el registro y la consola del panel"],
   ["previa-inspector-abrir", "el botón que abre el registro y la consola del panel"],
   ["previa-detalle-modelo", "el detalle del modelo en la capa flotante del panel"],
@@ -1692,6 +1748,9 @@ for (const [id, donde] of [
   ["vista-lado-minimizar", "el botón que minimiza y restaura la consola de Pantalla"],
   ["vista-lado-acoplar-izquierda", "el botón que acopla la consola al borde izquierdo"],
   ["vista-lado-acoplar-derecha", "el botón que acopla la consola al borde derecho"],
+  ["vista-lado-acoplar-arriba", "el botón que acopla la consola al borde superior"],
+  ["vista-lado-acoplar-abajo", "el botón que acopla la consola al borde inferior"],
+  ["vista-lado-soltar", "el botón que suelta la consola y la deja flotante"],
 ]) {
   if (!ids.has(id)) mal(`${donde} (${id}) no está en index.html`);
 }
@@ -1878,7 +1937,7 @@ for (const tirador of html.matchAll(/<div id="([^"]*tirador[^"]*|[^"]*separador-
   if (!/data-eje="(oeste|este|norte|sur|noroeste|noreste|suroeste|sureste)"/.test(etiqueta)) {
     mal("el tirador " + tirador[1] + " no declara su eje");
   }
-  if (!/aria-controls="(previa-lateral|vista-lado)"/.test(etiqueta)) {
+  if (!/aria-controls="(previa-lateral|vista-lado|previa-inspector)"/.test(etiqueta)) {
     mal("el tirador " + tirador[1] + " no dice qué panel redimensiona");
   }
 }
@@ -1886,6 +1945,8 @@ const tiradoresPanel = [...html.matchAll(/id="(tirador-previa-[a-z]+|separador-p
 if (tiradoresPanel !== 8) mal("la vista previa no tiene sus ocho tiradores: " + tiradoresPanel);
 const tiradoresVista = [...html.matchAll(/id="vista-tirador-[a-z]+"/g)].length;
 if (tiradoresVista !== 8) mal("la vista Pantalla no tiene sus ocho tiradores: " + tiradoresVista);
+const tiradoresFlotante = [...html.matchAll(/id="previa-inspector-tirador-[a-z]+"/g)].length;
+if (tiradoresFlotante !== 8) mal("la capa flotante no tiene sus ocho tiradores: " + tiradoresFlotante);
 // el rótulo de tipo/id sobre un nodo lo pinta el pintor compartido; este módulo no añade el suyo,
 // porque el panel y el emulador deben enseñar lo mismo sin duplicar el dibujo
 const fuentePrevia = fs.readFileSync(path.join(__dirname, "previa-panel.js"), "utf8");
