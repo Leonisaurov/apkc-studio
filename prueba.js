@@ -1223,10 +1223,15 @@ if (conDinamico.length !== 2 || conDinamico[1].texto !== "Pulsos: 1") {
 const modeloTexto = {
   pantalla: { x: 0, y: 0, ancho: 100, alto: 100 },
   raiz: {
-    tipo: "FrameLayout", rect: { x: 0, y: 0, ancho: 100, alto: 100 },
+    tipo: "FrameLayout", idRef: "0x7f010009", texto: "orientation",
+    rect: { x: 0, y: 0, ancho: 100, alto: 100 },
     hijos: [
       { tipo: "TextView", id: "id/etiqueta", idRef: "0x7f010000", texto: "Nombre",
         rect: { x: 0, y: 0, ancho: 100, alto: 10 } },
+      // el caso medido: otro nodo NO editable con el MISMO idRef y un `textoDinamico` prestado
+      { tipo: "LinearLayout", id: "id/contenedor", idRef: "0x7f010001",
+        texto: "orientation", textoDinamico: "orientation",
+        rect: { x: 0, y: 10, ancho: 100, alto: 20 } },
       { tipo: "EditText", id: "id/nombre", idRef: "0x7f010001", texto: "",
         rect: { x: 0, y: 10, ancho: 100, alto: 20 } },
       { tipo: "TextInputEditText", id: "id/apellido", idRef: "0x7f010002", texto: "",
@@ -1254,6 +1259,39 @@ if (previaPanel.editableEnPunto(modeloTexto, 100, 100, 50, 5) ||
 }
 if (previaPanel.oyenteEnPunto(modeloTexto, 100, 100, 50, 15)) {
   mal("un EditText sin OnClickListener aparece como oyente");
+}
+// el sembrado del campo lee SOLO el texto propio del EditText tocado: ni el raíz con
+// `texto:"orientation"`, ni el contenedor que comparte idRef y trae un `textoDinamico` prestado.
+// `textoDeNodo` sigue prefiriendo cualquier `texto*` para la pintura; no se ha tocado.
+const rectNombre = previaPanel.editableEnPunto(modeloTexto, 100, 100, 50, 15);
+const raizTexto = modeloTexto.raiz;
+const prestadoTexto = modeloTexto.raiz.hijos[1];
+const editVacio = modeloTexto.raiz.hijos[2];
+const editConTexto = JSON.parse(JSON.stringify(editVacio));
+editConTexto.texto = "Ana";
+const editConDinamico = JSON.parse(JSON.stringify(editConTexto));
+editConDinamico.textoDinamico = "Peña/Os";
+if (previaPanel.textoEditableDe(rectNombre, editVacio) !== "") {
+  mal("un EditText sin texto propio se siembra con el texto de otro nodo");
+}
+if (previaPanel.textoEditableDe(rectNombre, raizTexto) !== "" ||
+    previaPanel.textoEditableDe(rectNombre, prestadoTexto) !== "") {
+  mal("textoEditableDe presta el texto de un nodo no editable (raíz o idRef duplicado)");
+}
+if (previaPanel.textoEditableDe(rectNombre, editConTexto) !== "Ana" ||
+    previaPanel.textoEditableDe(rectNombre, editConDinamico) !== "Peña/Os") {
+  mal("textoEditableDe no lee texto/textoDinamico del EditText tocado");
+}
+if (vistaPrevia.textoDeNodo(raizTexto) !== "orientation" ||
+    vistaPrevia.textoDeNodo(prestadoTexto) !== "orientation") {
+  mal("textoDeNodo dejó de preferir los campos `texto*` (se rompería la pintura)");
+}
+if (!/textoInicialDe\(rect\)/.test(fuentePreviaEstado) ||
+    !/setSelectionRange\(0, campoTexto\.value\.length\)/.test(fuentePreviaEstado)) {
+  mal("el campo del emulador no siembra desde el rect ni selecciona todo para sustituir al teclear");
+}
+if (!/escribir:" \+ String\(p\.idRef\) \+ "\/" \+ String\(p\.valor/.test(fuentePreviaEstado)) {
+  mal("estado() no identifica el paso de escritura por idRef");
 }
 const escritoEnModelo = JSON.parse(JSON.stringify(modeloTexto));
 escritoEnModelo.raiz.hijos[1].textoDinamico = "Ana";

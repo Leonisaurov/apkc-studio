@@ -2175,6 +2175,8 @@ async function conductor() {
       return {
         modelo: !!modelo,
         ids: rects.map((r) => r.id),
+        // el raíz puede compartir idRef con un EditText: el sembrado no debe tomar su texto
+        idRefRaiz: rects.length ? rects[0].idRef : "",
         nombre: punto("id/nombre"), apellido: punto("id/apellido"), enviar: punto("id/enviar"),
         xml: document.getElementById("codigo").value,
       };
@@ -2199,8 +2201,9 @@ async function conductor() {
       })()`);
       comprueba("al pulsar un EditText aparece un campo real enfocado sobre el rect dibujado",
         abierto.existe && abierto.visible && abierto.enfocado && abierto.valor === "" &&
-        /^0x[0-9a-f]+$/i.test(String(abierto.idRef)),
-        JSON.stringify(abierto));
+        /^0x[0-9a-f]+$/i.test(String(abierto.idRef)) &&
+        abierto.idRef !== baseTexto.idRefRaiz,
+        JSON.stringify({ abierto, idRefRaiz: baseTexto.idRefRaiz }));
       await exec("Input.insertText", { text: "Ana Peña/Os" });
       const escrito = await evaluar(`(async () => {
         const vp = await import("/vista-previa.js");
@@ -2229,7 +2232,7 @@ async function conductor() {
       comprueba("escribir en el campo actualiza el texto dibujado y el modelo de ejecución",
         escrito.texto === "Ana Peña/Os" && escrito.pintado === "Ana Peña/Os" &&
         escrito.capturas.includes("usuario.escribir") &&
-        escrito.guion.some((p) => /^escribir:0x/.test(p)),
+        escrito.guion.some((p) => p === "escribir:" + abierto.idRef + "/Ana Peña/Os"),
         JSON.stringify({ texto: escrito.texto, pintado: escrito.pintado,
           capturas: escrito.capturas, guion: escrito.guion }).slice(0, 400));
       comprueba("el tecleo del emulador no cambia el XML del editor",
@@ -2258,13 +2261,16 @@ async function conductor() {
           xml: document.getElementById("codigo").value,
         };
       })()`);
+      const pasosEscritura = dosCampos.guion.filter((p) => /^escribir:0x/.test(p));
       comprueba("dos EditText conservan cada uno su texto en dos pasos `--escribir`",
         segundoAbierto && segundoAbierto.idRef && segundoAbierto.idRef !== abierto.idRef &&
         dosCampos.nombre === "Ana Peña/Os" && dosCampos.apellido === "García" &&
-        dosCampos.guion.filter((p) => /^escribir:/.test(p)).length === 2 &&
+        pasosEscritura.length === 2 &&
+        pasosEscritura[0] === "escribir:" + abierto.idRef + "/Ana Peña/Os" &&
+        pasosEscritura[1] === "escribir:" + segundoAbierto.idRef + "/García" &&
         dosCampos.xml === xmlAntesTexto,
         JSON.stringify({ segundo: segundoAbierto && segundoAbierto.idRef, dosCampos,
-          xmlIgual: dosCampos.xml === xmlAntesTexto }).slice(0, 400));
+          pasosEscritura, xmlIgual: dosCampos.xml === xmlAntesTexto }).slice(0, 400));
       // tocar fuera quita el foco sin tocar el documento; apagar limpia también lo tecleado
       await exec("Input.dispatchMouseEvent",
         { type: "mousePressed", x: baseTexto.enviar.x, y: baseTexto.enviar.y, button: "left", clickCount: 1 });

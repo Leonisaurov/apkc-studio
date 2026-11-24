@@ -479,6 +479,16 @@ export function esEditableTexto(tipo) {
   return TIPOS_CON_TECLADO.has(String(tipo || ""));
 }
 
+// El texto propio de una vista editable, con el rect que recibió el toque como prueba de identidad.
+// Solo cuenta el MISMO idRef y un tipo que admita teclado: un contenedor con el mismo idRef (o con
+// cualquier otra clave `texto*`) no puede prestarle su texto al EditText. `textoDeNodo` sigue
+// rigiendo la pintura; aquí se leen solo `texto` y `textoDinamico` del nodo tocado.
+export function textoEditableDe(rect, nodo) {
+  if (!rect || !nodo || nodo.idRef !== rect.idRef || !esEditableTexto(nodo.tipo)) return "";
+  if (typeof nodo.textoDinamico === "string" && nodo.textoDinamico !== "") return nodo.textoDinamico;
+  return typeof nodo.texto === "string" ? nodo.texto : "";
+}
+
 // La vista editable bajo un punto, en las mismas coordenadas lógicas que el pintor. Se elige la más
 // profunda, como en `oyenteEnPunto`, para que un EditText dentro de un contenedor con listener se
 // quede con el toque en vez de disparar el clic del padre.
@@ -2739,12 +2749,17 @@ export function crearPreviaPanel({ hospedador, proyecto, estadoPestana, editor, 
     return rectsEscalados(modelo, espacio.ancho, espacio.alto).find((r) => r.idRef === idRef) || null;
   }
 
-  // El texto con el que se abre el campo: lo ya tecleado en esta ejecución, o lo que el modelo
-  // muestra (el dinámico si la app escribió algo, el del layout si no).
-  function textoInicialDe(idRef) {
-    if (textosEscritos.has(idRef)) return textosEscritos.get(idRef);
-    for (const { nodo } of nodosAplanados(modeloActual())) {
-      if (nodo && nodo.idRef === idRef) return textoDeNodo(nodo);
+  // El texto con el que se abre el campo: lo ya tecleado en esta ejecución, o el texto del EditText
+  // que entregó el rect. Se lee del MISMO modelo escalado que se pintó (el del emulador), no del
+  // modelo dibujado, y se exige que el nodo sea editable y coincida con el tipo y el id del rect.
+  function textoInicialDe(rect) {
+    if (!rect || !rect.idRef) return "";
+    if (textosEscritos.has(rect.idRef)) return textosEscritos.get(rect.idRef);
+    for (const { nodo } of nodosAplanados(modeloDelEmulador())) {
+      if (!nodo || nodo.idRef !== rect.idRef || !esEditableTexto(nodo.tipo)) continue;
+      if (rect.tipo && nodo.tipo !== rect.tipo) continue;
+      if (rect.id && nodo.id !== rect.id) continue;
+      return textoEditableDe(rect, nodo);
     }
     return "";
   }
@@ -2821,7 +2836,7 @@ export function crearPreviaPanel({ hospedador, proyecto, estadoPestana, editor, 
   function abrirCampoTexto(canvas, rect, evento) {
     if (!campoTexto || apagado || pulsando || !rect || !rect.idRef) return;
     if (focoTexto && focoTexto.idRef !== rect.idRef) cerrarCampoTexto();
-    focoTexto = { canvas, idRef: rect.idRef, valor: textoInicialDe(rect.idRef) };
+    focoTexto = { canvas, idRef: rect.idRef, valor: textoInicialDe(rect) };
     campoTexto.value = focoTexto.valor;
     campoTexto.hidden = false;
     campoTexto.setAttribute("aria-label", "Texto del EditText " + rect.idRef + " del emulador");
@@ -2829,9 +2844,10 @@ export function crearPreviaPanel({ hospedador, proyecto, estadoPestana, editor, 
     ignorarCierreTexto = evento || null;
     colocarCampoTexto();
     campoTexto.focus();
+    // seleccionar desde el principio: `insertText` sustituye el texto sembrado en vez de concatenar
+    // detrás del caret. Con un campo vacío (0,0) deja el caret donde estaba.
     if (typeof campoTexto.setSelectionRange === "function") {
-      const fin = campoTexto.value.length;
-      campoTexto.setSelectionRange(fin, fin);
+      campoTexto.setSelectionRange(0, campoTexto.value.length);
     }
   }
 
@@ -5011,7 +5027,11 @@ export function crearPreviaPanel({ hospedador, proyecto, estadoPestana, editor, 
       ancho: caja.ancho, alto: caja.alto, arriba: caja.arriba,
       lado: cajaLado.ancho, ladoAlto: cajaLado.alto,
       visible, modo, ruta: rutaViva, pulsos: [...pulsos], editando,
-      guion: guion.map((p) => p.tipo + (p.valor ? ":" + p.valor : p.firma ? ":" + p.firma : "")),
+      // el paso de escritura lleva su idRef para que la prueba distinga dos EditText aunque el
+      // texto sea el mismo: `escribir:0x…/texto`, el mismo formato de `--escribir` del intérprete
+      guion: guion.map((p) => p.tipo === "escribir"
+        ? "escribir:" + String(p.idRef) + "/" + String(p.valor == null ? "" : p.valor)
+        : p.tipo + (p.valor ? ":" + p.valor : p.firma ? ":" + p.firma : "")),
       // las rutas de OPFS que usan los pasos de hot swap, para que una prueba pueda comprobar que
       // el dex quedó bajo /previa-soltada/ y no en el proyecto
       intercambios: guion.filter((p) => p.tipo === "intercambiar").map((p) => p.ruta),
