@@ -4803,6 +4803,100 @@ public final class R {
     }
   }
 
+  // 6za. CONTRATO ESTRUCTURAL de la emulación del Contador, no la emulación real: aquí solo se
+  //      fija que la plantilla genera lo que el intérprete necesita y que la página entiende el
+  //      JSON que `apkc preview` entregó en esta rama, en reposo y tras pulsar id/pulsar. La
+  //      emulación de verdad se mide fuera de node con la apk compilada y se añadirá a e2e.sh
+  //      centralmente: este bloque no la sustituye ni la falsifica.
+  const modeloContador = (pasos, extra, dinamico) => ({
+    paquete: "com.hola.contador", version: "0.1", actividad: ".MainActivity",
+    layout: "res/layout/main.xml", pantalla: { x: 0, y: 0, ancho: 360, alto: 640 },
+    aproximado: true, nodos: 3,
+    ejecucion: Object.assign({
+      actividad: "com.hola.contador.MainActivity", metodo: "onCreate", pasos,
+      oyentes: [{ id: "id/pulsar", idRef: "0x7f010000" }],
+      pantallas: ["com.hola.contador.MainActivity"],
+      ciclo: ["com.hola.contador.MainActivity.onCreate"],
+    }, extra),
+    raiz: {
+      tipo: "LinearLayout", ancho: "match_parent", alto: "match_parent", gravity: "center",
+      rect: { x: 0, y: 0, ancho: 360, alto: 640 },
+      hijos: [
+        Object.assign({ tipo: "TextView", id: "id/total", idRef: "0x7f010001",
+          texto: "Pulsos: 0", estilo: "@0x01030042", ancho: "wrap_content", alto: "wrap_content",
+          rect: { x: 136, y: 284, ancho: 88, alto: 24 } },
+          dinamico ? { textoDinamico: dinamico } : {}),
+        { tipo: "Button", id: "id/pulsar", idRef: "0x7f010000", texto: "Pulsar", oyente: true,
+          ancho: "wrap_content", alto: "wrap_content", rect: { x: 148, y: 308, ancho: 64, alto: 48 } },
+      ],
+    },
+  });
+  const reposoContador = vistaPrevia.modeloDeSalida(JSON.stringify(modeloContador(22, {}, null)));
+  const clicContador = vistaPrevia.modeloDeSalida(JSON.stringify(modeloContador(69, {
+    interacciones: 1,
+    capturas: [
+      { origen: "TextView.setText", id: "id/total", idRef: "0x7f010001", texto: "Pulsos: 1" },
+      { origen: "Log.d", texto: "pulso 1" },
+      { origen: "println", texto: "contador: pulso 1" },
+    ],
+    consola: [
+      { origen: "Log.d", texto: "pulso 1", secuencia: 1 },
+      { origen: "println", texto: "contador: pulso 1", secuencia: 2 },
+    ],
+    pulsaciones: ["id/pulsar"],
+  }, "Pulsos: 1")));
+  if (!reposoContador || !clicContador) {
+    mal("contador: modeloDeSalida rechaza el JSON del emulador");
+  } else {
+    // el botón registra su oyente en Java (no con android:onClick) y el TextView muestra la cuenta
+    if (!/findViewById\(R\.id\.pulsar\)\.setOnClickListener/.test(actContador)) {
+      mal("contador: la actividad no registra el oyente de id/pulsar");
+    }
+    if (!/android:text="Pulsos: 0"/.test(layContador) || !/android:text="Pulsar"/.test(layContador)) {
+      mal("contador: el layout no parte de «Pulsos: 0» con el botón «Pulsar»");
+    }
+    const planoReposo = vistaPrevia.nodosAplanados(reposoContador);
+    const planoCl = vistaPrevia.nodosAplanados(clicContador);
+    if (planoReposo.length !== 3 || planoCl.length !== 3) {
+      mal(`contador: ${planoReposo.length} y ${planoCl.length} nodos aplanados, esperados 3`);
+    }
+    const totalReposo = planoReposo.find((x) => x.nodo.id === "id/total");
+    const totalClic = planoCl.find((x) => x.nodo.id === "id/total");
+    const botonContador = planoReposo.find((x) => x.nodo.id === "id/pulsar");
+    if (!totalReposo || !totalClic || !botonContador) {
+      mal("contador: faltan id/total o id/pulsar en el modelo");
+    } else {
+      if (vistaPrevia.textoDeNodo(totalReposo.nodo) !== "Pulsos: 0" ||
+          vistaPrevia.textoDeNodo(totalClic.nodo) !== "Pulsos: 1") {
+        mal("contador: textoDeNodo no prefiere textoDinamico tras el clic");
+      }
+      if (botonContador.nodo.oyente !== true || botonContador.nodo.idRef !== "0x7f010000") {
+        mal("contador: el botón del modelo no es el oyente que registra la actividad");
+      }
+    }
+    const ejecucionReposo = reposoContador.ejecucion || {}, ejecucionClic = clicContador.ejecucion || {};
+    if (!(ejecucionReposo.pasos > 0) || !(ejecucionClic.pasos > 0) ||
+        reposoContador.avisos || reposoContador.error || clicContador.avisos || clicContador.error) {
+      mal("contador: ejecución sin pasos o con avisos/error");
+    }
+    if (!(ejecucionReposo.oyentes || []).some((o) => o.id === "id/pulsar") ||
+        ejecucionReposo.interacciones !== undefined) {
+      mal("contador: en reposo debe haber oyente id/pulsar y cero interacciones");
+    }
+    if (ejecucionClic.interacciones !== 1 ||
+        !(ejecucionClic.consola || []).some((c) => /^Log\.|println/.test(c.origen) && /pulso 1/.test(c.texto))) {
+      mal("contador: el clic no deja una interacción y una línea de consola");
+    }
+    if (!/\b3 nodos\b/.test(vistaPrevia.textoDelModelo(clicContador))) {
+      mal("contador: textoDelModelo no cuenta los 3 nodos");
+    }
+    const rectsContador = vistaPrevia.rectsEscalados(clicContador, 360, 640);
+    if (rectsContador.length !== 3 || rectsContador[1].texto !== "Pulsos: 1" ||
+        rectsContador[2].oyente !== true) {
+      mal("contador: rectsEscalados no pinta el texto dinámico ni el botón oyente");
+    }
+  }
+
   console.log(fallos ? `PRUEBA FALLA: ${fallos} problemas` : "prueba: todo en orden");
   process.exit(fallos ? 1 : 0);
 })();
