@@ -1293,6 +1293,32 @@ for (const prefijo of ["previa-inspector", "vista-lado"]) {
 if (!/export const BORDES = \["izquierda", "derecha", "arriba", "abajo"\]/.test(fuentePaneles)) {
   mal("paneles.js no ofrece los cuatro bordes de acoplamiento");
 }
+
+// §341: la consola nace pequeña (340 × 240) y el tirador norte/oeste dejan quieta la arista de
+// enfrente. La medición 1:1 con `getBoundingClientRect` es CDP y queda en verificación; aquí se
+// falsan las causas en el fuente y en el CSS, que sí se pueden comprobar sin navegador.
+if (/Math\.min\(560, ventana\(\)\.alto/.test(fuentePreviaEstado)) {
+  mal("altoLibreFlotante sigue cayendo al respaldo grande de 560 px");
+}
+if (!/function altoLibreFlotante\(nombre\)[\s\S]{0,220}return LADO_ALTO_MINIMO;/.test(fuentePreviaEstado)) {
+  mal("altoLibreFlotante no usa el mínimo de 240 px como preferencia ausente");
+}
+if (!/function cajaFlotante\(nombre\)[\s\S]{0,900}arriba: Number\.isFinite\(estado\.y\)/.test(fuentePreviaEstado)) {
+  mal("cajaFlotante no entrega el `arriba` real del estado al tirador");
+}
+if (!/function cajaFlotante\(nombre\)[\s\S]{0,1100}izquierda: Number\.isFinite\(estado\.x\)/.test(fuentePreviaEstado)) {
+  mal("cajaFlotante no entrega la `izquierda` real del estado al tirador oeste");
+}
+if (!/function fijarFlotante\(nombre, caja, altura\)[\s\S]{0,700}estado\.y = caja\.arriba/.test(fuentePreviaEstado) ||
+    !/function fijarFlotante\(nombre, caja, altura\)[\s\S]{0,700}estado\.x = caja\.izquierda/.test(fuentePreviaEstado)) {
+  mal("fijarFlotante no guarda arriba/x, así que la arista de enfrente se desplaza");
+}
+if (/\.previa-inspector \{[^}]*height: 46%/.test(fuenteEstilo)) {
+  mal("style.css sigue dando a .previa-inspector una altura base del 46 %");
+}
+if (/\.marco-vista-lado,\s*\.marco-vista-lado\[data-alto="propio"\] \{[^}]*bottom: 0;/.test(fuenteEstilo)) {
+  mal("style.css sigue estirando .marco-vista-lado de arriba abajo");
+}
 // La regla del :not() anterior tiene especificidad (0,3,0): el tirador ha de repetir su clase para
 // alcanzarla, o el navegador aplica `none` y los ocho tiradores no reciben el puntero (ni flotando
 // ni acoplado). La aserción fija esa especificidad, no solo la presencia de `pointer-events: auto`.

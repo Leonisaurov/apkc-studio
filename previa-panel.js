@@ -1056,6 +1056,8 @@ export function crearPreviaPanel({ hospedador, proyecto, estadoPestana, editor, 
       ancho: deLaCaja.ancho,
       alto: altoEfectivo(marco, deLaCaja),
       arriba: Number.isFinite(deLaCaja.alto) ? deLaCaja.arriba : 0,
+      // sin `izquierda` el tirador oeste reconstruía el borde derecho desde cero (§341)
+      izquierda: Number.isFinite(deLaCaja.izquierda) ? deLaCaja.izquierda : 0,
     };
   }
 
@@ -1164,12 +1166,13 @@ export function crearPreviaPanel({ hospedador, proyecto, estadoPestana, editor, 
     }
   }
 
-  // El alto de la capa libre: el que eligió el usuario o uno razonable para la ventana. En modo
-  // acoplado manda la ventana (arriba y abajo a 8 px) y en la pastilla manda el contenido.
+  // El alto de la capa libre: el que eligió el usuario o el mínimo (240 px). Antes se caía a
+  // `min(560, …)`, así que la consola nacía grande; la preferencia ausente es pequeña por diseño.
+  // En modo acoplado manda la ventana y en la pastilla manda el contenido.
   function altoLibreFlotante(nombre) {
     const alto = FLOTANTES[nombre].alto();
     if (Number.isFinite(alto)) return Math.round(alto);
-    return Math.max(LADO_ALTO_MINIMO, Math.min(560, ventana().alto - 96));
+    return LADO_ALTO_MINIMO;
   }
 
   function actualizarBotonesFlotante(nombre) {
@@ -1220,9 +1223,13 @@ export function crearPreviaPanel({ hospedador, proyecto, estadoPestana, editor, 
       const caja = typeof contenedor.getBoundingClientRect === "function"
         ? contenedor.getBoundingClientRect() : null;
       if (caja && caja.width > 0 && caja.height > 0) {
-        if (f.anchoPropio && !Number.isFinite(estado.ancho)) estado.ancho = Math.round(caja.width);
-        if (f.altoPropio && !Number.isFinite(estado.alto)) estado.alto = Math.round(caja.height);
-        if (faltaPosicion) {
+        // Sin preferencia guardada se usan los defaults pequeños (340 × 240), no la caja que
+        // viniera del reparto de la fila: la consola nace pequeña y arriba (§341).
+        if (f.anchoPropio && !Number.isFinite(estado.ancho)) estado.ancho = ANCHO_POR_DEFECTO;
+        if (f.altoPropio && !Number.isFinite(estado.alto)) estado.alto = altoLibreFlotante(nombre);
+        // La vista Pantalla sí toma la posición del marco: su columna ya está a la derecha del
+        // dibujo. El panel del editor deja `x`/`y` sin fijar y cae en el default de abajo.
+        if (faltaPosicion && nombre === "vista") {
           estado.x = Math.round(caja.left);
           estado.y = Math.round(caja.top);
         }
@@ -1302,20 +1309,34 @@ export function crearPreviaPanel({ hospedador, proyecto, estadoPestana, editor, 
     };
   }
 
-  // Caja que se entrega al tirador: el ancho y el alto que se ve, nunca indefinidos.
+  // Caja que se entrega al tirador: el ancho y el alto que se ve, nunca indefinidos, y sobre todo
+  // la posición REAL. Antes `arriba` valía 0 fijo y no había `izquierda`, así que el tirador norte
+  // encogía desde abajo y el oeste desde la derecha (§341). El estado manda; si aún no tiene posición
+  // guardada, se toma del rect del contenedor antes de que `aplicarModoFlotante` lo coloque.
   function cajaFlotante(nombre) {
     const f = FLOTANTES[nombre];
+    const estado = f.estado;
+    const contenedor = f.contenedor();
+    const rect = contenedor && typeof contenedor.getBoundingClientRect === "function"
+      ? contenedor.getBoundingClientRect() : null;
     return {
       ancho: f.ancho(),
       alto: altoLibreFlotante(nombre),
-      arriba: 0,
+      arriba: Number.isFinite(estado.y) ? estado.y
+        : (rect && rect.height > 0 ? Math.round(rect.top) : 0),
+      izquierda: Number.isFinite(estado.x) ? estado.x
+        : (rect && rect.width > 0 ? Math.round(rect.left) : 0),
     };
   }
 
-  // Un tirador de la capa flotante del panel escribe en su propio estado; los de Pantalla siguen
-  // pasando por `fijarLado`, que ya guarda `CLAVE_LADO`/`CLAVE_LADO_ALTO`. En los dos casos se
-  // reaplica el modo con `persistir=false` y se guarda una sola vez al soltar.
+  // Un tirador de la capa flotante escribe en su propio estado; el panel añade su tamaño y la vista
+  // sigue pasando por `fijarLado`, que guarda `CLAVE_LADO`/`CLAVE_LADO_ALTO`. En los dos casos se
+  // reaplica el modo con `persistir=false` y se guarda una sola vez al soltar. Escribir `x`/`y` es
+  // lo que hace que la arista de enfrente quede quieta al redimensionar.
   function fijarFlotante(nombre, caja, altura) {
+    const estado = FLOTANTES[nombre].estado;
+    if (Number.isFinite(caja.izquierda)) estado.x = caja.izquierda;
+    if (Number.isFinite(caja.arriba)) estado.y = caja.arriba;
     if (nombre === "panel") {
       inspector.ancho = caja.ancho;
       if (altura) inspector.alto = caja.alto;
