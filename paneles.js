@@ -164,6 +164,13 @@ export function instanciaModulo(tipo, nombre, extra = {}) {
   };
 }
 
+// Siguiente número de la banda 40-59. El tope en 19 es el contrato compartido por las dos
+// superficies flotantes y por los módulos declarados en el DOM: sin él, agarrar un asa muchas
+// veces acabaría tapando las capas del modo editar (z 60) y los diálogos (z 80+).
+export function siguienteZ(z) {
+  return Math.min(19, (Number.isFinite(z) ? Math.round(z) : 0) + 1);
+}
+
 // Estado inicial de un módulo. La geometría preferida es pequeña y el modo es flotante.
 export function estadoInicial(id = "", z = 1) {
   return {
@@ -221,7 +228,7 @@ export function reducirPanel(estado, accion) {
     case "cerrar":
       return { ...e, modo: "cerrado", visible: false };
     case "traerAlFrente":
-      return { ...e, z: Number.isFinite(a.z) ? a.z : (Number.isFinite(e.z) ? e.z + 1 : 1) };
+      return { ...e, z: Number.isFinite(a.z) ? Math.min(19, Math.round(a.z)) : siguienteZ(e.z) };
     case "reiniciar":
       return estadoInicial(e.id, e.z);
     default:

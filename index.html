@@ -695,7 +695,7 @@
                     <p class="previa-progreso-texto"></p>
                   </div>
                 </div>
-                <div id="previa-inspector" class="previa-inspector">
+                <div id="previa-inspector" class="previa-inspector" data-modo="libre">
                   <div id="previa-inspector-tirador-oeste" class="tirador-previa tirador-oeste" data-eje="oeste"
                        role="separator" tabindex="0" aria-orientation="vertical"
                        aria-label="Borde izquierdo del registro y la consola: ancho"
@@ -818,10 +818,13 @@
           </div>
 
           <div class="panel-inferior modulo" id="panel-inferior" data-modulo="compilacion" hidden>
-            <div class="modulo-cab">
-              <button class="modulo-asa" type="button" tabindex="-1" title="Mover la consola de compilación"
+            <div class="modulo-cab" data-destino-acople="abajo">
+              <button class="modulo-asa" type="button" title="Mover la consola de compilación"
                       aria-label="Mover la consola de compilación"></button>
               <span class="modulo-titulo">Consola de compilación</span>
+              <span class="modulo-destino-acople">Zona para acoplar abajo</span>
+              <button id="panel-inferior-acoplar" class="modulo-acoplar" type="button"
+                      aria-pressed="false" title="Acoplar o soltar la consola de compilación">Acoplar</button>
             </div>
             <div class="modulo-tiradores" aria-hidden="true">
               <span class="modulo-tirador" data-eje="norte"></span>

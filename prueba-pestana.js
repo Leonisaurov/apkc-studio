@@ -6864,6 +6864,36 @@ async function conductor() {
     "sesiones con Network.enable: " + cubierto.sesiones +
       (cubierto.sinRed ? " · sin red: " + cubierto.sinRed : ""));
 
+  // Corrección de los siete defectos de paneles: aquí se puede jurar el z CALCULADO por el
+  // navegador, no el modelo de `prueba.js`. Si el sondeo no llega (sin CDP), se declara incierto
+  // y no se cuenta como verde: las regex de fuente no son una medición del navegador.
+  try {
+    const capas = await evaluar(`(() => {
+      const inspector = document.getElementById("previa-inspector");
+      const campo = document.querySelector(".previa-campo-texto");
+      const panel = document.getElementById("panel-inferior");
+      const asa = panel ? panel.querySelector(".modulo-asa") : null;
+      return {
+        inspector: inspector ? getComputedStyle(inspector).zIndex : null,
+        campo: campo ? getComputedStyle(campo).zIndex : null,
+        modo: inspector ? inspector.dataset.modo : null,
+        asaTabindex: asa ? asa.getAttribute("tabindex") : null,
+        acoplar: !!document.getElementById("panel-inferior-acoplar"),
+        destino: !!panel && !!panel.querySelector("[data-destino-acople]"),
+        sombra: panel ? getComputedStyle(panel).boxShadow : null,
+      };
+    })()`);
+    comprueba("el inspector recién pintado calcula z>20 en chromium (banda 40-59)",
+      Number(capas.inspector) > 20 && Number(capas.inspector) > Number(capas.campo || 20) &&
+        capas.modo === "libre", JSON.stringify(capas));
+    comprueba("la consola inferior tiene asa focalizable, Acoplar/Soltar, zona destino y sombra",
+      capas.asaTabindex === "0" && capas.acoplar && capas.destino &&
+        !!capas.sombra && capas.sombra !== "none", JSON.stringify(capas));
+  } catch (e) {
+    console.log("  incierto: z calculado y caja del inspector requieren CDP: " +
+      (e && e.message || e));
+  }
+
   ws.close();
   console.log("\n" + hechos + " comprobaciones bien, " + fallos + " mal");
   apagar();

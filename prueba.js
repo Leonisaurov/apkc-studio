@@ -1993,7 +1993,7 @@ const fuenteConectar = (fuentePreviaEstado.match(/function conectarFlotante\(nom
 if (!/traerAlFrente\(nombre\);/.test(fuenteConectar)) {
   mal("conectarFlotante no trae la capa al frente al agarrar el asa");
 }
-if (!/contadorZ = Math\.min\(19, contadorZ \+ 1\)/.test(fuentePreviaEstado) ||
+if (!/contadorZ = siguienteZ\(contadorZ\)/.test(fuentePreviaEstado) ||
     !/setProperty\("--z", String\(contadorZ\)\)/.test(fuentePreviaEstado)) {
   mal("traerAlFrente no sube `--z` dentro de la banda de módulos");
 }
@@ -2002,6 +2002,147 @@ const bloqueFlotante = (fuenteEstilo.match(
 if (!/z-index:\s*calc\(40 \+ var\(--z, 0\)\)/.test(bloqueFlotante)) {
   mal("style.css no coloca las capas flotantes en la banda 40 + --z");
 }
+
+// H1/H8: aseveraciones sobre un DOM construido aquí, no sobre el texto de las fuentes. Es un
+// modelo mínimo del inspector con `style`, `dataset`, `classList` y `addEventListener`: resuelve
+// la regla base de `style.css` como haría la cascada para `z-index: calc(40 + var(--z, 0))`.
+// El hit-test real de `getComputedStyle` en chromium queda `incierto` en `prueba-pestana.js`;
+// estas comprobaciones falsan el cambio de regla, el tope del z y el cableado sin navegador.
+function nodoDomFalso({ id = "", clase = "", datos = {}, estilo = {} } = {}) {
+  const props = new Map(Object.entries(estilo));
+  const clases = new Set(clase.split(/\s+/).filter(Boolean));
+  const oyentes = new Map();
+  return {
+    id,
+    dataset: { ...datos },
+    classList: {
+      add: (c) => clases.add(c),
+      remove: (c) => clases.delete(c),
+      contains: (c) => clases.has(c),
+    },
+    style: {
+      setProperty: (k, v) => { props.set(k, String(v)); },
+      getPropertyValue: (k) => props.get(k) || "",
+    },
+    setAttribute: (k, v) => { props.set("@" + k, String(v)); },
+    getAttribute: (k) => props.get("@" + k) || null,
+    querySelector: () => null,
+    addEventListener: (tipo, fn) => {
+      if (!oyentes.has(tipo)) oyentes.set(tipo, []);
+      oyentes.get(tipo).push(fn);
+    },
+    _oyentes: oyentes,
+    _props: props,
+  };
+}
+function reglaCssModelo(css, selector) {
+  const esc = selector.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  const m = new RegExp(esc + "\\s*\\{([^}]*)\\}").exec(css);
+  return m ? m[1] : "";
+}
+function getComputedStyleModelo(css, nodo, propiedad) {
+  const valor = (new RegExp(propiedad + "\\s*:\\s*([^;]+)").exec(
+    reglaCssModelo(css, ".previa-inspector")) || [])[1] || "";
+  return valor
+    .replace(/var\(--z\s*,\s*([^)]+)\)/g, (_, respaldo) => nodo.style.getPropertyValue("--z") || respaldo.trim())
+    .replace(/calc\(\s*(\d+)\s*\+\s*(\d+)\s*\)/g, (_, x, y) => String(Number(x) + Number(y)))
+    .trim();
+}
+const inspectorPintado = nodoDomFalso({ id: "previa-inspector", datos: { modo: "libre" } });
+const zPintado = Number(getComputedStyleModelo(fuenteEstilo, inspectorPintado, "z-index"));
+if (!(zPintado > 20)) {
+  mal(`el inspector recién pintado queda en z ${zPintado}, debajo de los campos (z20)`);
+}
+const inspectorElevado = nodoDomFalso({ id: "previa-inspector", datos: { modo: "libre" },
+  estilo: { "--z": "19" } });
+if (Number(getComputedStyleModelo(fuenteEstilo, inspectorElevado, "z-index")) !== 59) {
+  mal("el tope de la banda 40-59 no deja el inspector en z 59 con --z=19");
+}
+if (!/\bid="previa-inspector"[^>]*data-modo="libre"/.test(html)) {
+  mal("index.html no pinta el inspector con data-modo=libre desde el principio");
+}
+
+// Un asa, un handler: montar dos veces el mismo módulo no puede duplicar el pointerdown.
+const nodoPanel = nodoDomFalso({ id: "panel-inferior", datos: { modulo: "compilacion" } });
+const asaPanel = nodoDomFalso({ clase: "modulo-asa" });
+const cabPanel = nodoDomFalso({ clase: "modulo-cab", datos: { destinoAcoplado: "abajo" } });
+nodoPanel.querySelector = (sel) => sel === ".modulo-asa" ? asaPanel
+  : sel === ".modulo-cab" ? cabPanel : null;
+const instanciaAsa = paneles.instanciaModulo("compilacion", "");
+pestanaMod.conectarAsaModulo(nodoPanel, instanciaAsa);
+pestanaMod.conectarAsaModulo(nodoPanel, instanciaAsa);
+if ((asaPanel._oyentes.get("pointerdown") || []).length !== 1) {
+  mal("el asa del panel inferior tiene más de un handler de pointerdown");
+}
+if ((asaPanel._oyentes.get("keydown") || []).length !== 1) {
+  mal("el asa del panel inferior no tiene su handler de teclado");
+}
+if (/tabindex="-1"[^>]*title="Mover la consola/.test(html)) {
+  mal("el asa de la consola sigue siendo infocalizable (tabindex=-1)");
+}
+const bloqueCompilacion = (pestana.match(/function aplicarModuloCompilacion\(panel\)[\s\S]*?\n\}/) || [])[0] || "";
+if (/addEventListener\("pointerdown"/.test(bloqueCompilacion)) {
+  mal("aplicarModuloCompilacion monta un segundo handler en el asa");
+}
+const bloqueMontar = (pestana.match(/function montarModulosBasicos\(\)[\s\S]*?\n\}/) || [])[0] || "";
+if (!/conectarAsaModulo\(nodo, instancia\)/.test(bloqueMontar)) {
+  mal("montarModulosBasicos no usa el cableado único del asa");
+}
+
+// El tope del z se cumple de verdad sobre la instancia y se persiste en `--z`. El reducer
+// también acota el z explícito, así que se comprueba `siguienteZ` directamente: si solo se mirara
+// la instancia, un `siguienteZ` sin tope quedaría disfrazado por el acotado del reducer.
+if (paneles.siguienteZ(40) !== 19 || paneles.siguienteZ(19) !== 19) {
+  mal("siguienteZ no topa en 19: " + paneles.siguienteZ(40));
+}
+const instanciaZ = paneles.instanciaModulo("compilacion", "");
+for (let i = 0; i < 30; i++) pestanaMod.subirModulo(nodoPanel, instanciaZ);
+if (instanciaZ.estado.z !== 19 || nodoPanel.style.getPropertyValue("--z") !== "19") {
+  mal("subirModulo no topa en 19 ni persiste --z: " + JSON.stringify(instanciaZ.estado));
+}
+
+// Acoplar/Soltar y la zona destino usan el reducer con los cinco ids de MODULOS.
+for (const id of Object.keys(paneles.MODULOS)) {
+  const nodo = nodoDomFalso({ id, datos: { modulo: id } });
+  const instancia = paneles.instanciaModulo(id, "");
+  const acoplado = pestanaMod.accionModulo(nodo, { tipo: "acoplar", borde: "abajo" }, instancia);
+  if (!acoplado || acoplado.modo !== "acoplado" || nodo.dataset.modo !== "acoplado") {
+    mal(`acoplar no aplica el reducer al módulo ${id}`);
+  }
+  const suelto = pestanaMod.accionModulo(nodo, { tipo: "desacoplar" }, instancia);
+  if (!suelto || suelto.modo !== "libre" || nodo.dataset.modo !== "libre") {
+    mal(`desacoplar no aplica el reducer al módulo ${id}`);
+  }
+}
+if (!/id="panel-inferior-acoplar"/.test(html) || !/data-destino-acople="abajo"/.test(html)) {
+  mal("index.html no tiene el botón Acoplar/Soltar ni la zona destino en .modulo-cab");
+}
+if (!/box-shadow/.test(reglaCssModelo(fuenteEstilo, ".modulo")) ||
+    !/\.modulo\.seleccionado\s*\{[^}]*outline/.test(fuenteEstilo) ||
+    !/window\.addEventListener\("pointermove", mover\)/.test(
+      (pestana.match(/function conectarAsaModulo\(nodo, instancia\)[\s\S]*?\n\}/) || [])[0] || "")) {
+  mal("los módulos no tienen sombra, estado .seleccionado ni arrastre con pointermove");
+}
+
+// En las capas flotantes, traer al frente no es solo cosa del asa: botones, teclado y primera
+// carga pasan por la misma función (el hit-test en navegador se marca incierto aparte).
+const bloqueConexion = (fuentePreviaEstado.match(/function conectarFlotante\(nombre\)[\s\S]*?\n  \}/) || [])[0] || "";
+for (const [nombre, patron] of [
+  ["asa", /asa\.addEventListener\("pointerdown"[\s\S]{0,700}traerAlFrente\(nombre\)/],
+  ["minimizar", /botonMinimizar\.addEventListener\("click"[\s\S]{0,160}traerAlFrente\(nombre\)/],
+  ["acoplar", /const acoplar = \(borde\) => \{[\s\S]{0,240}traerAlFrente\(nombre\)/],
+  ["soltar", /botonSoltar\.addEventListener\("click"[\s\S]{0,160}traerAlFrente\(nombre\)/],
+  ["teclado", /asa\.addEventListener\("keydown"[\s\S]{0,300}traerAlFrente\(nombre\)/],
+  ["primera carga", /zInicial[\s\S]{0,240}traerAlFrente\(nombre\)/],
+]) {
+  if (!patron.test(bloqueConexion)) mal(`traerAlFrente no se llama desde ${nombre}`);
+}
+const bloqueAplicar = (fuentePreviaEstado.match(
+  /function aplicarModoFlotante\(nombre, persistir\)[\s\S]*?\n  \}/) || [])[0] || "";
+if (!/zInicial[\s\S]{0,240}traerAlFrente\(nombre\)/.test(bloqueAplicar)) {
+  mal("aplicarModoFlotante no trae la capa al frente en su primera pintura");
+}
+console.log("  (incierto: el z calculado real con getComputedStyle y el hit-test solo se pueden jurar en chromium, sin CDP aquí)");
 
 const esLayout = previaPanel.esRutaDeLayout;
 if (!esLayout("/proyecto/res/layout/main.xml")) mal("esRutaDeLayout no reconoce res/layout");

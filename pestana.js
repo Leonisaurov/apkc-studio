@@ -14,7 +14,7 @@ import { crearPanelDeps } from "./deps.js";
 import { guardarUltimaApk, EVENTO_ULTIMA_APK } from "./ultima-apk.js";
 import { CONTRATO_NUCLEO } from "./wisp.js";
 import { instalarPuenteWisp } from "./wisp-puente.js";
-import { MODULOS, instanciaModulo, cajaRedimensionada, reducirPanel } from "./paneles.js";
+import { MODULOS, instanciaModulo, cajaRedimensionada, reducirPanel, siguienteZ } from "./paneles.js";
 
 // La pestaña que hace: editor de fuente + un arbol en OPFS + los comandos de apkc.wasm.
 //
@@ -2263,19 +2263,160 @@ async function nuevoFichero(carpeta) {
 // el asa lo trae al frente dentro de la banda z 40-59. No se renombran ids ni se toca el botón
 // «Compilar»: siguen siendo el contrato del editor y de las pruebas.
 const moduloCompilacion = instanciaModulo("compilacion", "");
+
+// Sube un módulo dentro de la banda 40-59 con el MISMO tope que las capas flotantes y persiste el
+// valor en `--z`, que es lo que lee el CSS. Antes el asa del panel incrementaba sin límite y el
+// resultado no se guardaba en ninguna preferencia.
+export function subirModulo(nodo, instancia) {
+  if (!nodo || !instancia) return 0;
+  const z = siguienteZ(instancia.estado.z);
+  instancia.estado = reducirPanel(instancia.estado, { tipo: "traerAlFrente", z });
+  if (nodo.style && typeof nodo.style.setProperty === "function") {
+    nodo.style.setProperty("--z", String(instancia.estado.z));
+  }
+  return instancia.estado.z;
+}
+
+// Una acción cualquiera del reducer sobre un módulo declarado en el DOM. Es genérica sobre los
+// cinco ids de `MODULOS`, no solo sobre las dos consolas del teléfono: el botón Acoplar/Soltar y
+// la zona destino pasan por aquí con el id que corresponda.
+export function accionModulo(nodo, accion, instancia) {
+  if (!nodo || !nodo.dataset || !MODULOS[nodo.dataset.modulo]) return null;
+  const dato = instancia || MODULOS_DOM.get(nodo) ||
+    instanciaModulo(nodo.dataset.modulo, nodo.id || "", { contenedor: () => nodo });
+  dato.estado = reducirPanel(dato.estado, accion);
+  if (["acoplado", "libre", "minimizado", "cerrado"].includes(dato.estado.modo)) {
+    nodo.dataset.modo = dato.estado.modo;
+  }
+  if (dato.estado.borde) nodo.dataset.borde = dato.estado.borde;
+  if (nodo.style && typeof nodo.style.setProperty === "function") {
+    nodo.style.setProperty("--z", String(dato.estado.z));
+  }
+  return dato.estado;
+}
+
+// Un solo sistema de asa para todos los módulos: trae al frente, marca `.seleccionado`, mueve con
+// `pointermove` y con las flechas del teclado, y deja arrastrar la cabecera a la zona de acople.
+// La guardia `dataset.conectado` evita el doble handler que había entre aquí y
+// `aplicarModuloCompilacion`.
+export function conectarAsaModulo(nodo, instancia) {
+  const asa = nodo && typeof nodo.querySelector === "function" ? nodo.querySelector(".modulo-asa") : null;
+  if (!asa || (asa.dataset && asa.dataset.conectado)) return 0;
+  if (asa.dataset) asa.dataset.conectado = "1";
+  if (typeof asa.setAttribute === "function") asa.setAttribute("tabindex", "0");
+  let arrastre = null;
+  const seleccionar = () => {
+    if (typeof document === "undefined" || typeof document.querySelectorAll !== "function") return;
+    for (const otro of document.querySelectorAll(".modulo.seleccionado")) {
+      if (otro !== nodo && otro.classList) otro.classList.remove("seleccionado");
+    }
+    if (nodo.classList) nodo.classList.add("seleccionado");
+  };
+  const cabecera = nodo.querySelector(".modulo-cab");
+  if (cabecera) {
+    cabecera.draggable = true;
+    cabecera.addEventListener("dragstart", (e) => {
+      if (e.dataTransfer && typeof e.dataTransfer.setData === "function") {
+        e.dataTransfer.setData("text/apkc-modulo", nodo.dataset.modulo);
+      }
+    });
+  }
+  asa.addEventListener("pointerdown", (e) => {
+    if (e.button !== undefined && e.button !== 0) return;
+    subirModulo(nodo, instancia);
+    seleccionar();
+    if (typeof window !== "undefined" && window.matchMedia &&
+        window.matchMedia("(max-width: 760px)").matches) return;
+    arrastre = {
+      x: e.clientX, y: e.clientY,
+      izquierda: parseFloat(nodo.style.left) || 0,
+      arriba: parseFloat(nodo.style.top) || 0,
+    };
+    if (typeof asa.setPointerCapture === "function") {
+      try { asa.setPointerCapture(e.pointerId); } catch (err) { /* puntero sintético */ }
+    }
+    if (e.preventDefault) e.preventDefault();
+  });
+  const mover = (ev) => {
+    if (!arrastre) return;
+    nodo.style.left = (arrastre.izquierda + ev.clientX - arrastre.x) + "px";
+    nodo.style.top = (arrastre.arriba + ev.clientY - arrastre.y) + "px";
+    if (ev.preventDefault) ev.preventDefault();
+  };
+  const soltar = () => { arrastre = null; };
+  if (typeof window !== "undefined") {
+    window.addEventListener("pointermove", mover);
+    window.addEventListener("pointerup", soltar);
+    window.addEventListener("pointercancel", soltar);
+  }
+  asa.addEventListener("keydown", (e) => {
+    if (!e || typeof e.key !== "string" || e.altKey || e.ctrlKey || e.metaKey) return;
+    if (!["Enter", " ", "ArrowLeft", "ArrowRight", "ArrowUp", "ArrowDown"].includes(e.key)) return;
+    subirModulo(nodo, instancia);
+    seleccionar();
+    const dx = e.key === "ArrowRight" ? 16 : e.key === "ArrowLeft" ? -16 : 0;
+    const dy = e.key === "ArrowDown" ? 16 : e.key === "ArrowUp" ? -16 : 0;
+    if (dx || dy) {
+      nodo.style.left = ((parseFloat(nodo.style.left) || 0) + dx) + "px";
+      nodo.style.top = ((parseFloat(nodo.style.top) || 0) + dy) + "px";
+    }
+    if (e.preventDefault) e.preventDefault();
+  });
+  return 1;
+}
+
 function aplicarModuloCompilacion(panel) {
   if (!panel) return;
   const def = MODULOS.compilacion;
   panel.dataset.modulo = def.id;
   panel.style.setProperty("--modulo-alto", def.altoPref + "px");
   panel.style.setProperty("--z", String(moduloCompilacion.estado.z));
-  const asa = panel.querySelector(".modulo-asa");
-  if (asa && !asa.dataset.conectado) {
-    asa.dataset.conectado = "1";
-    asa.addEventListener("pointerdown", () => {
-      moduloCompilacion.estado.z += 1;
-      panel.style.setProperty("--z", String(moduloCompilacion.estado.z));
+  if (!panel.dataset.zInicial) {
+    panel.dataset.zInicial = "1";
+    subirModulo(panel, moduloCompilacion);
+  }
+  const cab = panel.querySelector(".modulo-cab");
+  const boton = document.getElementById("panel-inferior-acoplar");
+  if (cab && boton && !boton.dataset.conectado) {
+    boton.dataset.conectado = "1";
+    const pintarBoton = () => {
+      const acoplado = moduloCompilacion.estado.modo === "acoplado";
+      boton.textContent = acoplado ? "Soltar" : "Acoplar";
+      boton.setAttribute("aria-pressed", String(acoplado));
+      cab.dataset.modo = moduloCompilacion.estado.modo;
+    };
+    boton.addEventListener("click", () => {
+      subirModulo(panel, moduloCompilacion);
+      const acoplado = moduloCompilacion.estado.modo === "acoplado";
+      accionModulo(panel, acoplado ? { tipo: "desacoplar" } : { tipo: "acoplar", borde: "abajo" },
+        moduloCompilacion);
+      pintarBoton();
     });
+    // zona destino real: cualquier módulo arrastrado hasta esta cabecera se acopla al borde que
+    // la zona declara, con el mismo reducer y el id del módulo que llegó.
+    cab.addEventListener("dragover", (e) => {
+      if (!e.dataTransfer) return;
+      e.preventDefault();
+      cab.classList.add("soltar-acople");
+    });
+    cab.addEventListener("dragleave", () => cab.classList.remove("soltar-acople"));
+    cab.addEventListener("drop", (e) => {
+      cab.classList.remove("soltar-acople");
+      const id = e.dataTransfer && typeof e.dataTransfer.getData === "function"
+        ? e.dataTransfer.getData("text/apkc-modulo") : "";
+      if (!MODULOS[id]) return;
+      if (e.preventDefault) e.preventDefault();
+      const destino = typeof document !== "undefined"
+        ? document.querySelector('[data-modulo="' + id + '"]') : null;
+      const instancia = destino ? (MODULOS_DOM.get(destino) || instanciaModulo(id, destino.id || "")) : null;
+      if (destino && instancia) {
+        subirModulo(destino, instancia);
+        accionModulo(destino, { tipo: "acoplar", borde: cab.dataset.destinoAcoplado || "abajo" },
+          instancia);
+      }
+      if (id === "compilacion") pintarBoton();
+    });
+    pintarBoton();
   }
 }
 
@@ -2288,18 +2429,12 @@ function montarModulosBasicos() {
   for (const nodo of document.querySelectorAll("[data-modulo]")) {
     const def = MODULOS[nodo.dataset.modulo];
     if (!def || MODULOS_DOM.has(nodo)) continue;
-    const instancia = instanciaModulo(nodo.dataset.modulo, nodo.id || "", {
-      contenedor: () => nodo,
-    });
+    // el panel inferior ya tiene su instancia: `montarModulosBasicos` solo la registra una vez
+    const instancia = nodo.id === "panel-inferior" ? moduloCompilacion :
+      instanciaModulo(nodo.dataset.modulo, nodo.id || "", { contenedor: () => nodo });
     MODULOS_DOM.set(nodo, instancia);
     nodo.style.setProperty("--z", String(instancia.estado.z));
-    const asa = nodo.querySelector(".modulo-asa");
-    if (asa) {
-      asa.addEventListener("pointerdown", () => {
-        instancia.estado = reducirPanel(instancia.estado, { tipo: "traerAlFrente" });
-        nodo.style.setProperty("--z", String(instancia.estado.z));
-      });
-    }
+    conectarAsaModulo(nodo, instancia);
     for (const tirador of nodo.querySelectorAll(".modulo-tirador")) {
       tirador.addEventListener("pointerdown", (e) => {
         if (e.button !== undefined && e.button !== 0) return;

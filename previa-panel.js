@@ -51,7 +51,7 @@ import {
   ANCHO_POR_DEFECTO, ANCHO_MINIMO, ANCHO_MAXIMO, ALTO_MINIMO, LADO_POR_DEFECTO, LADO_MINIMO,
   LADO_ALTO_MINIMO, BORDES, BORDE_POR_DEFECTO, medidaValida, numeroOpcional, cajaRedimensionada,
   cajaAcoplada, MODULOS, instanciaModulo, reducirPanel, clavesDePanel, estadoDePreferencia,
-  preferenciaDeEstado,
+  preferenciaDeEstado, siguienteZ,
 } from "./paneles.js";
 
 // Persistencia de la vista dividida. Son preferencias de esta ventana, no del proyecto.
@@ -978,7 +978,7 @@ export function crearPreviaPanel({ hospedador, proyecto, estadoPestana, editor, 
   function traerAlFrente(nombre) {
     const f = FLOTANTES[nombre];
     if (!f) return 0;
-    contadorZ = Math.min(19, contadorZ + 1);
+    contadorZ = siguienteZ(contadorZ);
     Object.assign(f.estado, reducirPanel(f.estado, { tipo: "traerAlFrente", z: contadorZ }));
     const contenedor = f.contenedor && f.contenedor();
     if (contenedor && contenedor.style && typeof contenedor.style.setProperty === "function") {
@@ -1281,6 +1281,12 @@ export function crearPreviaPanel({ hospedador, proyecto, estadoPestana, editor, 
     const estado = f.estado;
     const contenedor = f.contenedor();
     if (!contenedor) return;
+    // la primera capa que se pinta entra ya en la banda 40-59: sin esta llamada, `aplicarModoFlotante`
+    // podía salir temprano (caja cero) y dejar el z base por debajo de los campos del editor
+    if (!contenedor.dataset.zInicial) {
+      contenedor.dataset.zInicial = "1";
+      traerAlFrente(nombre);
+    }
     const medidas = ventana();
     const faltaPosicion = !Number.isFinite(estado.x) || !Number.isFinite(estado.y);
     const faltaTamano = (f.anchoPropio && !Number.isFinite(estado.ancho)) ||
@@ -2892,6 +2898,9 @@ export function crearPreviaPanel({ hospedador, proyecto, estadoPestana, editor, 
     // El mismo botón es reversible: si la capa ya está en ese borde, vuelve a flotar. El botón
     // «Soltar» hace lo mismo sin necesidad de acordarse de dónde estaba acoplada.
     const acoplar = (borde) => {
+      // cualquier botón de la cabecera trae la capa al frente, no solo el asa: si no, la capa
+      // recién tocada queda detrás de otra y el usuario ve el efecto debajo de la otra ventana
+      traerAlFrente(nombre);
       if (estado.modo === MODO_ACOPLADO && estado.borde === borde) {
         aplicarModoFlotantePorModo(nombre, MODO_LIBRE);
       } else {
@@ -2954,6 +2963,7 @@ export function crearPreviaPanel({ hospedador, proyecto, estadoPestana, editor, 
         if (estado.modo !== MODO_MINIMIZADO) return;
         const boton = e.target && typeof e.target.closest === "function" ? e.target.closest("button") : null;
         if (boton && boton !== asa) return;
+        traerAlFrente(nombre);
         restaurar();
       });
     }
@@ -2961,6 +2971,7 @@ export function crearPreviaPanel({ hospedador, proyecto, estadoPestana, editor, 
     const botonMinimizar = el(f.ids.minimizar);
     if (botonMinimizar) {
       botonMinimizar.addEventListener("click", () => {
+        traerAlFrente(nombre);
         if (estado.modo === MODO_MINIMIZADO) restaurar(); else minimizar();
       });
     }
@@ -2970,7 +2981,37 @@ export function crearPreviaPanel({ hospedador, proyecto, estadoPestana, editor, 
     }
     const botonSoltar = el(f.ids.soltar);
     if (botonSoltar) {
-      botonSoltar.addEventListener("click", () => aplicarModoFlotantePorModo(nombre, MODO_LIBRE));
+      botonSoltar.addEventListener("click", () => {
+        traerAlFrente(nombre);
+        aplicarModoFlotantePorModo(nombre, MODO_LIBRE);
+      });
+    }
+
+    // el asa es un botón focalizable: con el teclado también se trae al frente y se desplaza la
+    // capa, igual que con el puntero. Las flechas mueven 16 px y Enter/Espacio solo la elevan.
+    asa.addEventListener("keydown", (e) => {
+      if (e.altKey || e.ctrlKey || e.metaKey || typeof e.key !== "string") return;
+      if (!["Enter", " ", "ArrowLeft", "ArrowRight", "ArrowUp", "ArrowDown"].includes(e.key)) return;
+      traerAlFrente(nombre);
+      const paso = 16;
+      const dx = e.key === "ArrowRight" ? paso : e.key === "ArrowLeft" ? -paso : 0;
+      const dy = e.key === "ArrowDown" ? paso : e.key === "ArrowUp" ? -paso : 0;
+      if (dx || dy) {
+        const medidas = ventana();
+        estado.x = Math.round(acotar((Number.isFinite(estado.x) ? estado.x : 0) + dx, 0,
+          Math.max(0, medidas.ancho - f.ancho())));
+        estado.y = Math.round(acotar((Number.isFinite(estado.y) ? estado.y : 0) + dy, 0,
+          Math.max(0, medidas.alto - altoLibreFlotante(nombre))));
+        aplicarModoFlotante(nombre, true);
+      }
+      e.preventDefault();
+    });
+
+    // la primera carga también cuenta como gesto: la capa recién pintada nace con su `--z` en la
+    // banda 40-59 en vez de quedar en el z base de quien la tenga debajo
+    if (!contenedor.dataset.zInicial) {
+      contenedor.dataset.zInicial = "1";
+      traerAlFrente(nombre);
     }
 
     // al cambiar el tamaño de la ventana, la capa libre se recorta a los bordes nuevos

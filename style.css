@@ -674,7 +674,10 @@ kbd {
    acoplarla o minimizarla no cambia las medidas del canvas. */
 .previa-inspector {
   position: absolute;
-  z-index: 5;
+  /* La banda 40-59 manda también en la regla base: si el inspector se pinta antes de que
+     `aplicarModoFlotante` escriba `data-modo`, el z calculado tiene que ser >20 para que la
+     consola no nazca debajo de `.previa-campo-texto` (z20) ni de un `.modulo` (z40+). */
+  z-index: calc(40 + var(--z, 0));
   left: 4px;
   right: 4px;
   bottom: 4px;
@@ -2238,7 +2241,15 @@ pre {
 /* ---- módulos flotantes ---------------------------------------------------- */
 /* Banda z 40-59: por encima del canvas y del panel, por debajo de las capas del modo editar
    (z 60) y de los diálogos (z 80+). `--z` lo sube `traerAlFrente` sin cambiar esos niveles. */
-.modulo { position: relative; z-index: calc(40 + var(--z, 0)); }
+/* Igual que las capas del modo editar (vista XML y ficha de propiedades): sombra para que se
+   distinga del fondo, y `.seleccionado` con contorno para ver cuál se está arrastrando. */
+.modulo {
+  position: relative;
+  z-index: calc(40 + var(--z, 0));
+  box-shadow: 0 8px 22px rgba(0, 0, 0, .38);
+}
+.modulo.seleccionado { outline: 2px solid var(--acento); outline-offset: 1px; }
+.modulo.seleccionado > .modulo-cab { background: var(--acento2); }
 .modulo-cab {
   flex: none;
   display: flex;
@@ -2248,6 +2259,24 @@ pre {
   padding: 2px 6px;
   border-bottom: 1px solid var(--borde2);
   background: var(--superficie2);
+}
+/* Acoplar/Soltar y zona destino real: el botón conmuta con `reducirPanel` y la zona acepta un
+   módulo arrastrado desde otra cabecera, como el destino del arrastre de la vista XML. */
+.modulo-acoplar { font-size: 11px; padding: 1px 5px; }
+.modulo-destino-acople {
+  flex: 1 1 auto;
+  min-width: 0;
+  font-size: 10px;
+  color: var(--texto-tenue);
+  text-align: center;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.modulo-cab.soltar-acople .modulo-destino-acople {
+  outline: 1px dashed var(--acento-claro);
+  outline-offset: -2px;
+  color: var(--acento-claro);
 }
 .modulo-asa {
   flex: none;
@@ -2293,6 +2322,16 @@ pre {
   border-top: 1px solid var(--borde);
 }
 .panel-inferior[hidden] { display: none; }
+/* acople real al borde de abajo: el botón Acoplar/Soltar y la zona destino escriben
+   `data-modo="acoplado"` con `reducirPanel`, y la consola deja de repartir alto en la fila. */
+.panel-inferior[data-modo="acoplado"] {
+  position: fixed;
+  left: 8px;
+  right: 8px;
+  bottom: 8px;
+  max-height: 55vh;
+  z-index: calc(40 + var(--z, 0));
+}
 .panel-tabs {
   flex: none;
   display: flex;
