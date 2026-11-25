@@ -1100,6 +1100,37 @@ const modeloDibujo = {
   if (!pintadoSin || pintadoSin.operaciones !== 0) mal("un modelo sin dibujo pinta operaciones");
 }
 
+// 6b-sexies-bis. `drawText` publica el `textSize` del Paint en `tamano` (`json:"tamano,omitempty"`),
+// así que la pestaña tiene que leerlo y escalarlo en vez de dibujar siempre a los 12px del
+// respaldo. Las operaciones antiguas no traen el campo y deben seguir viéndose igual.
+const fuenteDeDrawText = (operacion, ancho, alto) => {
+  const lienzo = lienzoFalso(ancho, alto);
+  const modelo = {
+    pantalla: { x: 0, y: 0, ancho: 100, alto: 100 }, aproximado: true, nodos: 2,
+    raiz: { tipo: "LinearLayout", rect: { x: 0, y: 0, ancho: 100, alto: 100 }, hijos: [{
+      tipo: "p.q.Lienzo", id: "id/lienzo", rect: { x: 0, y: 0, ancho: 100, alto: 100 },
+      dibujo: { operaciones: [operacion] },
+    }] },
+  };
+  vistaPrevia.pintarModelo(lienzo.canvas, modelo);
+  const indice = lienzo.llamadas.findIndex((c) => c.nombre === "fillText");
+  return indice < 0 ? null : estiloAntes(lienzo.llamadas, indice, "font");
+};
+const texto28 = { operacion: "texto", x1: 2, y1: 8, texto: "28", color: "#445566", tamano: 28 };
+const fuente28 = fuenteDeDrawText(texto28, 100, 100);
+if (!/^28px\b/.test(String(fuente28))) {
+  mal("el pintor ignora el tamano que publica drawText: " + fuente28);
+}
+const fuente28Doble = fuenteDeDrawText(texto28, 200, 200);
+if (!/^56px\b/.test(String(fuente28Doble))) {
+  mal("el tamano publicado por drawText no se escala con la pantalla: " + fuente28Doble);
+}
+const fuenteAntigua = fuenteDeDrawText(
+  { operacion: "texto", x1: 2, y1: 8, texto: "28", color: "#445566" }, 100, 100);
+if (!/^12px\b/.test(String(fuenteAntigua))) {
+  mal("una operación sin tamano dejó de usar el respaldo de 12px: " + fuenteAntigua);
+}
+
 // 6b-ter. el pintor usa los colores y la letra del tema del aparato, no los del editor: la
 // pantalla se rellena de blanco, el botón de gris y el estilo Large se pinta a 22px.
 {

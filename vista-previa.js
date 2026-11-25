@@ -411,9 +411,13 @@ function pintarOperaciones(ctx, r, escala, tinta) {
         const texto = typeof op.texto === "string" ? op.texto : "";
         if (!texto) break;
         // `drawText` recibe la línea base, no la esquina: se pinta con la base alfabética y se
-        // devuelve el lienzo a la de arriba que usa el texto del nodo
-        const tamano = Math.max(1, TEXTO_DIBUJO * escala);
-        ctx.font = tamano + "px ui-monospace, SFMono-Regular, Menlo, Consolas, monospace";
+        // devuelve el lienzo a la de arriba que usa el texto del nodo. El intérprete publica el
+        // `textSize` del Paint en `tamano`; las operaciones antiguas no lo traen y caen al
+        // respaldo de 12px del modelo, igual que los valores que no se pueden medir.
+        const publicado = aNumeroOFinito(op.tamano);
+        const base = publicado !== null && publicado > 0 ? publicado : TEXTO_DIBUJO;
+        const px = Math.max(1, base * escala);
+        ctx.font = px + "px ui-monospace, SFMono-Regular, Menlo, Consolas, monospace";
         ctx.textBaseline = "alphabetic";
         ctx.fillStyle = color;
         ctx.fillText(texto, alLienzo(x1), altoLienzo(y1));
