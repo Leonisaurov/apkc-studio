@@ -596,6 +596,9 @@ export function crearPanelWisp({ hospedador, almacen, fetchImpl, documento } = {
   };
 
   const relayActual = () => {
+    // Garantía del contrato, no del llamador: el campo puede estar precargado con el relay
+    // propio, pero mientras el módulo esté apagado no se devuelve ninguna URL.
+    if (!eleccion.activo()) throw new Error("módulo WISP desactivado: hay que pasar por asegurarDecision() antes de leer el relay");
     const propia = urlPropia && typeof urlPropia.value === "string" ? urlPropia.value.trim() : "";
     if (propia) {
       const problema = urlRelayValida(propia);

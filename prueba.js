@@ -5815,6 +5815,10 @@ public final class R {
     if (!/id="wisp-selector" hidden/.test(bloqueWisp)) {
       mal("el selector de relays no nace oculto en index.html");
     }
+    // El relay propio está precargado en el campo, pero eso no enciende el módulo.
+    if (!bloqueWisp.includes('id="wisp-url" value="wss://wisp.dolci-vita.link/wisp/"')) {
+      mal("index.html no precarga el relay propio en #wisp-url");
+    }
     const fuenteWisp = fs.readFileSync(path.join(__dirname, "wisp.js"), "utf8");
     const swFuente = fs.readFileSync(path.join(__dirname, "sw.js"), "utf8");
     for (const pieza of ['"./wisp.js"', '"./wisp-relays.json"']) {
@@ -5871,9 +5875,22 @@ public final class R {
       if (decision !== false || porId["wisp-selector"].hidden !== true) {
         mal("sin diálogo en el documento, «asegurarDecision» no cae al modo seguro (apagado)");
       }
+      // (a1) campo precargado y módulo apagado: relayActual falla cerrado. La garantía vive en
+      // relayActual, no en que el llamador haya pasado antes por asegurarDecision().
+      porId["wisp-url"].value = "wss://wisp.dolci-vita.link/wisp/";
+      let relayApagado = "";
+      try { relayApagado = panelWisp.relayActual(); }
+      catch (e) { relayApagado = String(e && e.message ? e.message : e); }
+      if (!/módulo WISP desactivado/.test(relayApagado)) {
+        mal("relayActual devolvió el relay precargado con el módulo apagado: " + relayApagado);
+      }
       panelWisp.decidir(true);
       await new Promise((r) => setTimeout(r, 0));
       if (porId["wisp-selector"].hidden) mal("al activar el módulo no aparece el selector de relays");
+      if (panelWisp.relayActual() !== "wss://wisp.dolci-vita.link/wisp/") {
+        mal("con el módulo activo, relayActual no devuelve la URL precargada");
+      }
+      porId["wisp-url"].value = "";
       if (porId["wisp-relay"].children.length !== 6) {
         mal("el selector de relays no lista los 6 conocidos: " + porId["wisp-relay"].children.length);
       }
