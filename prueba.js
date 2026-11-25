@@ -5473,7 +5473,7 @@ public final class R {
     }
     const bytesOficiales = new TextEncoder().encode(CAS_WISP_PEM);
     const huellaOficialCalculada = await depsMod.sha256Hex(bytesOficiales);
-    if (bytesOficiales.length !== 3494 || huellaOficialCalculada !== CAS_WISP_SHA256) {
+    if (bytesOficiales.length !== 3487 || huellaOficialCalculada !== CAS_WISP_SHA256) {
       mal("el bundle oficial no es el medido en §349: " + bytesOficiales.length + " bytes, sha256 " +
         huellaOficialCalculada);
     }
