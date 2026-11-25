@@ -260,12 +260,22 @@ export function menuDeModelo(modelo) {
   return resumen ? resumen.menu : null;
 }
 
+// §290: `values-es` y `values-es-rMX` son los dos bloques medidos; `""` conserva la base. La
+// validación vive aquí, en producción, para que ninguna orden pueda colar un idioma sin medir.
+const LOCALES_DE_LA_APP = Object.freeze(["", "es", "es-MX"]);
+export function localeValido(valor) {
+  return typeof valor === "string" && LOCALES_DE_LA_APP.includes(valor);
+}
+
 // La línea de arranque de `apkc preview`: la apk, sin guion. Con sesión viva los pasos ya no se
 // repiten —el intérprete conserva la máquina—, así que esta forma solo se usa para nacer de cero.
 // El parámetro `guion` sigue en la firma por compatibilidad con quien la llamaba al arrancar; se
 // ignora a propósito para que ninguna orden pueda reenviar los clics anteriores por aquí.
-export function argvDePrevia(guion, apk) {
-  return ["preview", String(apk)];
+export function argvDePrevia(guion, apk, locale = "") {
+  const argv = ["preview"];
+  if (localeValido(locale) && locale !== "") argv.push("--locale", locale);
+  argv.push(String(apk));
+  return argv;
 }
 
 // La forma de cada paso del guion, compartida por el arranque clásico (sin sesión) y por la orden
@@ -963,6 +973,9 @@ export function crearPreviaPanel({ hospedador, proyecto, estadoPestana, editor, 
   // el apk que respalda el modelo en pantalla: el del build o la copia estable. Los clics repiten
   // `apkc preview` sobre el mismo fichero, así no dependen de que `build/app.apk` siga ahí.
   let apkActual = "build/app.apk";
+  // idioma de la APP en el emulador (no el de la interfaz, que vive en idioma.js). Viaja en el
+  // arranque de `apkc preview` y se hereda en las órdenes vivas sin reempaquetar la apk.
+  let locale = "";
   // el apk que llegó por arrastre y respalda el modelo en pantalla; se conserva para que los clics
   // sigan pidiendo `apkc preview` sobre el mismo fichero hasta que un build o otra APK lo sustituya
   let rutaApkSoltada = RUTA_APK_SOLTADA;
@@ -2548,7 +2561,7 @@ export function crearPreviaPanel({ hospedador, proyecto, estadoPestana, editor, 
     origenPrevia = fuente;
     try {
       await hospedador.cwd(carpeta);
-      const r = await hospedador.ejecutar(["preview", ruta]);
+      const r = await hospedador.ejecutar(argvDePrevia(guion, ruta, locale));
       recordarInstancias(r);
       const modelo = modeloDeSalida(r && r.consola);
       if (!modelo) {
@@ -2565,6 +2578,21 @@ export function crearPreviaPanel({ hospedador, proyecto, estadoPestana, editor, 
     } finally {
       origenPrevia = "build";
     }
+  }
+
+  // Cambia el idioma de la APP: no recompila ni reempaqueta, solo vuelve a lanzar `apkc preview`
+  // sobre la misma apk con `--locale`. Se pierden los pulsos y lo tecleado, como en un reinicio.
+  async function cambiarLocale(valor) {
+    const selector = el("previa-idioma-app");
+    if (!localeValido(valor)) {
+      if (selector) selector.value = locale;
+      mensajeEmulador("idioma no disponible");
+      return null;
+    }
+    locale = valor;
+    if (selector && selector.value !== valor) selector.value = valor;
+    reiniciarGuion();
+    return ejecutarPreviewDe(apkActual);
   }
 
   // Abre un `.apk` que el usuario soltó sobre el canvas del emulador. El fichero se guarda en la
@@ -2908,6 +2936,8 @@ export function crearPreviaPanel({ hospedador, proyecto, estadoPestana, editor, 
       if (reiniciar) reiniciar.addEventListener("click", () => reiniciarEmulador());
       const ultima = el(prefijo + "-usar-ultima");
       if (ultima) ultima.addEventListener("click", () => encenderDesdeUltima());
+      const idioma = el(prefijo + "-idioma-app");
+      if (idioma) idioma.addEventListener("change", () => { void cambiarLocale(idioma.value); });
       const select = el(prefijo + "-pantalla-tamano");
       if (select) select.addEventListener("change", () => {
         if (select.value === "personalizado") {
@@ -5269,6 +5299,8 @@ export function crearPreviaPanel({ hospedador, proyecto, estadoPestana, editor, 
     avanzar: avanzarManualmente,
     // teclear desde fuera (pruebas y consola): el mismo paso `--escribir` que el campo real
     escribir: enviarEscritura,
+    // idioma de la app desde fuera (pruebas CDP): la misma validación que el selector
+    cambiarLocale,
     // lectura para las pruebas: el campo real y el EditText con el foco en este momento
     campoTexto: () => ({
       montado: !!campoTexto,
@@ -5305,7 +5337,7 @@ export function crearPreviaPanel({ hospedador, proyecto, estadoPestana, editor, 
       ancho: caja.ancho, alto: caja.alto, arriba: caja.arriba,
       lado: cajaLado.ancho, ladoAlto: cajaLado.alto,
       visible, modo, ruta: rutaViva, pulsos: [...pulsos], editando,
-      sesion: idSesion, instanciasWasm, instanciasSesion,
+      sesion: idSesion, locale, instanciasWasm, instanciasSesion,
       // el paso de escritura lleva su idRef para que la prueba distinga dos EditText aunque el
       // texto sea el mismo: `escribir:0x…/texto`, el mismo formato de `--escribir` del intérprete
       guion: guion.map((p) => p.tipo === "escribir"
