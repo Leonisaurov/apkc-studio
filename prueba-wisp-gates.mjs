@@ -244,7 +244,7 @@ const hosts = gates.hostsDeRelays(leidos.relays);
   const puente = instalarPuenteWisp({
     global: pagina, contrato: CONTRATO_NUCLEO,
     enviar: (mensaje) => {
-      llamadas++;
+      if (mensaje.metodo === "obtener") llamadas++;
       if (mensaje.tipo !== "wisp") throw new Error("el puente envió " + mensaje.tipo + ", no wisp");
       return Promise.resolve({
         id: llamadas, tipo: "wisp",
