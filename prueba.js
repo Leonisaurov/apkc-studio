@@ -1701,6 +1701,79 @@ if (reiniciado.modo !== "libre" || reiniciado.alto !== 240 || reiniciado.visible
   mal("reducirPanel reiniciar no devuelve el estado pequeño y visible");
 }
 
+// 6d-d. §346: persistencia versionada y z-order. Las tres funciones puras se escriben y se leen sin
+//        perder geometría; la preferencia corrupta no lanza; el z crece al traer al frente. Las
+//        comprobaciones de `localStorage` y del CSS son de fuente porque no hay DOM en node.
+const cv = paneles.clavesDePanel("consola-telefono/panel");
+if (cv.modo !== "apkc-studio/paneles/v1/consola-telefono/panel/modo" ||
+    cv.z !== "apkc-studio/paneles/v1/consola-telefono/panel/z") {
+  mal("clavesDePanel no versiona las claves por id: " + JSON.stringify(cv));
+}
+const estadoGuardado = { modo: "acoplado", borde: "izquierda", x: 120, y: 96,
+  ancho: 340, alto: 320, z: 7 };
+const prefGuardada = paneles.preferenciaDeEstado(estadoGuardado);
+if (prefGuardada.modo !== "acoplado" || prefGuardada.borde !== "izquierda" ||
+    prefGuardada.x !== 120 || prefGuardada.y !== 96 || prefGuardada.ancho !== 340 ||
+    prefGuardada.alto !== 320 || prefGuardada.z !== 7) {
+  mal("preferenciaDeEstado no serializa la geometría y el z: " + JSON.stringify(prefGuardada));
+}
+const prefLeida = paneles.estadoDePreferencia(prefGuardada,
+  paneles.estadoInicial("consola-telefono/panel"), limitesConsola);
+if (prefLeida.modo !== "acoplado" || prefLeida.borde !== "izquierda" || prefLeida.x !== 120 ||
+    prefLeida.y !== 96 || prefLeida.ancho !== 340 || prefLeida.alto !== 320 || prefLeida.z !== 7) {
+  mal("estadoDePreferencia no recupera la geometría guardada: " + JSON.stringify(prefLeida));
+}
+// las claves antiguas valían cadenas: la migración las acepta y recorta a los límites de la ventana
+const prefMigrada = paneles.estadoDePreferencia(
+  { modo: "acoplado", borde: "arriba", x: "40", ancho: "380" },
+  paneles.estadoInicial("consola-telefono/panel"), limitesConsola);
+if (prefMigrada.modo !== "acoplado" || prefMigrada.borde !== "arriba" ||
+    prefMigrada.x !== 40 || prefMigrada.ancho !== 380) {
+  mal("estadoDePreferencia no migra las claves antiguas como cadenas: " + JSON.stringify(prefMigrada));
+}
+if (!/clavesDePanel\(f\.id\)/.test(fuentePreviaEstado) ||
+    !/estadoDePreferencia\(pref, estado/.test(fuentePreviaEstado) ||
+    !/preferenciaDeEstado\(estado\)/.test(fuentePreviaEstado) ||
+    !/leerClave\(f\.claves\.modo, MODO_LIBRE\)/.test(fuentePreviaEstado)) {
+  mal("previa-panel.js no integra la preferencia versionada con migración de las claves antiguas");
+}
+// Una clave rota en localStorage no puede tumbar la página: ni el JSON ni los campos sueltos.
+let preferenciaRota = "";
+try {
+  const jsonRoto = paneles.estadoDePreferencia("{no es json",
+    paneles.estadoInicial("vista"), limitesConsola);
+  const camposRotos = paneles.estadoDePreferencia(
+    { x: "basura", ancho: NaN, z: "no-numero", borde: 99 },
+    paneles.estadoInicial("vista"), limitesConsola);
+  if (jsonRoto.modo !== "libre" || jsonRoto.borde !== "derecha" || jsonRoto.z !== 1) {
+    preferenciaRota = "el JSON roto no cae al estado base";
+  } else if (camposRotos.x !== 0 || camposRotos.z !== 1 ||
+      camposRotos.borde !== "derecha") {
+    preferenciaRota = "los campos rotos no caen al estado base";
+  }
+} catch (e) {
+  preferenciaRota = "estadoDePreferencia lanza con una preferencia corrupta: " + e.message;
+}
+if (preferenciaRota) mal(preferenciaRota);
+// z-order: `traerAlFrente` sube el número sin mutar y el CSS lo coloca en la banda 40-59.
+const z0 = paneles.estadoInicial("consola-telefono/panel");
+const z1 = paneles.reducirPanel(z0, { tipo: "traerAlFrente" });
+const z2 = paneles.reducirPanel(z1, { tipo: "traerAlFrente" });
+if (!(z1.z > z0.z && z2.z > z1.z)) mal("traerAlFrente no sube el z de forma creciente");
+const fuenteConectar = (fuentePreviaEstado.match(/function conectarFlotante\(nombre\)[\s\S]*?\n  \}/) || [])[0] || "";
+if (!/traerAlFrente\(nombre\);/.test(fuenteConectar)) {
+  mal("conectarFlotante no trae la capa al frente al agarrar el asa");
+}
+if (!/contadorZ = Math\.min\(19, contadorZ \+ 1\)/.test(fuentePreviaEstado) ||
+    !/setProperty\("--z", String\(contadorZ\)\)/.test(fuentePreviaEstado)) {
+  mal("traerAlFrente no sube `--z` dentro de la banda de módulos");
+}
+const bloqueFlotante = (fuenteEstilo.match(
+  /\.previa-inspector\[data-modo="libre"\]([\s\S]{0,900}?)\}/) || [])[1] || "";
+if (!/z-index:\s*calc\(40 \+ var\(--z, 0\)\)/.test(bloqueFlotante)) {
+  mal("style.css no coloca las capas flotantes en la banda 40 + --z");
+}
+
 const esLayout = previaPanel.esRutaDeLayout;
 if (!esLayout("/proyecto/res/layout/main.xml")) mal("esRutaDeLayout no reconoce res/layout");
 if (!esLayout("/proyecto/res/layout-land/girado.xml")) mal("esRutaDeLayout no reconoce layout-land");

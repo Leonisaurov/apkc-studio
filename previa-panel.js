@@ -50,7 +50,8 @@ import { RUTA_ULTIMA_APK, leerUltimaApk, fechaDeMeta, EVENTO_ULTIMA_APK } from "
 import {
   ANCHO_POR_DEFECTO, ANCHO_MINIMO, ANCHO_MAXIMO, ALTO_MINIMO, LADO_POR_DEFECTO, LADO_MINIMO,
   LADO_ALTO_MINIMO, BORDES, BORDE_POR_DEFECTO, medidaValida, numeroOpcional, cajaRedimensionada,
-  cajaAcoplada, MODULOS, instanciaModulo,
+  cajaAcoplada, MODULOS, instanciaModulo, reducirPanel, clavesDePanel, estadoDePreferencia,
+  preferenciaDeEstado,
 } from "./paneles.js";
 
 // Persistencia de la vista dividida. Son preferencias de esta ventana, no del proyecto.
@@ -942,6 +943,21 @@ export function crearPreviaPanel({ hospedador, proyecto, estadoPestana, editor, 
       esperarCaja: false,
     }),
   };
+  // z-order por ventana. `--z` vale de 0 a 19 y el CSS lo suma a la banda 40, así que los módulos
+  // quedan por encima del canvas y del panel sin tapar las capas del modo editar (z 60) ni los
+  // diálogos (z 80+). No se emite por `BroadcastChannel`: es preferencia de esta ventana.
+  let contadorZ = 0;
+  function traerAlFrente(nombre) {
+    const f = FLOTANTES[nombre];
+    if (!f) return 0;
+    contadorZ = Math.min(19, contadorZ + 1);
+    Object.assign(f.estado, reducirPanel(f.estado, { tipo: "traerAlFrente", z: contadorZ }));
+    const contenedor = f.contenedor && f.contenedor();
+    if (contenedor && contenedor.style && typeof contenedor.style.setProperty === "function") {
+      contenedor.style.setProperty("--z", String(contadorZ));
+    }
+    return contadorZ;
+  }
   const completa = { panel: false, vista: false };
   let ultimaMeta = null;
   // el apk que respalda el modelo en pantalla: el del build o la copia estable. Los clics repiten
@@ -1125,24 +1141,33 @@ export function crearPreviaPanel({ hospedador, proyecto, estadoPestana, editor, 
   function leerFlotante(nombre) {
     const f = FLOTANTES[nombre];
     const estado = f.estado;
-    const modo = leerClave(f.claves.modo, MODO_LIBRE);
-    estado.modo = modo === MODO_ACOPLADO || modo === MODO_MINIMIZADO ? modo : MODO_LIBRE;
-    estado.borde = bordeValido(leerClave(f.claves.borde, BORDE_POR_DEFECTO));
-    const x = numeroOpcional(leerClave(f.claves.x, ""), 0, 100000);
-    const y = numeroOpcional(leerClave(f.claves.y, ""), 0, 100000);
-    estado.x = Number.isFinite(x) ? x : null;
-    estado.y = Number.isFinite(y) ? y : null;
-    if (f.claves.ancho) {
-      const limites = limitesFlotante();
-      const ancho = numeroOpcional(leerClave(f.claves.ancho, ""), limites.anchoMin, limites.anchoMax);
-      if (f.anchoPropio) estado.ancho = Number.isFinite(ancho) ? ancho : null;
+    // Primero la preferencia versionada. Los campos que aún no están en ella se toman de las claves
+    // antiguas (migración de un solo uso, sin borrar nada): así una ventana que ya había guardado
+    // su geometría con el formato viejo no la pierde al actualizar.
+    const cv = clavesDePanel(f.id);
+    const pref = {};
+    for (const campo of ["modo", "borde", "x", "y", "ancho", "alto", "z"]) {
+      const valor = leerClave(cv[campo], null);
+      if (valor !== null) pref[campo] = valor;
     }
-    if (f.claves.alto) {
-      const limites = limitesFlotante();
-      const alto = numeroOpcional(leerClave(f.claves.alto, ""), limites.altoMin, limites.altoMax);
-      if (f.altoPropio) estado.alto = Number.isFinite(alto) ? alto : null;
-    }
+    if (pref.modo === undefined) pref.modo = leerClave(f.claves.modo, MODO_LIBRE);
+    if (pref.borde === undefined) pref.borde = leerClave(f.claves.borde, BORDE_POR_DEFECTO);
+    if (pref.x === undefined) pref.x = leerClave(f.claves.x, "");
+    if (pref.y === undefined) pref.y = leerClave(f.claves.y, "");
+    if (pref.ancho === undefined && f.claves.ancho) pref.ancho = leerClave(f.claves.ancho, "");
+    if (pref.alto === undefined && f.claves.alto) pref.alto = leerClave(f.claves.alto, "");
+    // `estadoDePreferencia` es pura y no lanza: un JSON roto o un número con basura caen al estado
+    // base, que en la primera carga es la geometría pequeña por diseño.
+    const nuevo = estadoDePreferencia(pref, estado, limitesFlotante());
+    // solo el panel del editor tiene ancho y alto propios; en Pantalla los manda el marco del canvas
+    nuevo.ancho = f.anchoPropio ? nuevo.ancho : estado.ancho;
+    nuevo.alto = f.altoPropio ? nuevo.alto : estado.alto;
+    Object.assign(estado, nuevo);
     estado.anterior = estado.modo === MODO_MINIMIZADO ? MODO_LIBRE : estado.modo;
+    const contenedor = f.contenedor && f.contenedor();
+    if (contenedor && contenedor.style && typeof contenedor.style.setProperty === "function") {
+      contenedor.style.setProperty("--z", String(estado.z));
+    }
   }
 
   function leerFlotantes() {
@@ -1153,6 +1178,17 @@ export function crearPreviaPanel({ hospedador, proyecto, estadoPestana, editor, 
   function guardarFlotante(nombre) {
     const f = FLOTANTES[nombre];
     const estado = f.estado;
+    const pref = preferenciaDeEstado(estado);
+    if (!f.anchoPropio) pref.ancho = null;
+    if (!f.altoPropio) pref.alto = null;
+    const cv = clavesDePanel(f.id);
+    for (const campo of Object.keys(pref)) {
+      const valor = pref[campo];
+      if (valor === null || valor === undefined) borrarClave(cv[campo]);
+      else guardarClave(cv[campo], valor);
+    }
+    // Las claves antiguas se siguen escribiendo: una versión anterior de la página puede leerlas y
+    // la migración queda comprobada en los dos sentidos.
     guardarClave(f.claves.modo, estado.modo);
     guardarClave(f.claves.borde, estado.borde);
     if (Number.isFinite(estado.x)) guardarClave(f.claves.x, estado.x);
@@ -2775,6 +2811,9 @@ export function crearPreviaPanel({ hospedador, proyecto, estadoPestana, editor, 
     asa.addEventListener("pointerdown", (e) => {
       if (e.button !== undefined && e.button !== 0) return;
       if (estado.modo === MODO_MINIMIZADO) return;
+      // agarrar el asa trae la capa al frente: sube `--z` sin cambiar las capas del modo editar ni
+      // los diálogos, y el nuevo valor se persiste con el resto de la preferencia al soltar
+      traerAlFrente(nombre);
       const caja = contenedor.getBoundingClientRect();
       if (estado.modo === MODO_ACOPLADO) {
         // se queda donde estaba y pasa a libre: el primer movimiento no da un salto

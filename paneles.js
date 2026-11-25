@@ -13,6 +13,10 @@ export const LADO_MINIMO = 220;
 export const LADO_ALTO_MINIMO = 240;
 export const BORDES = ["izquierda", "derecha", "arriba", "abajo"];
 export const BORDE_POR_DEFECTO = "derecha";
+export const MODOS_PANEL = ["libre", "acoplado", "minimizado"];
+// Espacio de nombres de la preferencia versionada de cada módulo. Las claves antiguas
+// (`apkc-studio/previa-inspector-*` y `…-lado-*`) se leen como migración de un solo uso.
+export const PREFIJO_PANELES = "apkc-studio/paneles/v1/";
 // La consola del teléfono nace pequeña: el respaldo es 340 × 240, nunca el viejo `min(560, …)`.
 export const TAMANO_POR_DEFECTO = { ancho: ANCHO_POR_DEFECTO, alto: LADO_ALTO_MINIMO };
 
@@ -223,4 +227,75 @@ export function reducirPanel(estado, accion) {
     default:
       return e;
   }
+}
+
+// --- persistencia versionada (§346) -------------------------------------------------------------
+// Estas tres funciones son puras: no tocan `localStorage` ni el DOM, así que `prueba.js` puede
+// falsar la migración, la preferencia corrupta y el z-order en node. `previa-panel.js` se limita a
+// pasarles los valores que lee y a escribir las claves que devuelven.
+
+// Claves versionadas de un módulo: `apkc-studio/paneles/v1/<id>/{modo,borde,x,y,ancho,alto,z}`.
+export function clavesDePanel(id) {
+  const base = PREFIJO_PANELES + (id || "panel") + "/";
+  return {
+    modo: base + "modo",
+    borde: base + "borde",
+    x: base + "x",
+    y: base + "y",
+    ancho: base + "ancho",
+    alto: base + "alto",
+    z: base + "z",
+  };
+}
+
+// Estado serializable de un módulo. Los números no finitos y los modos desconocidos se dejan como
+// ausentes para que `estadoDePreferencia` caiga al respaldo; nunca se escribe `NaN` en localStorage.
+export function preferenciaDeEstado(estado) {
+  const e = estado && typeof estado === "object" ? estado : {};
+  return {
+    modo: MODOS_PANEL.includes(e.modo) ? e.modo : "libre",
+    borde: BORDES.includes(e.borde) ? e.borde : BORDE_POR_DEFECTO,
+    x: Number.isFinite(e.x) ? Math.round(e.x) : null,
+    y: Number.isFinite(e.y) ? Math.round(e.y) : null,
+    ancho: Number.isFinite(e.ancho) ? Math.round(e.ancho) : null,
+    alto: Number.isFinite(e.alto) ? Math.round(e.alto) : null,
+    z: Number.isFinite(e.z) ? Math.round(e.z) : 0,
+  };
+}
+
+// Una preferencia (objeto de campos o texto JSON) convertida en estado validado. Nunca lanza: un
+// JSON roto o un campo con basura caen al estado base, así que una clave estropeada no tumba la
+// página. Lo que no existe en la preferencia se conserva del estado base (migración de claves
+// antiguas y geometría aún no guardada).
+export function estadoDePreferencia(raw, estadoBase, limites = {}) {
+  const base = estadoBase && typeof estadoBase === "object" ? estadoBase : estadoInicial();
+  const l = limites && typeof limites === "object" ? limites : {};
+  let p = raw;
+  if (typeof p === "string") {
+    try { p = JSON.parse(p); } catch (e) { p = null; }
+  }
+  if (!p || typeof p !== "object" || Array.isArray(p)) p = {};
+  const anchoMin = Number.isFinite(l.anchoMin) ? l.anchoMin : ANCHO_MINIMO;
+  const anchoMax = Number.isFinite(l.anchoMax) ? l.anchoMax : ANCHO_MAXIMO;
+  const altoMin = Number.isFinite(l.altoMin) ? l.altoMin : LADO_ALTO_MINIMO;
+  const altoMax = Number.isFinite(l.altoMax) ? l.altoMax : LADO_ALTO_MINIMO * 4;
+  const modo = MODOS_PANEL.includes(p.modo) ? p.modo
+    : (MODOS_PANEL.includes(base.modo) ? base.modo : "libre");
+  const borde = BORDES.includes(p.borde) ? p.borde
+    : (BORDES.includes(base.borde) ? base.borde : BORDE_POR_DEFECTO);
+  const x = numeroOpcional(p.x, 0, 100000);
+  const y = numeroOpcional(p.y, 0, 100000);
+  const ancho = numeroOpcional(p.ancho, anchoMin, anchoMax);
+  const alto = numeroOpcional(p.alto, altoMin, altoMax);
+  const z = numeroOpcional(p.z, 0, 100000);
+  return {
+    ...base,
+    modo,
+    borde,
+    x: x === null ? (Number.isFinite(base.x) ? base.x : null) : x,
+    y: y === null ? (Number.isFinite(base.y) ? base.y : null) : y,
+    ancho: ancho === null ? (Number.isFinite(base.ancho) ? base.ancho : null) : ancho,
+    alto: alto === null ? (Number.isFinite(base.alto) ? base.alto : null) : alto,
+    z: z === null ? (Number.isFinite(base.z) ? base.z : 0) : z,
+  };
 }

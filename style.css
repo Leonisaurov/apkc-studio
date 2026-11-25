@@ -713,9 +713,10 @@ kbd {
 .previa-inspector[data-modo="acoplado"],
 .previa-inspector[data-modo="minimizado"] {
   position: fixed;
-  /* por encima de los controles y del destino del arrastre del mismo panel, pero por debajo de las
-     capas del modo editar (z 60) y de los diálogos, como estaba cuando era `absolute` */
-  z-index: 6;
+  /* banda 40-59: por encima del canvas, del panel y del destino del arrastre, pero por debajo de
+     las capas del modo editar (z 60) y de los diálogos (z 80+). `conectarFlotante` sube `--z`
+     de 0 a 19 al agarrar el asa, así que la última capa tocada queda delante sin taparlos (§346). */
+  z-index: calc(40 + var(--z, 0));
   top: auto;
   right: auto;
   bottom: auto;
