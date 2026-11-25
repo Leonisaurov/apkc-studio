@@ -2854,6 +2854,24 @@ if (/height: 34vh/.test(fuenteEstilo) || !/height: var\(--modulo-alto/.test(fuen
 if (!/aplicarModuloCompilacion/.test(pestana)) {
   mal("pestana.js no aplica la geometría del módulo al panel inferior");
 }
+
+// §344: el explorador y el editor son módulos declarados en el DOM. Se conservan el undo tree,
+// la carga diferida (`texto = null`), el `readOnly` de la pestaña en carga y el `ResizeObserver`.
+if (!/class="lateral modulo" data-modulo="explorador"/.test(html)) {
+  mal('index.html no declara el explorador como módulo data-modulo="explorador"');
+}
+if (!/class="editor modulo" data-modulo="editor"/.test(html)) {
+  mal('index.html no declara el editor como módulo data-modulo="editor"');
+}
+if (!/montarModulosBasicos/.test(pestana) || !/MODULOS_DOM/.test(pestana)) {
+  mal("pestana.js no cablea los módulos declarados en el DOM");
+}
+if (!/ARBOL\.abiertos/.test(pestana) || !/readOnly/.test(pestana) || !/ResizeObserver/.test(pestana)) {
+  mal("el módulo explorador/editor perdió el árbol, la carga diferida o el ResizeObserver");
+}
+if (!/typeof vista !== "string"/.test(js)) {
+  mal("vistas.js conmuta de vista con un gesto de módulo en lugar de solo con data-vista");
+}
 // el canvas del render se puede pulsar: sin foco ni manejador no habría forma de tocar la app
 if (!/<canvas id="previa-lateral-canvas"[^>]*tabindex="0"/.test(html)) {
   mal("el canvas del render no es enfocable: no se puede pulsar con el teclado");

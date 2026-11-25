@@ -14,7 +14,7 @@ import { crearPanelDeps } from "./deps.js";
 import { guardarUltimaApk, EVENTO_ULTIMA_APK } from "./ultima-apk.js";
 import { CONTRATO_NUCLEO } from "./wisp.js";
 import { instalarPuenteWisp } from "./wisp-puente.js";
-import { MODULOS, instanciaModulo } from "./paneles.js";
+import { MODULOS, instanciaModulo, cajaRedimensionada, reducirPanel } from "./paneles.js";
 
 // La pestaña que hace: editor de fuente + un arbol en OPFS + los comandos de apkc.wasm.
 //
@@ -2279,6 +2279,58 @@ function aplicarModuloCompilacion(panel) {
   }
 }
 
+// §344-§345: cableado común de los módulos declarados en el DOM (`data-modulo`). El asa los trae
+// al frente y los ocho tiradores redimensionan desde la caja real, con la arista de enfrente quieta
+// gracias a `cajaRedimensionada`. No se clona ni se renombra ningún nodo: los listeners viven en el
+// contenido existente, así que se conservan el undo tree, la carga diferida y el `ResizeObserver`.
+const MODULOS_DOM = new Map();
+function montarModulosBasicos() {
+  for (const nodo of document.querySelectorAll("[data-modulo]")) {
+    const def = MODULOS[nodo.dataset.modulo];
+    if (!def || MODULOS_DOM.has(nodo)) continue;
+    const instancia = instanciaModulo(nodo.dataset.modulo, nodo.id || "", {
+      contenedor: () => nodo,
+    });
+    MODULOS_DOM.set(nodo, instancia);
+    nodo.style.setProperty("--z", String(instancia.estado.z));
+    const asa = nodo.querySelector(".modulo-asa");
+    if (asa) {
+      asa.addEventListener("pointerdown", () => {
+        instancia.estado = reducirPanel(instancia.estado, { tipo: "traerAlFrente" });
+        nodo.style.setProperty("--z", String(instancia.estado.z));
+      });
+    }
+    for (const tirador of nodo.querySelectorAll(".modulo-tirador")) {
+      tirador.addEventListener("pointerdown", (e) => {
+        if (e.button !== undefined && e.button !== 0) return;
+        if (window.matchMedia && window.matchMedia("(max-width: 760px)").matches) return;
+        const rect = nodo.getBoundingClientRect();
+        const base = {
+          ancho: Math.round(rect.width), alto: Math.round(rect.height),
+          arriba: Math.round(rect.top), izquierda: Math.round(rect.left),
+        };
+        const limites = {
+          anchoMin: def.min.ancho, anchoMax: Math.max(def.min.ancho, window.innerWidth - 16),
+          altoMin: def.min.alto, altoMax: Math.max(def.min.alto, window.innerHeight - 16),
+        };
+        const mover = (ev) => {
+          const caja = cajaRedimensionada(base, tirador.dataset.eje,
+            ev.clientX - e.clientX, ev.clientY - e.clientY, limites);
+          nodo.style.flex = "0 0 auto";
+          nodo.style.width = caja.ancho + "px";
+          nodo.style.height = caja.alto + "px";
+        };
+        const soltar = () => {
+          window.removeEventListener("pointermove", mover);
+          window.removeEventListener("pointerup", soltar);
+        };
+        window.addEventListener("pointermove", mover);
+        window.addEventListener("pointerup", soltar);
+      });
+    }
+  }
+}
+
 function mostrarPanel(nombre) {
   const panel = document.getElementById("panel-inferior");
   if (!panel) return;
@@ -3428,6 +3480,7 @@ const { leerAjustes, guardarAjustes } = crearAjustes({
 let listo = false;
 async function iniciarPestana() {
   try {
+    montarModulosBasicos();
     const r = await hospedador.arbol();
     listo = true;
     const nodos = r.nodos || [];

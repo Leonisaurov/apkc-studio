@@ -118,7 +118,7 @@ const VISTA_MINIMO = 280;
 // `raiz` es un selector guardado como dato, no un `querySelector` ejecutado al importar.
 export const MODULOS = {
   explorador: {
-    id: "explorador", titulo: "Archivos", raiz: "#explorador",
+    id: "explorador", titulo: "Archivos", raiz: ".lateral",
     anchoPref: 260, altoPref: 240, min: { ancho: 180, alto: 160 },
     claves: {}, esperarCaja: false,
   },

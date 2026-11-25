@@ -126,8 +126,20 @@
       </button>
     </nav>
 
-    <aside class="lateral" aria-label="Explorador del proyecto">
+    <aside class="lateral modulo" data-modulo="explorador" aria-label="Explorador del proyecto">
+      <div class="modulo-tiradores" aria-hidden="true">
+        <span class="modulo-tirador" data-eje="norte"></span>
+        <span class="modulo-tirador" data-eje="sur"></span>
+        <span class="modulo-tirador" data-eje="este"></span>
+        <span class="modulo-tirador" data-eje="oeste"></span>
+        <span class="modulo-tirador" data-eje="noreste"></span>
+        <span class="modulo-tirador" data-eje="noroeste"></span>
+        <span class="modulo-tirador" data-eje="sureste"></span>
+        <span class="modulo-tirador" data-eje="suroeste"></span>
+      </div>
       <div class="lateral-cab">
+        <button class="modulo-asa" type="button" tabindex="-1" title="Mover el explorador"
+                aria-label="Mover el explorador"></button>
         <span>Explorador</span>
         <span class="lateral-acciones">
           <button id="plegar-arbol" class="icono-boton" type="button" title="Contraer todas las carpetas" aria-label="Contraer todas las carpetas">
@@ -318,7 +330,17 @@
           </div>
 
           <div id="editor-fila" class="editor-fila">
-            <div class="editor">
+            <div class="editor modulo" data-modulo="editor">
+              <div class="modulo-tiradores" aria-hidden="true">
+                <span class="modulo-tirador" data-eje="norte"></span>
+                <span class="modulo-tirador" data-eje="sur"></span>
+                <span class="modulo-tirador" data-eje="este"></span>
+                <span class="modulo-tirador" data-eje="oeste"></span>
+                <span class="modulo-tirador" data-eje="noreste"></span>
+                <span class="modulo-tirador" data-eje="noroeste"></span>
+                <span class="modulo-tirador" data-eje="sureste"></span>
+                <span class="modulo-tirador" data-eje="suroeste"></span>
+              </div>
               <pre id="numeros" class="numeros" aria-hidden="true"></pre>
               <div class="capas">
                 <pre id="resalto" class="resalto" aria-hidden="true"></pre>

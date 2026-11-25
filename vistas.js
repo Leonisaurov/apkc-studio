@@ -15,6 +15,9 @@ import {
   const NOMBRES = { crear: "Inicio", pestana: "Editor", vista: "Pantalla", deps: "Dependencias" };
 
   function mostrar(vista) {
+    // Un gesto de un módulo (asa, tirador o acople) no es un cambio de vista: `data-vista` solo lo
+    // ponen los botones de navegación, así que un objeto sin id reconocido no conmuta nada (§344).
+    if (typeof vista !== "string") return;
     if (!document.getElementById(vista)) vista = "crear";
     for (const seccion of document.querySelectorAll("#vistas > .vista")) {
       seccion.classList.toggle("activa", seccion.id === vista);
