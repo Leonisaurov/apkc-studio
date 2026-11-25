@@ -50,7 +50,7 @@ import { RUTA_ULTIMA_APK, leerUltimaApk, fechaDeMeta, EVENTO_ULTIMA_APK } from "
 import {
   ANCHO_POR_DEFECTO, ANCHO_MINIMO, ANCHO_MAXIMO, ALTO_MINIMO, LADO_POR_DEFECTO, LADO_MINIMO,
   LADO_ALTO_MINIMO, BORDES, BORDE_POR_DEFECTO, medidaValida, numeroOpcional, cajaRedimensionada,
-  cajaAcoplada,
+  cajaAcoplada, MODULOS, instanciaModulo,
 } from "./paneles.js";
 
 // Persistencia de la vista dividida. Son preferencias de esta ventana, no del proyecto.
@@ -906,10 +906,11 @@ export function crearPreviaPanel({ hospedador, proyecto, estadoPestana, editor, 
     ancho: null,
     alto: null,
   };
-  // Las dos capas desprendidas, con lo que cambia de una a otra: su contenedor, sus claves y sus
-  // botones. El resto del comportamiento es el mismo y vive en `aplicarModoFlotante`.
+  // Las dos capas desprendidas son dos instancias del MISMO módulo del registro (`§342`): el panel
+  // del editor y la vista Pantalla. Lo que cambia es el DOM (contenedor, ids y claves); la geometría
+  // y el ciclo de vida vienen de `MODULOS`, así que añadir un módulo nuevo no exige otro sistema.
   const FLOTANTES = {
-    panel: {
+    panel: instanciaModulo("consola-telefono", "panel", {
       estado: inspector,
       contenedor: () => el("previa-inspector"),
       claves: { modo: CLAVE_PANEL_MODO, borde: CLAVE_PANEL_BORDE, x: CLAVE_PANEL_X, y: CLAVE_PANEL_Y,
@@ -924,8 +925,8 @@ export function crearPreviaPanel({ hospedador, proyecto, estadoPestana, editor, 
       altoPropio: true,
       // oculta en el modo Vista previa: su caja mide cero hasta que se enseña el emulador
       esperarCaja: true,
-    },
-    vista: {
+    }),
+    vista: instanciaModulo("consola-telefono", "vista", {
       estado: lado,
       contenedor: () => marcoLado(),
       claves: { modo: CLAVE_LADO_MODO, borde: CLAVE_LADO_BORDE, x: CLAVE_LADO_X, y: CLAVE_LADO_Y,
@@ -939,7 +940,7 @@ export function crearPreviaPanel({ hospedador, proyecto, estadoPestana, editor, 
       anchoPropio: false,
       altoPropio: false,
       esperarCaja: false,
-    },
+    }),
   };
   const completa = { panel: false, vista: false };
   let ultimaMeta = null;

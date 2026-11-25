@@ -1319,6 +1319,28 @@ if (/\.previa-inspector \{[^}]*height: 46%/.test(fuenteEstilo)) {
 if (/\.marco-vista-lado,\s*\.marco-vista-lado\[data-alto="propio"\] \{[^}]*bottom: 0;/.test(fuenteEstilo)) {
   mal("style.css sigue estirando .marco-vista-lado de arriba abajo");
 }
+
+// §342: el registro genérico tiene los cinco módulos y las dos consolas son instancias de uno solo.
+for (const id of ["explorador", "editor", "previa", "consola-telefono", "compilacion"]) {
+  const m = paneles.MODULOS[id];
+  if (!m || !m.titulo || !m.raiz || !m.min || !Number.isFinite(m.anchoPref) || !Number.isFinite(m.altoPref)) {
+    mal(`MODULOS no describe el módulo ${id}: ${JSON.stringify(m)}`);
+  }
+}
+if (!/const FLOTANTES = \{[\s\S]{0,240}instanciaModulo\("consola-telefono", "panel"/.test(fuentePreviaEstado) ||
+    !/instanciaModulo\("consola-telefono", "vista"/.test(fuentePreviaEstado)) {
+  mal("las dos consolas no son instancias del mismo módulo del registro");
+}
+let moduloDesconocidoRechazado = false;
+try { paneles.instanciaModulo("no-existe", "x"); } catch (e) { moduloDesconocidoRechazado = true; }
+if (!moduloDesconocidoRechazado) mal("instanciaModulo acepta un tipo que no está en el registro");
+const instanciaPanel = paneles.instanciaModulo("consola-telefono", "panel");
+if (instanciaPanel.anchoPref !== 340 || instanciaPanel.altoPref !== 240 || instanciaPanel.estado.id !== "consola-telefono/panel") {
+  mal("instanciaModulo no hereda la geometría pequeña del registro: " + JSON.stringify(instanciaPanel));
+}
+if (/from "\.\/previa-panel\.js"/.test(fuentePaneles)) {
+  mal("paneles.js importa de previa-panel.js: hay importación inversa");
+}
 // La regla del :not() anterior tiene especificidad (0,3,0): el tirador ha de repetir su clase para
 // alcanzarla, o el navegador aplica `none` y los ocho tiradores no reciben el puntero (ni flotando
 // ni acoplado). La aserción fija esa especificidad, no solo la presencia de `pointer-events: auto`.

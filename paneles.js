@@ -110,6 +110,56 @@ export function cajaRedimensionada(caja, eje, dx, dy, limites) {
   };
 }
 
+// El teléfono del emulador no se queda sin ancho cuando el panel crece.
+const VISTA_MINIMO = 280;
+
+// Registro de los cinco módulos del editor. Cada entrada describe el contenido existente (que se
+// envuelve, no se clona ni se renombra) y su geometría preferida. No hay dependencias de DOM aquí:
+// `raiz` es un selector guardado como dato, no un `querySelector` ejecutado al importar.
+export const MODULOS = {
+  explorador: {
+    id: "explorador", titulo: "Archivos", raiz: "#explorador",
+    anchoPref: 260, altoPref: 240, min: { ancho: 180, alto: 160 },
+    claves: {}, esperarCaja: false,
+  },
+  editor: {
+    id: "editor", titulo: "Editor", raiz: ".editor",
+    anchoPref: 640, altoPref: 420, min: { ancho: 280, alto: 280 },
+    claves: {}, esperarCaja: false,
+  },
+  previa: {
+    id: "previa", titulo: "Teléfono", raiz: "#marco-previa",
+    anchoPref: LADO_POR_DEFECTO, altoPref: 640, min: { ancho: VISTA_MINIMO, alto: 240 },
+    claves: {}, esperarCaja: false,
+  },
+  "consola-telefono": {
+    id: "consola-telefono", titulo: "Registro y consola del teléfono", raiz: "#previa-inspector",
+    anchoPref: ANCHO_POR_DEFECTO, altoPref: LADO_ALTO_MINIMO,
+    min: { ancho: LADO_MINIMO, alto: LADO_ALTO_MINIMO },
+    claves: {}, esperarCaja: true,
+  },
+  compilacion: {
+    id: "compilacion", titulo: "Consola de compilación", raiz: "#panel-inferior",
+    anchoPref: 640, altoPref: LADO_ALTO_MINIMO * 2, min: { ancho: 280, alto: LADO_ALTO_MINIMO },
+    claves: {}, esperarCaja: false,
+  },
+};
+
+// Una instancia de un módulo del registro. `nombre` distingue las dos superficies del mismo tipo
+// (panel del editor y vista Pantalla) y `extra` aporta lo que depende del DOM: contenedor, ids y
+// claves de persistencia. El estado se puede pasar desde fuera para conservar el objeto existente.
+export function instanciaModulo(tipo, nombre, extra = {}) {
+  const def = MODULOS[tipo];
+  if (!def) throw new Error("módulo desconocido: " + tipo);
+  return {
+    ...def,
+    tipo,
+    nombre,
+    estado: extra.estado || estadoInicial(def.id + (nombre ? "/" + nombre : ""), def.z || 40),
+    ...extra,
+  };
+}
+
 // Estado inicial de un módulo. La geometría preferida es pequeña y el modo es flotante.
 export function estadoInicial(id = "", z = 1) {
   return {
