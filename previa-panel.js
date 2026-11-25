@@ -45,6 +45,13 @@ import {
   iconosSistema, tamanoDeTipo,
 } from "./layout-editor.js";
 import { RUTA_ULTIMA_APK, leerUltimaApk, fechaDeMeta, EVENTO_ULTIMA_APK } from "./ultima-apk.js";
+// Geometría y constantes compartidas con los módulos flotantes (§340). Se importan, no se
+// redefinen: `paneles.js` es puro y no importa de aquí, así que no hay ciclo ESM.
+import {
+  ANCHO_POR_DEFECTO, ANCHO_MINIMO, ANCHO_MAXIMO, ALTO_MINIMO, LADO_POR_DEFECTO, LADO_MINIMO,
+  LADO_ALTO_MINIMO, BORDES, BORDE_POR_DEFECTO, medidaValida, numeroOpcional, cajaRedimensionada,
+  cajaAcoplada,
+} from "./paneles.js";
 
 // Persistencia de la vista dividida. Son preferencias de esta ventana, no del proyecto.
 const CLAVE_ANCHO = "apkc-studio/previa-ancho";
@@ -79,42 +86,14 @@ const CLAVE_PANEL_ALTO = "apkc-studio/previa-inspector-alto";
 const MODO_LIBRE = "libre";
 const MODO_ACOPLADO = "acoplado";
 const MODO_MINIMIZADO = "minimizado";
-const BORDE_POR_DEFECTO = "derecha";
 // la consola se puede acoplar a los cuatro bordes de la ventana; el borde elegido se guarda con el
 // modo, así que una recarga devuelve la capa al mismo sitio y con el mismo tamaño
-const BORDES = ["izquierda", "derecha", "arriba", "abajo"];
 export function bordeValido(pedido) {
   return BORDES.includes(pedido) ? pedido : BORDE_POR_DEFECTO;
 }
-// Geometría de una capa acoplada, pura y probada en node: el ancho y el alto son los que eligió el
-// usuario (o los de siempre), recortados a la ventana, y solo el borde elegido se pega al margen.
-export function cajaAcoplada(borde, ancho, alto, medidas, margen = 8) {
-  const anchoVentana = Number.isFinite(medidas && medidas.ancho) ? medidas.ancho : 1024;
-  const altoVentana = Number.isFinite(medidas && medidas.alto) ? medidas.alto : 768;
-  const anchoUtil = Math.max(LADO_MINIMO, anchoVentana - margen * 2);
-  const altoUtil = Math.max(LADO_ALTO_MINIMO, altoVentana - margen * 2);
-  const caja = {
-    ancho: Math.round(medidaValida(ancho, LADO_MINIMO, anchoUtil, LADO_POR_DEFECTO)),
-    alto: Math.round(medidaValida(alto, LADO_ALTO_MINIMO, altoUtil, altoUtil)),
-    arriba: "auto", abajo: "auto", izquierda: "auto", derecha: "auto",
-  };
-  if (borde === "arriba") caja.arriba = margen;
-  else if (borde === "abajo") caja.abajo = margen;
-  else if (borde === "izquierda") caja.izquierda = margen;
-  else caja.derecha = margen;
-  return caja;
-}
-
-const ANCHO_POR_DEFECTO = 340;
-const ANCHO_MINIMO = 240;
-const ANCHO_MAXIMO = 900;
-const ALTO_MINIMO = 320;
 // el editor nunca baja de 280 px: el tirador no puede dejarlo en una rendija
 const EDITOR_MINIMO = 280;
-const LADO_POR_DEFECTO = 380;
-const LADO_MINIMO = 220;
 const LADO_MAXIMO = 560;
-const LADO_ALTO_MINIMO = 240;
 // el teléfono de la vista Pantalla no se queda sin ancho aunque el panel crezca
 const VISTA_MINIMO = 280;
 const ESTRECHO = "(max-width: 760px)";
@@ -151,73 +130,8 @@ const PANTALLAS = {
 };
 const PANTALLA_POR_DEFECTO = { ancho: 360, alto: 640 };
 
-// Una medida utilizable: siempre entera, dentro de [minimo, maximo] y con un respaldo si lo pedido
-// no es un número (una preferencia corrupta no puede dejar el panel en 0 px).
-export function medidaValida(pedido, minimo, maximo, respaldo) {
-  const min = Number.isFinite(minimo) ? Math.round(minimo) : ANCHO_MINIMO;
-  let max = Number.isFinite(maximo) ? Math.round(maximo) : ANCHO_MAXIMO;
-  if (max < min) max = min;
-  const n = typeof pedido === "number" ? pedido : Number(pedido);
-  const porDefecto = Number.isFinite(respaldo) ? respaldo : ANCHO_POR_DEFECTO;
-  if (!Number.isFinite(n)) return Math.min(max, Math.max(min, porDefecto));
-  return Math.round(Math.min(max, Math.max(min, n)));
-}
-
 export function anchoValido(pedido, minimo, maximo) {
   return medidaValida(pedido, minimo, maximo, ANCHO_POR_DEFECTO);
-}
-
-// Un número opcional: `null` cuando la preferencia no existe o no es un número, y si la hay, dentro
-// de su rango. Es lo que distingue «sin alto propio» (la fila entera) de «640 px elegidos».
-export function numeroOpcional(valor, minimo, maximo) {
-  if (valor === null || valor === undefined || valor === "") return null;
-  const n = typeof valor === "number" ? valor : Number(valor);
-  if (!Number.isFinite(n)) return null;
-  return medidaValida(n, minimo, maximo, minimo);
-}
-
-// El reparto de una caja al arrastrar un tirador. `eje` es «oeste», «este», «norte», «sur» o una
-// esquina que combine dos («noroeste»…): la arista que se mueve sigue al puntero y la de enfrente
-// se queda quieta. El alto nunca deja hueco fuera del marco (`arriba >= 0`, `arriba + alto <=
-// altoMax`) y el ancho no cruza sus límites. Pura: la usan los dos marcos y se prueba en node.
-export function cajaRedimensionada(caja, eje, dx, dy, limites) {
-  const l = limites && typeof limites === "object" ? limites : {};
-  const anchoMin = Number.isFinite(l.anchoMin) ? Math.round(l.anchoMin) : ANCHO_MINIMO;
-  const anchoMax = Math.max(anchoMin, Number.isFinite(l.anchoMax) ? Math.round(l.anchoMax) : ANCHO_MAXIMO);
-  const altoMin = Number.isFinite(l.altoMin) ? Math.round(l.altoMin) : ALTO_MINIMO;
-  const altoMax = Math.max(altoMin, Number.isFinite(l.altoMax) ? Math.round(l.altoMax) : altoMin * 4);
-  const base = caja && typeof caja === "object" ? caja : {};
-  const actual = {
-    ancho: medidaValida(base.ancho, anchoMin, anchoMax, ANCHO_POR_DEFECTO),
-    alto: medidaValida(base.alto, altoMin, altoMax, altoMax),
-    arriba: Number.isFinite(base.arriba) ? Math.max(0, Math.round(base.arriba)) : 0,
-  };
-  if (actual.arriba + actual.alto > altoMax) actual.alto = Math.max(altoMin, altoMax - actual.arriba);
-  const rumbo = typeof eje === "string" ? eje : "";
-  // las direcciones se comparan exactas: «oeste» termina en «este» y un `includes` movería el
-  // ancho en los dos sentidos a la vez, dejándolo igual
-  const alOeste = rumbo === "oeste" || rumbo === "noroeste" || rumbo === "suroeste";
-  const alEste = rumbo === "este" || rumbo === "noreste" || rumbo === "sureste";
-  const alNorte = rumbo === "norte" || rumbo === "noroeste" || rumbo === "noreste";
-  const alSur = rumbo === "sur" || rumbo === "suroeste" || rumbo === "sureste";
-  let ancho = actual.ancho;
-  let alto = actual.alto;
-  let arriba = actual.arriba;
-  if (alOeste) ancho -= dx;
-  if (alEste) ancho += dx;
-  if (alNorte) {
-    // la arista de abajo no se mueve: el alto se queda con lo que sobra
-    const tope = Math.max(0, arriba + alto - altoMin);
-    const nuevoArriba = Math.min(tope, Math.max(0, arriba + dy));
-    alto += arriba - nuevoArriba;
-    arriba = nuevoArriba;
-  }
-  if (alSur) alto += dy;
-  return {
-    ancho: Math.round(Math.min(anchoMax, Math.max(anchoMin, ancho))),
-    alto: Math.round(Math.min(altoMax - arriba, Math.max(altoMin, alto))),
-    arriba: Math.round(arriba),
-  };
 }
 
 export function esRutaDeLayout(ruta) {

@@ -13,6 +13,7 @@ import { leerZip, normalizarEntradas, zipDelArbol, paqueteDelManifiesto, nombreD
   ajustesDelManifiesto, conAjustes } from "./proyecto.js";
 import * as vistaPrevia from "./vista-previa.js";
 import * as previaPanel from "./previa-panel.js";
+import * as paneles from "./paneles.js";
 import * as autocompletado from "./autocompletado-datos.js";
 import * as xmlEditor from "./xml-editor.js";
 import * as vistaXml from "./vista-xml.js";
@@ -1211,6 +1212,8 @@ for (const id of ["previa-render-estado", "vista-previa-estado"]) {
   }
 }
 const fuentePreviaEstado = fs.readFileSync(path.join(__dirname, "previa-panel.js"), "utf8");
+// §340: la geometría y sus constantes viven en `paneles.js`; el test de bordes mira allí.
+const fuentePaneles = fs.readFileSync(path.join(__dirname, "paneles.js"), "utf8");
 for (const id of ["previa-detalle-modelo", "vista-lado-detalle"]) {
   if (!fuentePreviaEstado.includes(id)) {
     mal(`previa-panel.js no escribe el detalle del modelo en la capa flotante (${id})`);
@@ -1287,8 +1290,8 @@ for (const prefijo of ["previa-inspector", "vista-lado"]) {
     }
   }
 }
-if (!/const BORDES = \["izquierda", "derecha", "arriba", "abajo"\]/.test(fuentePreviaEstado)) {
-  mal("previa-panel.js no ofrece los cuatro bordes de acoplamiento");
+if (!/export const BORDES = \["izquierda", "derecha", "arriba", "abajo"\]/.test(fuentePaneles)) {
+  mal("paneles.js no ofrece los cuatro bordes de acoplamiento");
 }
 // La regla del :not() anterior tiene especificidad (0,3,0): el tirador ha de repetir su clase para
 // alcanzarla, o el navegador aplica `none` y los ocho tiradores no reciben el puntero (ni flotando
@@ -1554,7 +1557,7 @@ for (const borde of ["izquierda", "derecha", "arriba", "abajo"]) {
 if (bordeValido("basura") !== "derecha" || bordeValido(null) !== "derecha") {
   mal("bordeValido no cae al borde por defecto");
 }
-const cajaAcoplada = previaPanel.cajaAcoplada;
+const cajaAcoplada = paneles.cajaAcoplada;
 const medidas = { ancho: 1000, alto: 700 };
 const acopladaIzquierda = cajaAcoplada("izquierda", 380, 420, medidas);
 const acopladaArriba = cajaAcoplada("arriba", 500, 240, medidas);
@@ -1573,7 +1576,7 @@ if (recortada.ancho !== 984 || recortada.alto !== 684 || recortada.abajo !== 8) 
 
 // 6d-bis. el reparto de una esquina o una arista: la arista que se mueve sigue al puntero y la de
 //        enfrente se queda; el alto no deja hueco fuera del marco. Puro, probado aquí.
-const repartir = previaPanel.cajaRedimensionada;
+const repartir = paneles.cajaRedimensionada;
 const desde = { ancho: 400, alto: 500, arriba: 0 };
 const limites = { anchoMin: 240, anchoMax: 900, altoMin: 320, altoMax: 700 };
 const oeste = repartir(desde, "oeste", -40, 0, limites);
@@ -1598,11 +1601,56 @@ const minimo = repartir({ ancho: 400, alto: 340, arriba: 0 }, "norte", 0, 200, l
 if (minimo.alto !== 320) mal("cajaRedimensionada deja un alto por debajo del mínimo: " + JSON.stringify(minimo));
 const anchoMinimo = repartir(desde, "este", -400, 0, limites);
 if (anchoMinimo.ancho !== 240) mal("cajaRedimensionada deja un ancho por debajo del mínimo");
-if (previaPanel.numeroOpcional("", 320, 900) !== null || previaPanel.numeroOpcional("basura", 320, 900) !== null) {
+if (paneles.numeroOpcional("", 320, 900) !== null || paneles.numeroOpcional("basura", 320, 900) !== null) {
   mal("numeroOpcional no distingue «sin alto» de una preferencia rota");
 }
-if (previaPanel.numeroOpcional("600", 320, 900) !== 600 || previaPanel.numeroOpcional(10, 320, 900) !== 320) {
+if (paneles.numeroOpcional("600", 320, 900) !== 600 || paneles.numeroOpcional(10, 320, 900) !== 320) {
   mal("numeroOpcional no acepta una cadena ni recorta al mínimo");
+}
+
+// 6d-c. §340: la geometría pura viaja en `paneles.js` sin importación inversa. El tirador norte
+//        deja la arista de abajo quieta y el oeste deja quieta la derecha; el default es 340 × 240.
+const limitesConsola = { anchoMin: 220, anchoMax: 1424, altoMin: 240, altoMax: 884 };
+const norteConsola = repartir({ ancho: 340, alto: 320, arriba: 96, izquierda: 120 }, "norte", 0, 40, limitesConsola);
+if (norteConsola.arriba !== 136 || norteConsola.alto !== 280 || norteConsola.arriba + norteConsola.alto !== 416) {
+  mal("cajaRedimensionada norte no deja el bottom 416 invariante: " + JSON.stringify(norteConsola));
+}
+const norteCrece = repartir({ ancho: 340, alto: 320, arriba: 96, izquierda: 120 }, "norte", 0, -40, limitesConsola);
+if (norteCrece.arriba !== 56 || norteCrece.alto !== 360 || norteCrece.arriba + norteCrece.alto !== 416) {
+  mal("cajaRedimensionada norte no crece con el bottom quieto: " + JSON.stringify(norteCrece));
+}
+const oesteConsola = repartir({ ancho: 340, alto: 240, arriba: 96, izquierda: 120 }, "oeste", 40, 0, limitesConsola);
+if (oesteConsola.izquierda !== 160 || oesteConsola.ancho !== 300 || oesteConsola.izquierda + oesteConsola.ancho !== 460) {
+  mal("cajaRedimensionada oeste no deja la derecha 460 invariante: " + JSON.stringify(oesteConsola));
+}
+if (paneles.TAMANO_POR_DEFECTO.ancho !== 340 || paneles.TAMANO_POR_DEFECTO.alto !== 240) {
+  mal("TAMANO_POR_DEFECTO no es 340 × 240: " + JSON.stringify(paneles.TAMANO_POR_DEFECTO));
+}
+const inicial = paneles.estadoInicial("consola", 7);
+if (inicial.ancho !== 340 || inicial.alto !== 240 || inicial.modo !== "libre" || inicial.z !== 7) {
+  mal("estadoInicial no arranca pequeño y flotante: " + JSON.stringify(inicial));
+}
+const acoplado = paneles.reducirPanel(inicial, { tipo: "acoplar", borde: "abajo" });
+if (acoplado.modo !== "acoplado" || acoplado.borde !== "abajo" || inicial.modo !== "libre") {
+  mal("reducirPanel acoplar no cambia el modo sin mutar el estado: " + JSON.stringify(acoplado));
+}
+const acopladoBasura = paneles.reducirPanel(inicial, { tipo: "acoplar", borde: "basura" });
+if (acopladoBasura.borde !== "derecha") mal("reducirPanel acoplar no cae al borde por defecto");
+const panelMovido = paneles.reducirPanel(inicial, { tipo: "mover", dx: 10, dy: -5 });
+if (panelMovido.x !== 10 || panelMovido.y !== -5 || inicial.x !== 0) mal("reducirPanel mover no traslada sin mutar");
+const redimensionado = paneles.reducirPanel(
+  { ...inicial, x: 120, y: 96, ancho: 340, alto: 320 },
+  { tipo: "redimensionar", eje: "norte", dx: 0, dy: 40, limites: limitesConsola });
+if (redimensionado.y !== 136 || redimensionado.alto !== 280 || redimensionado.y + redimensionado.alto !== 416) {
+  mal("reducirPanel redimensionar no conserva la arista de abajo: " + JSON.stringify(redimensionado));
+}
+const alFrente = paneles.reducirPanel(inicial, { tipo: "traerAlFrente", z: 12 });
+if (alFrente.z !== 12 || inicial.z !== 7) mal("reducirPanel traerAlFrente no sube el z sin mutar");
+const cerrado = paneles.reducirPanel(inicial, { tipo: "cerrar" });
+if (cerrado.modo !== "cerrado" || cerrado.visible !== false) mal("reducirPanel cerrar no oculta el módulo");
+const reiniciado = paneles.reducirPanel(cerrado, { tipo: "reiniciar" });
+if (reiniciado.modo !== "libre" || reiniciado.alto !== 240 || reiniciado.visible !== true) {
+  mal("reducirPanel reiniciar no devuelve el estado pequeño y visible");
 }
 
 const esLayout = previaPanel.esRutaDeLayout;
