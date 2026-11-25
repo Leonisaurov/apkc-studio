@@ -6730,6 +6730,109 @@ async function conductor() {
     }
   }
 
+  // 34. selector de idioma de la APP (§326): la misma apk de OPFS se relanza con --locale en el
+  // arranque de `apkc preview`, sin recompilar ni reempaquetar. Es la punta CDP del flag que la
+  // sesión wasm hereda después, cuando la orden viva ya no lleva esa bandera.
+  const idiomaApp = await evaluar(`(async () => {
+    const bytes = new Uint8Array(await (await fetch("/apk-ejemplo")).arrayBuffer());
+    await hospedador.escribir("/proyecto/build/app.apk", bytes);
+    await hospedador.escribir("/sdk/ultimo.apk", bytes);
+    if (document.getElementById("previa-energia").getAttribute("aria-pressed") === "false") {
+      document.getElementById("previa-energia").click();
+    }
+    if (!PREVIA_PANEL.estado().visible) document.getElementById("previa-alternar").click();
+    document.getElementById("previa-modo-render").click();
+    const vp = await import("/vista-previa.js");
+    const pp = await import("/previa-panel.js");
+    const foto = () => {
+      const m = vp.modeloActual();
+      const nodos = vp.nodosAplanados(m).map((x) => x.nodo);
+      const saludo = nodos.find((n) => n.id === "id/saludo");
+      const ids = nodos.map((n) => n.id || "").filter(Boolean).sort();
+      const drawables = [];
+      for (const n of nodos) for (const [k, v] of Object.entries(n)) {
+        if (typeof v === "string" && /^res\\/(drawable|mipmap)/.test(v)) drawables.push(k + "=" + v);
+      }
+      const e = PREVIA_PANEL.estado();
+      return { locale: e.locale, sesion: e.sesion, guion: e.guion.slice(),
+        texto: saludo ? (saludo.textoDinamico || saludo.texto || "") : null,
+        ids, drawables: drawables.sort(), error: (m && m.error) || "",
+        aviso: String(document.getElementById("previa-render-estado").textContent).slice(0, 160) };
+    };
+    const esperarModelo = async (valor, anterior) => {
+      for (let i = 0; i < 120; i++) {
+        const e = PREVIA_PANEL.estado();
+        const m = vp.modeloActual();
+        if (e.locale === valor && m && m !== anterior) return !m.error;
+        await new Promise((r) => setTimeout(r, 150));
+      }
+      return false;
+    };
+    const seleccion = document.getElementById("previa-idioma-app");
+    if (!seleccion) return { error: "sin selector #previa-idioma-app" };
+    const fotos = [];
+    for (const valor of ["es", "", "es-MX"]) {
+      const anterior = vp.modeloActual();
+      seleccion.value = valor;
+      seleccion.dispatchEvent(new Event("change", { bubbles: true }));
+      const listo = await esperarModelo(valor, anterior);
+      fotos.push(Object.assign({ listo, valor }, foto()));
+    }
+    const anterior = vp.modeloActual();
+    seleccion.value = "es";
+    seleccion.dispatchEvent(new Event("change", { bubbles: true }));
+    await esperarModelo("es", anterior);
+    const antesClic = foto();
+    await PREVIA_PANEL.pulsar("id/saludo");
+    for (let i = 0; i < 60; i++) {
+      if (PREVIA_PANEL.estado().guion.some((p) => p.indexOf("pulsar:id/saludo") === 0)) break;
+      await new Promise((r) => setTimeout(r, 150));
+    }
+    const trasClic = foto();
+    const argvOrden = pp.argvDeOrden({ tipo: "pulsar", valor: "id/saludo" }, "s1");
+    const ui = document.getElementById("idioma-ui");
+    ui.value = "en";
+    ui.dispatchEvent(new Event("change", { bubbles: true }));
+    const trasUi = foto();
+    const langInterfaz = document.documentElement.lang;
+    ui.value = "es";
+    ui.dispatchEvent(new Event("change", { bubbles: true }));
+    return { fotos, antesClic, trasClic, argvOrden, trasUi,
+      langInterfaz, bytes: bytes.length };
+  })()`);
+  const fotosIdioma = (idiomaApp && idiomaApp.fotos) || [];
+  const porValor = (valor) => fotosIdioma.find((f) => f.valor === valor) || {};
+  comprueba("idioma app: id/saludo Hola! con es",
+    !!idiomaApp && porValor("es").listo === true && porValor("es").locale === "es" &&
+    porValor("es").texto === "Hola!" && porValor("es").error === "",
+    JSON.stringify(porValor("es")).slice(0, 300));
+  comprueba("idioma app: id/saludo Hello! sin locale",
+    porValor("").listo === true && porValor("").locale === "" && porValor("").texto === "Hello!",
+    JSON.stringify(porValor("")).slice(0, 300));
+  // la fixture de la plantilla «traducido» solo trae values y values-es (lo dice su
+  // `aapt2 dump resources`): es-MX cae a values-es, sin inventar un bloque regional que no está.
+  comprueba("idioma app: id/saludo Hola! con es-MX sin bloque es-rMX en la fixture",
+    porValor("es-MX").listo === true && porValor("es-MX").locale === "es-MX" &&
+    porValor("es-MX").texto === "Hola!",
+    JSON.stringify(porValor("es-MX")).slice(0, 300));
+  comprueba("idioma app: ids y drawables invariantes entre los tres idiomas",
+    fotosIdioma.length === 3 && fotosIdioma.every((f) => f.listo === true &&
+      JSON.stringify(f.ids) === JSON.stringify(fotosIdioma[0].ids) &&
+      JSON.stringify(f.drawables) === JSON.stringify(fotosIdioma[0].drawables)),
+    JSON.stringify(fotosIdioma.map((f) => ({ ids: f.ids, drawables: f.drawables }))).slice(0, 300));
+  comprueba("idioma app: clic posterior mantiene el idioma con es",
+    !!idiomaApp && idiomaApp.antesClic.locale === "es" &&
+    idiomaApp.trasClic.locale === "es" && idiomaApp.trasClic.texto === "Hola!" &&
+    idiomaApp.trasClic.sesion === idiomaApp.antesClic.sesion &&
+    idiomaApp.trasClic.guion.some((p) => p === "pulsar:id/saludo") &&
+    !idiomaApp.argvOrden.includes("--locale"),
+    JSON.stringify({ antes: idiomaApp && idiomaApp.antesClic, tras: idiomaApp && idiomaApp.trasClic,
+      argv: idiomaApp && idiomaApp.argvOrden }).slice(0, 300));
+  comprueba("idioma app: el idioma de la interfaz no cambia el de la app",
+    !!idiomaApp && idiomaApp.trasUi.locale === "es" && idiomaApp.trasUi.texto === "Hola!" &&
+    idiomaApp.langInterfaz === "en",
+    JSON.stringify({ ui: idiomaApp && idiomaApp.trasUi, lang: idiomaApp && idiomaApp.langInterfaz }).slice(0, 300));
+
   // requisito del proyecto, escrito como comprobación: la pestaña no puede pedir nada fuera de
   // su origen. Ni un CDN de un runtime de terceros, ni telemetría, ni una fuente. En el modo
   // externo la lista blanca son los hosts de `wisp-relays.json`; por defecto va vacía y cualquier

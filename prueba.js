@@ -1627,6 +1627,41 @@ if (JSON.stringify(previaPanel.argvDePrevia(pasosTexto, "build/app.apk")) !==
     JSON.stringify(["preview", "build/app.apk"])) {
   mal("argvDePrevia no es solo el arranque: " + JSON.stringify(previaPanel.argvDePrevia(pasosTexto, "build/app.apk")));
 }
+// §290 solo mide `values-es` y `values-es-rMX`: los siete casos fijan la whitelist en producción.
+const casosLocale = [
+  ["", true, ["preview", "build/app.apk"]],
+  ["es", true, ["preview", "--locale", "es", "build/app.apk"]],
+  ["es-MX", true, ["preview", "--locale", "es-MX", "build/app.apk"]],
+  ["es-MX;id", false, ["preview", "build/app.apk"]],
+  ["EN", false, ["preview", "build/app.apk"]],
+  [null, false, ["preview", "build/app.apk"]],
+  [{}, false, ["preview", "build/app.apk"]],
+];
+for (const [entrada, valido, esperado] of casosLocale) {
+  const etiqueta = JSON.stringify(entrada);
+  if (previaPanel.localeValido(entrada) !== valido) {
+    mal(`localeValido(${etiqueta}) no da ${valido}`);
+  }
+  const argv = previaPanel.argvDePrevia(pasosTexto, "build/app.apk", entrada);
+  if (JSON.stringify(argv) !== JSON.stringify(esperado)) {
+    mal(`argvDePrevia con ${etiqueta} dio ${JSON.stringify(argv)} y se esperaba ${JSON.stringify(esperado)}`);
+  }
+}
+// el guard anti-omisión se falsifica leyendo las fuentes: sin chromium no hace falta levantar uno
+// para comprobar que el gate no puede decir «todo en orden» con la pestaña saltada.
+const fuenteE2e = fs.readFileSync(path.join(__dirname, "e2e.sh"), "utf8");
+for (const [fragmento, motivo] of [
+  ["EXIGIR_PESTANA=${EXIGIR_PESTANA:-1}", "e2e.sh no trae el guard activo por defecto"],
+  ["pestaña omitida: falta", "e2e.sh no falla cuando falta la pestaña"],
+  ["grep -c '^  ok'", "e2e.sh no cuenta las comprobaciones de la pestaña"],
+  ['[ "$n" -gt 0 ]', "e2e.sh no exige al menos una comprobación de la pestaña"],
+]) {
+  if (!fuenteE2e.includes(fragmento)) mal(motivo);
+}
+const fuenteGate = fs.readFileSync(path.join(__dirname, "..", ".github/workflows/gate.yml"), "utf8");
+if (!fuenteGate.includes('EXIGIR_PESTANA: "1"')) {
+  mal("el job pesado de CI no fija EXIGIR_PESTANA=1");
+}
 const esperadosTexto = [
   ["preview", "--sesion", "s1", "--pulsar", "id/enviar"],
   ["preview", "--sesion", "s1", "--escribir", "0x7f010001/Ana"],
