@@ -7,3 +7,6 @@ studio-test.zip
 # Se copia en studio/ solo para servirlo desde el propio origen.
 deps/
 deps-index.json
+# jar AOSP servido por el servidor de desarrollo desde el propio origen (no se versiona).
+android-stub.json
+android-stub-34.jar
