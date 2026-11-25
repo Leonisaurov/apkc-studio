@@ -1,7 +1,8 @@
 // Prueba del sitio publicado, o de una copia local servida SIN cabeceras ni endpoints de desarrollo.
 // Comprueba lo que solo se ve en un host estático: el service worker pone COOP/COEP, la página se
-// recarga sola, el android.jar entra por el selector de fichero (sin /android-jar) y el apk que
-// sale de la pestaña verifica con apksigner por fuera. Cero peticiones fuera del origen.
+// recarga sola, el android.jar entra por el selector de fichero (sin /android-jar), el
+// android-stub-34.jar servido coincide con /android-stub.json y el apk que sale de la pestaña
+// verifica con apksigner por fuera. Cero peticiones fuera del origen.
 //
 // uso local:  SITIO_DIR=../sitio ANDROID_JAR=/.../android.jar APKSIGNER=/.../apksigner node prueba-sitio.js
 // en vivo:    SITIO_URL=https://apkc-studio.surge.sh/ ... node prueba-sitio.js
@@ -202,6 +203,26 @@ async function conductor() {
   comprueba("deps se sirve sin peticiones fuera del origen",
     peticionesDeps.length >= 2 && fueraDeps.length === 0,
     peticionesDeps.length + " peticiones de deps, " + fueraDeps.length + " fuera del origen");
+
+  // J5: el android.jar propio viaja en el sitio. Comprobar que el manifiesto y el jar servido
+  // existen (no 404) y que bytes y SHA-256 cuadran con lo declarado, sin confundir este oráculo
+  // con el check de >1 MB de más abajo, que mira el ANDROID_JAR inyectado por el selector.
+  const stub = await evaluar(`(async () => {
+    const j = await fetch("/android-stub.json");
+    const meta = j.status === 200 ? await j.json() : null;
+    const r = await fetch("/android-stub-34.jar");
+    const b = r.status === 200 ? new Uint8Array(await r.arrayBuffer()) : new Uint8Array(0);
+    const d = await crypto.subtle.digest("SHA-256", b);
+    return { j: j.status, r: r.status, meta, bytes: b.length,
+      sha: [...new Uint8Array(d)].map(x => x.toString(16).padStart(2, "0")).join("") };
+  })()`);
+  comprueba("android-stub.json se sirve (no 404)", stub.j === 200, "estado " + stub.j);
+  comprueba("android-stub-34.jar se sirve (no 404)", stub.r === 200, "estado " + stub.r);
+  comprueba("el jar servido coincide con su manifiesto",
+    stub.j === 200 && stub.r === 200 && stub.bytes === stub.meta.bytes &&
+    stub.bytes === 2916833 && stub.sha === stub.meta.sha256 &&
+    stub.sha === "e2ddfb55b63b32890cb77e55d9249dabc521e78510fd35d0c2a3e639bd7c8827",
+    "bytes " + stub.bytes + ", sha " + stub.sha);
 
   // El módulo de la pestaña publica sus funciones en window al terminar de cargar; esperar a
   // que estén antes de tocar nada, porque la recarga del SW puede haber invalidado un contexto
