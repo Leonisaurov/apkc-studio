@@ -374,7 +374,7 @@ function medidaCruz(nodo, cruzMax, vertical) {
 }
 
 function colocarLineal(nodo, caja, vertical) {
-  const principalMax = vertical ? caja.alto : caja.ancho;
+  let principalMax = vertical ? caja.alto : caja.ancho;
   const cruzMax = vertical ? caja.ancho : caja.alto;
   const piezas = nodo.hijos.map((hijo) => {
     const margen = margenDe(hijo);
@@ -400,6 +400,23 @@ function colocarLineal(nodo, caja, vertical) {
   let tamPila = piezas.reduce((s, p) => s + (vertical
     ? p.margen.arriba + p.tam.alto + p.margen.abajo
     : p.margen.izq + p.tam.ancho + p.margen.der), 0);
+  // Un padre `wrap_content` crece con sus hijos ya medidos con mínimos: encogerlos para que quepan
+  // en una caja calculada con el botón sin mínimos era lo que dejaba el layout de ApkShare más
+  // chico que el botón «Search». Si el eje está limitado (match_parent o un dp fijo), se mantiene el
+  // reflujo proporcional de §336 para que ningún hijo desborde su hueco.
+  const esWrap = String(local(nodo.atributos, vertical ? "layout_height" : "layout_width") || "")
+    .trim() === "wrap_content";
+  if (tamPila > principalMax && principalMax > 0 && esWrap) {
+    const extra = tamPila - principalMax;
+    if (vertical) {
+      nodo.rect.alto += extra;
+      caja.alto += extra;
+    } else {
+      nodo.rect.ancho += extra;
+      caja.ancho += extra;
+    }
+    principalMax = tamPila;
+  }
   // Cinco botones con mínimos de 88dp no caben en una fila de 360dp. En vez de podar la fila,
   // refluimos: encogemos proporcionalmente tamaños y márgenes para que todos sigan visibles
   // dentro del padre, sin cambiar el centro de una fila de un solo botón (§293).

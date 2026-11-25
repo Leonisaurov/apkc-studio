@@ -1042,6 +1042,56 @@ if (botonesHueco.length !== 5 || paresBotones.length !== 0) {
     JSON.stringify({ paresBotones, botones: botonesHueco }));
 }
 console.log("paresBotones (huecos de 64 dp): " + JSON.stringify(paresBotones));
+// ApkShare: el LinearLayout wrap_content que cubre el EditText y un único botón «Search» no puede
+// quedarse por debajo del botón después de los mínimos de ART. Es el modelo que emite
+// `apkc preview inc/build/app.apk`: botón 64×48dp en (288,8), EditText 280×24dp en (8,8), padre
+// 360×64dp con 8dp de relleno. Sin propagación el botón ensanchado llega a x=364 (4dp fuera del
+// padre) y se solapa 12dp con el EditText. Con ella el padre mide 372dp, el EditText se remide a
+// 268dp antes de escalar y el centro del botón sigue en (320,32), como exige §293.
+const modeloApkShare = {
+  pantalla: { x: 0, y: 0, ancho: 360, alto: 640 },
+  raiz: { tipo: "LinearLayout", ancho: "match_parent", alto: "match_parent",
+    rect: { x: 0, y: 0, ancho: 360, alto: 640 }, hijos: [
+      { tipo: "LinearLayout", ancho: "match_parent", alto: "wrap_content",
+        padding: { izq: 8, arr: 8, der: 8, aba: 8 },
+        rect: { x: 0, y: 0, ancho: 360, alto: 64 }, hijos: [
+          { tipo: "EditText", id: "id/searchQuery", pista: "Search. . .",
+            ancho: "match_parent", alto: "wrap_content", peso: 1,
+            rect: { x: 8, y: 8, ancho: 280, alto: 24 } },
+          { tipo: "Button", id: "id/searchBtn", texto: "Search", oyente: true,
+            ancho: "wrap_content", alto: "wrap_content",
+            rect: { x: 288, y: 8, ancho: 64, alto: 48 } },
+        ] },
+    ] },
+};
+const conApkShare = vistaPrevia.modeloConMinimos(modeloApkShare);
+const filaApkShare = conApkShare.raiz.hijos[0];
+const botonApkShare = filaApkShare.hijos[1].rect;
+const editApkShare = filaApkShare.hijos[0].rect;
+if (botonApkShare.ancho !== 88 || botonApkShare.alto !== 40 ||
+    botonApkShare.x + botonApkShare.ancho / 2 !== 320 ||
+    botonApkShare.y + botonApkShare.alto / 2 !== 32) {
+  mal("ApkShare: el botón «Search» no conserva su centro con los mínimos: " + JSON.stringify(botonApkShare));
+}
+if (filaApkShare.rect.ancho < botonApkShare.ancho ||
+    filaApkShare.rect.x > botonApkShare.x || filaApkShare.rect.y > botonApkShare.y ||
+    filaApkShare.rect.x + filaApkShare.rect.ancho < botonApkShare.x + botonApkShare.ancho ||
+    filaApkShare.rect.y + filaApkShare.rect.alto < botonApkShare.y + botonApkShare.alto) {
+  mal("ApkShare: el LinearLayout padre no contiene al botón con mínimos: " +
+    JSON.stringify({ padre: filaApkShare.rect, boton: botonApkShare }));
+}
+if (editApkShare.x + editApkShare.ancho > botonApkShare.x) {
+  mal("ApkShare: el EditText se solapa con el botón ensanchado: " +
+    JSON.stringify({ edit: editApkShare, boton: botonApkShare }));
+}
+if (modeloApkShare.raiz.hijos[0].rect.ancho !== 360 ||
+    modeloApkShare.raiz.hijos[0].hijos[0].rect.ancho !== 280 ||
+    modeloApkShare.raiz.hijos[0].hijos[1].rect.ancho !== 64) {
+  mal("ApkShare: modeloConMinimos mutó el modelo que mira la vista dividida");
+}
+const rectsApkShare = vistaPrevia.rectsEscalados(conApkShare, 360, 640);
+console.log("rectsEscalados (ApkShare, EditText + un botón): " + JSON.stringify(
+  rectsApkShare.map((r) => ({ id: r.id, tipo: r.tipo, x: r.x, y: r.y, ancho: r.ancho, alto: r.alto }))));
 // §337. la pintura sigue recortada al marco y la capa del EditText se recorta al canvas. El
 // `getBoundingClientRect()` real sobre chromium queda en el bloque CDP condicionado.
 const fuenteVistaPrevia = fs.readFileSync(path.join(__dirname, "vista-previa.js"), "utf8");

@@ -247,8 +247,60 @@ function refluyeFilaBotones(nodo) {
   }
 }
 
+// Propaga los mínimos de ART al contenedor inmediato y al hermano que comparte eje con el botón
+// crecido. El botón NO se mueve: conserva el centro que mide §293; quien cede es el contenedor —su
+// medida pasa a ser max(medida, máximo de hijos con mínimos + padding)— y el EditText, que se remide
+// antes del escalado para no solaparse con la caja ensanchada (layout de ApkShare). Solo se toca al
+// padre que tiene un botón crecido como hijo directo: la raíz `match_parent` no se agranda por un
+// nieto, y una fila de varios botones ya se resolvió en `refluyeFilaBotones` (§336).
+function propagaMinimos(nodo, cambios) {
+  if (!nodo || typeof nodo !== "object") return;
+  if (Array.isArray(nodo.hijos)) for (const hijo of nodo.hijos) propagaMinimos(hijo, cambios);
+  if (!nodo.rect || !Array.isArray(nodo.hijos) ||
+      ![nodo.rect.x, nodo.rect.y, nodo.rect.ancho, nodo.rect.alto]
+        .every((v) => aNumeroOFinito(v) !== null)) return;
+  const buenos = nodo.hijos.filter((h) => h && h.rect &&
+    [h.rect.x, h.rect.y, h.rect.ancho, h.rect.alto].every((v) => aNumeroOFinito(v) !== null));
+  const crecidos = buenos.filter((h) => cambios.has(h) && aparienciaDe(h).boton);
+  if (!crecidos.length) return;
+  for (const boton of crecidos) {
+    for (const hermano of buenos) {
+      if (hermano === boton || aparienciaDe(hermano).boton) continue;
+      const solapaY = hermano.rect.y < boton.rect.y + boton.rect.alto &&
+        boton.rect.y < hermano.rect.y + hermano.rect.alto;
+      const solapaX = hermano.rect.x < boton.rect.x + boton.rect.ancho &&
+        boton.rect.x < hermano.rect.x + hermano.rect.ancho;
+      if (solapaY && hermano.rect.x <= boton.rect.x &&
+          hermano.rect.x + hermano.rect.ancho > boton.rect.x) {
+        hermano.rect.ancho = Math.max(1, boton.rect.x - hermano.rect.x);
+      } else if (solapaY && hermano.rect.x > boton.rect.x &&
+                 hermano.rect.x < boton.rect.x + boton.rect.ancho) {
+        const der = hermano.rect.x + hermano.rect.ancho;
+        hermano.rect.x = boton.rect.x + boton.rect.ancho;
+        hermano.rect.ancho = Math.max(1, der - hermano.rect.x);
+      } else if (solapaX && hermano.rect.y <= boton.rect.y &&
+                 hermano.rect.y + hermano.rect.alto > boton.rect.y) {
+        hermano.rect.alto = Math.max(1, boton.rect.y - hermano.rect.y);
+      } else if (solapaX && hermano.rect.y > boton.rect.y &&
+                 hermano.rect.y < boton.rect.y + boton.rect.alto) {
+        const abajo = hermano.rect.y + hermano.rect.alto;
+        hermano.rect.y = boton.rect.y + boton.rect.alto;
+        hermano.rect.alto = Math.max(1, abajo - hermano.rect.y);
+      }
+    }
+  }
+  const pad = nodo.padding && typeof nodo.padding === "object" ? nodo.padding : {};
+  const der = aNumeroOFinito(pad.der) ?? 0;
+  const aba = aNumeroOFinito(pad.aba) ?? 0;
+  const maxDer = Math.max(...buenos.map((h) => h.rect.x + h.rect.ancho));
+  const maxAbajo = Math.max(...buenos.map((h) => h.rect.y + h.rect.alto));
+  nodo.rect.ancho = Math.max(nodo.rect.ancho, maxDer - nodo.rect.x + der);
+  nodo.rect.alto = Math.max(nodo.rect.alto, maxAbajo - nodo.rect.y + aba);
+}
+
 export function modeloConMinimos(modelo) {
   if (!modelo || typeof modelo !== "object" || !modelo.raiz) return modelo;
+  const cambios = new WeakMap();
   const copiar = (nodo) => {
     if (!nodo || typeof nodo !== "object") return nodo;
     const copia = { ...nodo };
@@ -268,6 +320,7 @@ export function modeloConMinimos(modelo) {
           ancho: anchoNuevo,
           alto: altoNuevo,
         };
+        if (anchoNuevo !== ancho || altoNuevo !== alto) cambios.set(copia, true);
       }
     }
     if (Array.isArray(nodo.hijos)) copia.hijos = nodo.hijos.map(copiar);
@@ -275,6 +328,7 @@ export function modeloConMinimos(modelo) {
   };
   const raiz = copiar(modelo.raiz);
   refluyeFilaBotones(raiz);
+  propagaMinimos(raiz, cambios);
   return { ...modelo, raiz };
 }
 
