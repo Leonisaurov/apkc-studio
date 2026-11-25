@@ -3304,25 +3304,31 @@ function firmaDeHotswap() {
 
 // El dex que se intercambia es el del propio build: `classes.dex` dentro de build/app.apk, leído
 // con el mismo leerZip que usa el editor para importar proyectos. No se genera con `apkc dex`
-// aparte porque el build acaba de dejarlo firmado y igual al que ejecuta el emulador.
+// aparte porque el build acaba de dejarlo firmado y igual al que ejecuta el emulador. El apk
+// completo se devuelve junto al dex: la misma orden debe entregar los recursos nuevos para que
+// un cambio en `res/layout/main.xml` repinte la interfaz sin reiniciar la sesión.
 async function dexDelUltimoBuild() {
   const apk = await hospedador.bytes(PROYECTO + "/build/app.apk");
   if (!apk || !apk.length) return null;
   const entradas = await leerZip(apk);
   const claseDex = entradas.find((e) => !e.dir && e.ruta === "classes.dex");
-  return claseDex ? claseDex.datos : null;
+  return { dex: claseDex ? claseDex.datos : null, apk };
 }
 
 async function intercambiarTrasCompilar() {
-  let dex;
+  let build;
   try {
-    dex = await dexDelUltimoBuild();
+    build = await dexDelUltimoBuild();
   } catch (e) {
-    dex = null;
+    build = null;
     nota("intercambio en caliente: no se pudo leer el dex del build: " +
       (e && e.message ? e.message : e));
   }
-  if (!dex) { nota("intercambio en caliente: build/app.apk no trae classes.dex"); return null; }
+  if (!build || !build.dex) {
+    nota("intercambio en caliente: build/app.apk no trae classes.dex");
+    return null;
+  }
+  const dex = build.dex;
   // con el dex en la mano se comprueba que la anónima derivada existe antes de escribir la firma;
   // el campo escrito a mano sigue ganando porque actualizarFirmaAutomatica lo respeta.
   actualizarFirmaAutomatica(dex);
@@ -3339,7 +3345,7 @@ async function intercambiarTrasCompilar() {
       "compilación intercambiará " + firma);
     return null;
   }
-  const aplicado = await PREVIA_PANEL.intercambiarDelBuild(dex, firma);
+  const aplicado = await PREVIA_PANEL.intercambiarDelBuild(dex, firma, build.apk);
   nota(aplicado
     ? "intercambio en caliente aplicado: " + firma
     : "intercambio en caliente rechazado: " + firma + "; el motivo está en el registro del emulador");

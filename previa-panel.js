@@ -281,6 +281,9 @@ export function argvDePrevia(guion, apk, locale = "") {
 // La forma de cada paso del guion, compartida por el arranque clásico (sin sesión) y por la orden
 // nueva. Un clic es `--pulsar`, desplegar el menú es `--menu`, elegir un ítem es `--menu-item menu/N`,
 // teclear es `--escribir id/texto` y el hot swap es `--intercambiar clase/metodo(proto)=fichero.dex`.
+// El swap que nace de un build lleva además `--intercambiar-recursos build/app.apk` en la MISMA orden:
+// el apk se ha escrito antes en la zona OPFS de la sesión y el intérprete re-parsea ARSC/AXML sin
+// reiniciar. El swap avanzado de un dex suelto no lo lleva, porque no hay apk nuevo que repintar.
 function argvDePasos(pasos) {
   const argv = [];
   for (const paso of Array.isArray(pasos) ? pasos : []) {
@@ -295,6 +298,7 @@ function argvDePasos(pasos) {
     }
     else if (tipo === "intercambiar") {
       argv.push("--intercambiar", String(paso.firma) + "=" + String(paso.ruta));
+      if (paso.recursosRuta) argv.push("--intercambiar-recursos", String(paso.recursosRuta));
     } else argv.push("--pulsar", String(paso && paso.valor));
   }
   return argv;
@@ -1969,7 +1973,7 @@ export function crearPreviaPanel({ hospedador, proyecto, estadoPestana, editor, 
     return campo && typeof campo.value === "string" ? campo.value.trim() : "";
   }
 
-  async function intercambiarDexSoltado(archivo, idSuperficie, firmaDada) {
+  async function intercambiarDexSoltado(archivo, idSuperficie, firmaDada, recursos = null) {
     if (!archivo) return null;
     const nombre = String(archivo.name || "el dex");
     const rechazar = (texto) => {
@@ -2029,8 +2033,35 @@ export function crearPreviaPanel({ hospedador, proyecto, estadoPestana, editor, 
         return rechazar("no se pudo refrescar " + nombre + " en la zona de prueba: " +
           (e && e.message ? e.message : e));
       }
+      // El apk del build entra en la zona OPFS de la sesión y se refresca antes de la orden, igual
+      // que el dex: el intérprete lo abre con `--intercambiar-recursos` en esta MISMA orden y no debe
+      // encontrarse un handle viejo. La ruta es relativa a `carpeta`, el cwd que `ejecutaGuion` fija
+      // para el worker, de modo que el apk nuevo re-parsea ARSC/AXML sin cambiar el id de sesión.
+      if (recursos && recursos.bytes && recursos.bytes.length) {
+        const rutaRecursos = carpeta + "/" + recursos.ruta;
+        try {
+          const escrito = await hospedador.escribir(rutaRecursos, recursos.bytes);
+          if (escrito && escrito.tipo === "error") {
+            return rechazar("no se pudo guardar el apk del build en la sesión: " + escrito.error);
+          }
+        } catch (e) {
+          return rechazar("no se pudo guardar el apk del build en la sesión: " +
+            (e && e.message ? e.message : e));
+        }
+        try {
+          const refrescado = await hospedador.refrescar(rutaRecursos);
+          if (refrescado && refrescado.tipo === "error") {
+            return rechazar("no se pudo refrescar el apk del build en la sesión: " + refrescado.error);
+          }
+        } catch (e) {
+          return rechazar("no se pudo refrescar el apk del build en la sesión: " +
+            (e && e.message ? e.message : e));
+        }
+      }
       const antes = guion.length;
-      guion.push({ tipo: "intercambiar", firma, ruta });
+      const paso = { tipo: "intercambiar", firma, ruta };
+      if (recursos && recursos.bytes && recursos.bytes.length) paso.recursosRuta = recursos.ruta;
+      guion.push(paso);
       ejecutando = true;
       const pintado = await ejecutaGuion(antes, "Intercambiando " + firma + " desde " + nombre + "…", {
         alFallar: (motivo) => registrarSwap("no se intercambió " + nombre + ": " + motivo, "peligro"),
@@ -2051,13 +2082,19 @@ export function crearPreviaPanel({ hospedador, proyecto, estadoPestana, editor, 
 
   // El modo cómodo: el dex ya compilado por la pestaña entra en el guion vivo con la firma que
   // manda el build, sin selector de ficheros y sin tocar el campo avanzado. Reutiliza la misma
-  // guarda, validación, escritura en OPFS y registro del camino del arrastre.
-  async function intercambiarDelBuild(bytes, firma) {
+  // guarda, validación, escritura en OPFS y registro del camino del arrastre. El apk del build
+  // viaja como tercer argumento y se manda en la misma orden para que `main.xml` cambie sin
+  // reiniciar; si no llega (quien llama desde la prueba con solo el dex) el swap sigue siendo
+  // solo de código, que es el contrato antiguo.
+  async function intercambiarDelBuild(bytes, firma, apkBytes) {
     const nombre = "build/app.apk";
     registrarSwap("intercambio automático desde " + nombre + ": " + String(firma || ""), "aviso");
     const copia = new Uint8Array(bytes || []);
     const archivo = { name: nombre, arrayBuffer: async () => copia.buffer };
-    const pintado = await intercambiarDexSoltado(archivo, SUPERFICIES[0].id, firma);
+    const recursos = apkBytes && apkBytes.length
+      ? { bytes: apkBytes, ruta: "build/app.apk" }
+      : null;
+    const pintado = await intercambiarDexSoltado(archivo, SUPERFICIES[0].id, firma, recursos);
     if (!pintado) return null;
     const cambios = (resumenEjecucion(modeloActual()) || { intercambios: [] }).intercambios;
     const ultimo = cambios.length ? cambios[cambios.length - 1] : null;

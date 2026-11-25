@@ -1717,6 +1717,39 @@ if (JSON.stringify(previaPanel.argvDeOrden({ tipo: "pulsar", valor: "id/pulsar" 
     JSON.stringify(["preview", "--sesion", "s1", "--pulsar", "id/pulsar"])) {
   mal("argvDeOrden no respeta el contrato preview --sesion <id> --pulsar");
 }
+// El hot swap del build entrega el dex y los recursos en la MISMA orden de la sesión viva: sin
+// `--intercambiar-recursos build/app.apk` el usuario cambia `main.xml` y la interfaz sigue igual.
+const argvSwapRecursos = previaPanel.argvDeOrden({
+  tipo: "intercambiar",
+  firma: "Lcom/hola/Saludo;/onClick(Landroid/view/View;)V",
+  ruta: "/previa-soltada/intercambio-1.dex",
+  recursosRuta: "build/app.apk",
+}, "s1");
+if (JSON.stringify(argvSwapRecursos) !== JSON.stringify([
+  "preview", "--sesion", "s1",
+  "--intercambiar", "Lcom/hola/Saludo;/onClick(Landroid/view/View;)V=/previa-soltada/intercambio-1.dex",
+  "--intercambiar-recursos", "build/app.apk",
+])) {
+  mal("argvDeOrden no entrega --intercambiar con el dex y --intercambiar-recursos con build/app.apk: " +
+    JSON.stringify(argvSwapRecursos));
+}
+// El swap avanzado de un dex suelto no inventa recursos: conserva el contrato de solo código.
+if (JSON.stringify(previaPanel.argvDeOrden({
+  tipo: "intercambiar", firma: "Lx;/m()V", ruta: "/previa-soltada/intercambio-2.dex",
+}, "s1")) !== JSON.stringify([
+  "preview", "--sesion", "s1", "--intercambiar", "Lx;/m()V=/previa-soltada/intercambio-2.dex",
+])) {
+  mal("el swap de un dex suelto no debe llevar --intercambiar-recursos");
+}
+const fuenteSwapPestana = fs.readFileSync(path.join(__dirname, "pestana.js"), "utf8");
+if (!/PREVIA_PANEL\.intercambiarDelBuild\(dex, firma, build\.apk\)/.test(fuenteSwapPestana)) {
+  mal("pestana.js no manda el apk del build junto al dex al intercambiar");
+}
+const fuenteSwapPanel = fs.readFileSync(path.join(__dirname, "previa-panel.js"), "utf8");
+if (!/hospedador\.escribir\(rutaRecursos, recursos\.bytes\)/.test(fuenteSwapPanel) ||
+    !/recursosRuta = recursos\.ruta/.test(fuenteSwapPanel)) {
+  mal("previa-panel.js no escribe el apk del build en la sesión ni lo pone en la orden");
+}
 if (JSON.stringify(previaPanel.argvDeGuion(pasosTexto, "build/app.apk").slice(0, 3)) !==
     JSON.stringify(["preview", "--pulsar", "id/enviar"])) {
   mal("argvDeGuion dejó de conservar el guion clásico para el arranque sin sesión");
