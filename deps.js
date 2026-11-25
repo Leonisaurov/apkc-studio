@@ -19,6 +19,7 @@
 import { leerZip } from "./proyecto.js";
 import { crearPanelWisp, destinoDeCoordenada, hostDeRelay, resolverPorWisp } from "./wisp.js";
 import { parsearCoordenada } from "./deps-coordenada.js";
+import { conCarga } from "./consola.js";
 
 export const RUTA_INDICE = "./deps-index.json";
 const VERSION_INDICE = 1;
@@ -519,9 +520,11 @@ export function crearPanelDeps({ hospedador, conBloqueo, alImportar, wisp } = {}
         const cas = typeof modulo.casActual === "function" ? modulo.casActual() : null;
         decir("módulo WISP: pidiendo «" + coord + "» por " + hostDeRelay(relay) +
           (cas ? " con las CAs del dispositivo (" + cas.huella.slice(0, 16) + "…)" : " sin bundle de CAs") + "…");
-        const r = await resolverPorWisp({
+        // El velo de `conCarga` cubre solo la llamada al núcleo: `try/finally` lo retira tanto si
+        // el relay responde como si falla, y no toca `#deps-progreso` (que es de la vía local).
+        const r = await conCarga("Descargando módulo…", () => resolverPorWisp({
           relay, coordenada: coord, destino: destinoDeCoordenada(coord), hospedador, cas,
-        });
+        }));
         pintarWisp(r, relay);
         decir("listo: «" + coord + "» traído por el relay " + hostDeRelay(relay) +
           " y escrito en " + r.ruta, "bien");

@@ -5436,6 +5436,9 @@ public final class R {
       "wisp-cas", "wisp-cas-huella", "wisp-cas-estado"]) {
       porId[id] = nodo();
     }
+    // el velo de carga vive en el shell, pero `conCarga` lo enciende desde el panel de deps
+    porId["cargando"] = nodo();
+    porId["cargando-texto"] = nodo();
     porId["wisp-aviso"].open = false;
     porId["wisp-relay"].appendChild = function (hijo) { this.children.push(hijo); };
     globalThis.document = {
@@ -5589,6 +5592,68 @@ public final class R {
           JSON.stringify({ estado: porId["deps-estado"].textContent,
             origen: porId["deps-origen"].textContent,
             instalacion: porId["deps-instalacion"].textContent, peticionesRelay }));
+      }
+
+      // (e2) la descarga del módulo enciende el velo de `conCarga` mientras el núcleo responde y
+      //      lo retira al terminar, también si falla. El núcleo tarda a propósito: el velo sale a
+      //      los 120 ms, así que una resolución instantánea no lo llegaría a mostrar. La barra
+      //      `#deps-progreso` es de la vía local y no debe cambiar con esta pantalla nueva.
+      const velo = porId["cargando"];
+      const textoVelo = porId["cargando-texto"];
+      const barra = porId["deps-progreso"];
+      const barraAntes = barra.hidden;
+      velo.hidden = true;
+      const nucleoPrevioCarga = globalThis.apkcWisp;
+      let liberarNucleo;
+      const esperaNucleo = new Promise((r) => { liberarNucleo = r; });
+      globalThis.apkcWisp = {
+        version: wispMod.CONTRATO_NUCLEO,
+        obtener: async () => {
+          await esperaNucleo;
+          return { bytes: bytesDep, sha256: hashDep,
+            ruta: "/deps/com/example/prueba/1.0/prueba-1.0.jar" };
+        },
+      };
+      porId["deps-coordenada"].value = "com.example:prueba:1.0";
+      const panelConCarga = depsMod.crearPanelDeps({
+        hospedador: hospedadorFalso,
+        wisp: { asegurarDecision: async () => true, relayActual: () => "wss://wisp.local/wisp/" },
+      });
+      try {
+        const descarga = panelConCarga.resolver();
+        await new Promise((r) => setTimeout(r, 140));
+        if (velo.hidden !== false || !/Descargando módulo/.test(String(textoVelo.textContent))) {
+          mal("al descargar el módulo por WISP no se enciende el velo de carga: " +
+            JSON.stringify({ hidden: velo.hidden, texto: textoVelo.textContent }));
+        }
+        if (barra.hidden !== barraAntes) {
+          mal("el velo de descarga cambió la barra #deps-progreso de la vía local");
+        }
+        liberarNucleo();
+        await descarga;
+        if (velo.hidden !== true) mal("el velo de carga no se oculta cuando la descarga sale bien");
+        if (barra.hidden !== barraAntes) {
+          mal("el velo de descarga dejó cambiada la barra #deps-progreso al terminar");
+        }
+        // y en error: `conCarga` cierra con finally, así que el velo no se queda colgado
+        globalThis.apkcWisp = {
+          version: wispMod.CONTRATO_NUCLEO,
+          obtener: async () => { await new Promise((r) => setTimeout(r, 140)); throw new Error("relay caído"); },
+        };
+        porId["deps-coordenada"].value = "com.example:prueba:1.0";
+        const panelQueFalla = depsMod.crearPanelDeps({
+          hospedador: hospedadorFalso,
+          wisp: { asegurarDecision: async () => true, relayActual: () => "wss://wisp.local/wisp/" },
+        });
+        await panelQueFalla.resolver();
+        if (velo.hidden !== true) mal("el velo de carga no se oculta cuando falla la descarga");
+        if (!/^error/.test(String(porId["deps-estado"].textContent))) {
+          mal("el fallo del relay no se pinta como error en el panel");
+        }
+      } finally {
+        liberarNucleo();
+        if (nucleoPrevioCarga === undefined) delete globalThis.apkcWisp;
+        else globalThis.apkcWisp = nucleoPrevioCarga;
       }
 
       // (f) un clasificador no se recorta para que encaje en los tres tramos del núcleo
