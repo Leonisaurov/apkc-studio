@@ -2316,6 +2316,9 @@ function montarModulosBasicos() {
         const mover = (ev) => {
           const caja = cajaRedimensionada(base, tirador.dataset.eje,
             ev.clientX - e.clientX, ev.clientY - e.clientY, limites);
+          // el canvas del teléfono no se reescala mientras se arrastra su módulo (§345)
+          if (nodo.dataset.modulo === "previa" && PREVIA_PANEL &&
+              typeof PREVIA_PANEL.pausarAjuste === "function") PREVIA_PANEL.pausarAjuste();
           nodo.style.flex = "0 0 auto";
           nodo.style.width = caja.ancho + "px";
           nodo.style.height = caja.alto + "px";

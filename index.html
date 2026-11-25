@@ -357,7 +357,19 @@
               </div>
             </div>
 
-            <div id="marco-previa" class="marco-previa">
+            <div id="marco-previa" class="marco-previa" data-modulo="previa">
+              <div class="modulo-tiradores" aria-hidden="true">
+                <span class="modulo-tirador" data-eje="norte"></span>
+                <span class="modulo-tirador" data-eje="sur"></span>
+                <span class="modulo-tirador" data-eje="este"></span>
+                <span class="modulo-tirador" data-eje="oeste"></span>
+                <span class="modulo-tirador" data-eje="noreste"></span>
+                <span class="modulo-tirador" data-eje="noroeste"></span>
+                <span class="modulo-tirador" data-eje="sureste"></span>
+                <span class="modulo-tirador" data-eje="suroeste"></span>
+              </div>
+              <button class="modulo-asa modulo-asa-flotante" type="button" tabindex="-1"
+                      title="Mover el teléfono" aria-label="Mover el teléfono"></button>
               <div id="separador-previa" class="tirador-previa tirador-oeste" data-eje="oeste"
                    role="separator" tabindex="0" aria-orientation="vertical"
                    aria-label="Borde izquierdo de la vista previa: ancho" aria-controls="previa-lateral"
@@ -1051,7 +1063,19 @@
                     <span class="texto-boton">Salir</span>
                   </button>
                 </div>
-                <div class="previa-marco previa-marco-vista">
+                <div class="previa-marco previa-marco-vista" data-modulo="previa">
+                  <div class="modulo-tiradores" aria-hidden="true">
+                    <span class="modulo-tirador" data-eje="norte"></span>
+                    <span class="modulo-tirador" data-eje="sur"></span>
+                    <span class="modulo-tirador" data-eje="este"></span>
+                    <span class="modulo-tirador" data-eje="oeste"></span>
+                    <span class="modulo-tirador" data-eje="noreste"></span>
+                    <span class="modulo-tirador" data-eje="noroeste"></span>
+                    <span class="modulo-tirador" data-eje="sureste"></span>
+                    <span class="modulo-tirador" data-eje="suroeste"></span>
+                  </div>
+                  <button class="modulo-asa modulo-asa-flotante" type="button" tabindex="-1"
+                          title="Mover el emulador" aria-label="Mover el emulador"></button>
                   <canvas id="vista-previa" class="previa-canvas previa-canvas-vista" width="360" height="640"
                           tabindex="0" role="img" aria-label="Emulador: pantalla del apk con los eventos de la app; se puede pulsar sobre las vistas que responden a un clic"
                           aria-describedby="vista-previa-estado"></canvas>

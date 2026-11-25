@@ -5197,6 +5197,9 @@ export function crearPreviaPanel({ hospedador, proyecto, estadoPestana, editor, 
 
   return {
     iniciar,
+    // un gesto de módulo sobre el teléfono debe pausar el ajuste del canvas, igual que los de la
+    // consola: el `ResizeObserver` no puede reescalar el dibujo mientras se arrastra (§345)
+    pausarAjuste: pausarAjusteCanvas,
     aplicarModo,
     aplicarVisible,
     refrescarVivo,

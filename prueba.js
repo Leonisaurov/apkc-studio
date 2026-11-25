@@ -2872,6 +2872,28 @@ if (!/ARBOL\.abiertos/.test(pestana) || !/readOnly/.test(pestana) || !/ResizeObs
 if (!/typeof vista !== "string"/.test(js)) {
   mal("vistas.js conmuta de vista con un gesto de módulo en lugar de solo con data-vista");
 }
+
+// §345: el teléfono del editor y el lienzo de Pantalla son el mismo módulo `previa`. Los dos
+// puntos de clic, `canvas.__espacio`, la pantalla completa y la pausa del ajuste siguen ahí.
+if (!/id="marco-previa"[^>]*data-modulo="previa"/.test(html)) {
+  mal('index.html no declara #marco-previa como módulo "previa"');
+}
+if (!/class="previa-marco previa-marco-vista" data-modulo="previa"/.test(html)) {
+  mal("index.html no declara el lienzo de Pantalla como módulo previa");
+}
+if (!/id="vista-previa"/.test(html) || !/id="previa-lateral-canvas"/.test(html)) {
+  mal("index.html perdió uno de los dos canvas en los que se pulsa el emulador");
+}
+if (!/canvas\.__espacio = \{ ancho, alto \}/.test(fuentePreviaEstado)) {
+  mal("previa-panel.js dejó de publicar el espacio real del canvas");
+}
+if (!/pausarAjuste: pausarAjusteCanvas/.test(fuentePreviaEstado) ||
+    !/PREVIA_PANEL\.pausarAjuste/.test(pestana)) {
+  mal("un gesto del módulo previa no pausa el ajuste del canvas");
+}
+if (!/pantalla-completa/.test(fuentePreviaEstado)) {
+  mal("previa-panel.js perdió la pantalla completa del emulador");
+}
 // el canvas del render se puede pulsar: sin foco ni manejador no habría forma de tocar la app
 if (!/<canvas id="previa-lateral-canvas"[^>]*tabindex="0"/.test(html)) {
   mal("el canvas del render no es enfocable: no se puede pulsar con el teclado");

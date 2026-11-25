@@ -2253,6 +2253,15 @@ pre {
   background: repeating-linear-gradient(to bottom, var(--texto2) 0 1px, transparent 1px 4px);
 }
 .modulo-titulo { font-size: .78rem; color: var(--texto2); }
+/* el teléfono y el emulador llevan el asa sobre el marco, sin robar sitio al canvas */
+.modulo-asa-flotante {
+  position: absolute;
+  top: 4px;
+  right: 4px;
+  z-index: 2;
+  opacity: .55;
+}
+.modulo-asa-flotante:hover { opacity: 1; }
 .modulo-tiradores { position: absolute; inset: 0; pointer-events: none; }
 .modulo-tirador { position: absolute; pointer-events: auto; }
 .modulo-tirador[data-eje="norte"] { top: 0; left: 7px; right: 7px; height: 6px; cursor: ns-resize; }
