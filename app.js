@@ -249,6 +249,7 @@ const DESCRIPCIONES = {
     + "solo las de una categoría o las pendientes.",
   cronometro: "Cronómetro - Encadena un Runnable con Handler y postDelayed, toma el tiempo del "
     + "reloj monótono y anota vueltas mientras el reloj corre en pantalla.",
+  navegacion: "Navegación - Dos actividades: id/abrir llama a startActivity para mostrar la segunda pantalla y id/volver la cierra con finish; el contador de pulsos se conserva al volver.",
 };
 
 // ---------------------------------------------------------------- apps de ejemplo
@@ -1613,6 +1614,120 @@ public class MainActivity extends Activity implements View.OnClickListener, Runn
 </resources>
 `,
   },
+  // Copia de banco/apps-ejemplo/navegacion: dos actividades con dos layouts, sin R.java porque
+  // apkc lo genera de los recursos. El paquete del banco se sustituye por el del proyecto.
+  navegacion: {
+    java: {
+      "MainActivity.java": `package {{pkgname}};
+
+import android.app.*;
+import android.content.*;
+import android.os.*;
+import android.view.*;
+import android.widget.*;
+
+public class MainActivity extends Activity {
+    int pulsos = 0;
+    TextView total;
+
+    public void onCreate(Bundle savedInstanceState) {
+        super.onCreate(savedInstanceState);
+        setContentView(R.layout.main);
+        total = (TextView) findViewById(R.id.total);
+        findViewById(R.id.abrir).setOnClickListener(new View.OnClickListener() {
+            public void onClick(View v) {
+                abrir();
+            }
+        });
+    }
+
+    void abrir() {
+        pulsos = pulsos + 1;
+        total.setText("Pulsos: " + pulsos);
+        startActivity(new Intent(this, SegundaActivity.class));
+    }
+
+    public void onStart() { }
+    public void onResume() { }
+    public void onPause() { }
+    public void onStop() { }
+    public void onDestroy() { }
+    public void onRestart() { }
+}
+`,
+      "SegundaActivity.java": `package {{pkgname}};
+
+import android.app.*;
+import android.os.*;
+import android.view.*;
+import android.widget.*;
+
+public class SegundaActivity extends Activity {
+    public void onCreate(Bundle savedInstanceState) {
+        super.onCreate(savedInstanceState);
+        setContentView(R.layout.segunda);
+        TextView texto = (TextView) findViewById(R.id.texto);
+        texto.setText("Pantalla 2");
+        findViewById(R.id.volver).setOnClickListener(new View.OnClickListener() {
+            public void onClick(View v) {
+                finish();
+            }
+        });
+    }
+
+    public void onStart() { }
+    public void onResume() { }
+    public void onPause() { }
+    public void onStop() { }
+    public void onDestroy() { }
+}
+`,
+    },
+    layouts: {
+      "main.xml": `<?xml version="1.0" encoding="utf-8"?>
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:orientation="vertical"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:gravity="center">
+    <TextView
+        android:id="@+id/total"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:text="Pulsos: 0"/>
+    <Button
+        android:id="@+id/abrir"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:text="Abrir"/>
+</LinearLayout>
+`,
+      "segunda.xml": `<?xml version="1.0" encoding="utf-8"?>
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:orientation="vertical"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:gravity="center">
+    <TextView
+        android:id="@+id/texto"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:text="Segunda"/>
+    <Button
+        android:id="@+id/volver"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:text="Volver"/>
+</LinearLayout>
+`,
+    },
+    strings: `<resources>
+    <string name="app_name">{{appname}}</string>
+</resources>
+`,
+    actividades: `        <activity android:name=".SegundaActivity" />
+`,
+  },
 };
 
 // ---------------------------------------------------------------- el proyecto
@@ -1712,6 +1827,11 @@ function buildProject(state) {
     files["res/values/strings.xml"] = app.strings.replace(/\{\{appname\}\}/g, texto(state.name, "Mi app"));
     files["AndroidManifest.xml"] = files["AndroidManifest.xml"]
       .replace(/android:label="[^"]*"/g, 'android:label="@string/app_name"');
+    // El manifiesto base solo conoce MainActivity: la navegación añade la suya propia antes del cierre.
+    if (app.actividades) {
+      files["AndroidManifest.xml"] = files["AndroidManifest.xml"]
+        .replace("</application>", app.actividades + "</application>");
+    }
     if (app.permisos) {
       // el bloque <uses-sdk .../> de la plantilla base es autocerrado: los permisos entran detrás
       files["AndroidManifest.xml"] = files["AndroidManifest.xml"]

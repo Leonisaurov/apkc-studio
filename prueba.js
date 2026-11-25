@@ -201,6 +201,8 @@ const appsEjemplo = {
   chatbt: { java: ["MainActivity.java"], layouts: ["principal.xml", "item.xml"] },
   tareas: { java: ["MainActivity.java"], layouts: ["principal.xml", "item.xml"] },
   cronometro: { java: ["MainActivity.java"], layouts: ["principal.xml", "item.xml"] },
+  navegacion: { java: ["MainActivity.java", "SegundaActivity.java"],
+    layouts: ["main.xml", "segunda.xml"] },
 };
 const fuentesApp = "src/" + estado.package.split(".").join("/");
 for (const [nombre, esperado] of Object.entries(appsEjemplo)) {
@@ -213,7 +215,10 @@ for (const [nombre, esperado] of Object.entries(appsEjemplo)) {
   }
   const app = a.buildProject({ ...estado, template: nombre, kotlin: false, libs: false,
     native: false, assets: false, device: false });
-  if (app.files["res/layout/main.xml"] !== undefined) {
+  // La navegación trae su propio main.xml del banco; las demás usan principal.xml. Lo que no
+  // vale es el main.xml de Hola mundo: si se retira la entrada, vuelve a aparecer con el saludo.
+  const mainGenerado = app.files["res/layout/main.xml"];
+  if (mainGenerado !== undefined && /Hello World!/.test(mainGenerado)) {
     mal(`la plantilla ${nombre} conserva el layout main.xml de Hola mundo`);
   }
   for (const fichero of esperado.java) {
@@ -244,7 +249,7 @@ for (const [nombre, esperado] of Object.entries(appsEjemplo)) {
 // No se mete en comentarios Java ni en strings.xml, y el readme no puede decir undefined ni
 // arrastrar un marcador sin sustituir.
 const nombresDescritos = Object.keys(DESCRIPCIONES);
-if (nombresDescritos.length !== 10) mal(`DESCRIPCIONES describe ${nombresDescritos.length} plantillas, no diez`);
+if (nombresDescritos.length !== 11) mal(`DESCRIPCIONES describe ${nombresDescritos.length} plantillas, no once`);
 for (const nombre of nombresDescritos) {
   const descripcion = DESCRIPCIONES[nombre];
   if (typeof descripcion !== "string" || !descripcion.trim()) {
@@ -265,6 +270,39 @@ for (const nombre of nombresDescritos) {
       mal(`la descripción de ${nombre} se coló en el código generado: ${ruta}`);
     }
   }
+}
+// 2d-ter. La navegación es la primera app de ejemplo con dos actividades: exige su opción en el
+// selector, su nombre en la lista de vistas.js y los cinco ficheros del banco (manifiesto, dos
+// layouts y dos clases Java). Si se retira APPS_EJEMPLO.navegacion, buildProject vuelve al proyecto
+// base y esta comprobación falla; lo mismo si se pierde la declaración de la segunda actividad.
+if (!/value="navegacion"/.test(htmlPlantillas)) mal("el selector no ofrece la app navegacion");
+if (!/"navegacion"/.test(vistasPlantillas)) mal("vistas.js no reconoce la plantilla navegacion");
+const navegacion = a.buildProject({ ...estado, template: "navegacion", kotlin: false, libs: false,
+  native: false, assets: false, device: false });
+const ficherosNavega = [
+  "AndroidManifest.xml",
+  "res/layout/main.xml",
+  "res/layout/segunda.xml",
+  fuentesApp + "/MainActivity.java",
+  fuentesApp + "/SegundaActivity.java",
+];
+for (const ruta of ficherosNavega) {
+  if (typeof navegacion.files[ruta] !== "string") {
+    mal(`la plantilla navegacion no escribe ${ruta}`);
+  }
+}
+const manifiestoNavega = navegacion.files["AndroidManifest.xml"] || "";
+if (!/android:name="\.SegundaActivity"/.test(manifiestoNavega)) {
+  mal("la plantilla navegacion no declara SegundaActivity en el manifiesto");
+}
+const mainNavega = navegacion.files[fuentesApp + "/MainActivity.java"] || "";
+const segundaNavega = navegacion.files[fuentesApp + "/SegundaActivity.java"] || "";
+if (!/startActivity\(new Intent\(this, SegundaActivity\.class\)\)/.test(mainNavega) ||
+    !/total\.setText\("Pulsos: " \+ pulsos\)/.test(mainNavega)) {
+  mal("la plantilla navegacion no abre la segunda actividad conservando el contador");
+}
+if (!/findViewById\(R\.id\.volver\)/.test(segundaNavega) || !/finish\(\)/.test(segundaNavega)) {
+  mal("la plantilla navegacion no cierra la segunda actividad con finish desde id/volver");
 }
 // 2e. el cronómetro es la única plantilla que se reprograma a sí misma: si se pierde el Runnable,
 //     el postDelayed o el reloj monótono, la compilación sigue verde pero el reloj se queda quieto.

@@ -129,7 +129,7 @@ import {
       minsdk: "21",
       targetsdk: apiElegida && apiElegida.value ? apiElegida.value : "34",
       template: plantilla && ["contador", "ciclo", "menu", "traducido",
-        "lienzo", "notas", "chatbt", "tareas", "cronometro"].includes(plantilla.value)
+        "lienzo", "notas", "chatbt", "tareas", "cronometro", "navegacion"].includes(plantilla.value)
         ? plantilla.value : "hola",
       hello: "Hello World!",
       button: false,
