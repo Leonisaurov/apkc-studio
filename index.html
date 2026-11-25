@@ -1272,8 +1272,11 @@
               </div>
               <div id="wisp-selector" hidden>
                 <label>relay conocido <select id="wisp-relay"></select></label>
+                <!-- Relay propio del proyecto ofrecido como opción configurada por defecto. El
+                     módulo WISP sigue apagado y esta URL no se usa hasta el opt-in: mientras
+                     tanto, la página no hace ninguna petición fuera de su origen. -->
                 <label>URL personalizada (tu WISP local)
-                  <input type="text" id="wisp-url" placeholder="wss://mi-wisp.local/wisp/"
+                  <input type="text" id="wisp-url" value="wss://wisp.dolci-vita.link/wisp/" placeholder="wss://mi-wisp.local/wisp/"
                          autocomplete="off" spellcheck="false" class="ruta"></label>
                 <p class="nota" id="wisp-url-estado">vacío: se usa el relay elegido en la lista</p>
                 <label>certificados de confianza (PEM local, opcional)
