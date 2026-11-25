@@ -200,6 +200,23 @@ export function escalaPara(modelo, ancho, alto) {
 // ejes, porque agrandar la caja por la izquierda y arriba desplazaba el botón (y su texto) respecto
 // de ART. Al hacerlo aquí, `modeloConPantalla` de `previa-panel.js` escala ya el rect final: con una
 // pantalla de 180×320 el botón mide 44×20 en vez de volver a 88×48 «porque sí».
+// Recorta un rectángulo de capa DOM (coordenadas de viewport) al rect del canvas. Es lo que evita
+// que el `<input>` del EditText, que se coloca sobre el emulador, se vea fuera de la pantalla (§337).
+// No muta ni el rect entrado ni la caja; devuelve null si alguna medida no es finita.
+export function recortaACaja(rect, caja) {
+  if (!rect || !caja) return null;
+  const x = Number(rect.x), y = Number(rect.y);
+  const ancho = Number(rect.ancho), alto = Number(rect.alto);
+  const izqCaja = Number(caja.left), arrCaja = Number(caja.top);
+  const anchoCaja = Number(caja.width), altoCaja = Number(caja.height);
+  if (![x, y, ancho, alto, izqCaja, arrCaja, anchoCaja, altoCaja].every(Number.isFinite)) return null;
+  const izq = Math.max(izqCaja, x);
+  const arr = Math.max(arrCaja, y);
+  const der = Math.max(izq, Math.min(izqCaja + anchoCaja, x + ancho));
+  const abajo = Math.max(arr, Math.min(arrCaja + altoCaja, y + alto));
+  return { x: izq, y: arr, ancho: der - izq, alto: abajo - arr };
+}
+
 // Refluye una fila de botones que, después de aplicar los mínimos de ART, no cabe en su padre.
 // No quita ningún botón ni recorta su texto: reduce proporcionalmente anchos y huecos, con el
 // mismo centro relativo, para que los cinco botones de `notas` queden dentro de 360 dp (§336).

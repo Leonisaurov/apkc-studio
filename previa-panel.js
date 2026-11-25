@@ -36,7 +36,7 @@
 import {
   pintarModelo, modeloActual, EVENTO_PREVIA, modeloDeSalida, pintarVistaPrevia, nodosAplanados,
   textoDeNodo, rectsEscalados, escalaPara, MENSAJE_SIN_MODELO, textoDelModelo,
-  modeloConMinimos, mensajeVistaPrevia,
+  modeloConMinimos, mensajeVistaPrevia, recortaACaja,
 } from "./vista-previa.js";
 import { modeloDeLayout, decodificarEntidades, paddingDe, contenedorDe, atributoLocal } from "./vista-xml.js";
 import {
@@ -2994,10 +2994,15 @@ export function crearPreviaPanel({ hospedador, proyecto, estadoPestana, editor, 
     if (!caja || !(caja.width > 0) || !(caja.height > 0)) return;
     const sx = caja.width / espacio.ancho;
     const sy = caja.height / espacio.alto;
-    campoTexto.style.left = (caja.left + r.x * sx) + "px";
-    campoTexto.style.top = (caja.top + r.y * sy) + "px";
-    campoTexto.style.width = Math.max(24, r.ancho * sx) + "px";
-    campoTexto.style.height = Math.max(18, r.alto * sy) + "px";
+    // la capa DOM va recortada al canvas: un rect del emulador que se sale por la izquierda o la
+    // derecha no puede dejar el campo visible fuera de la pantalla (§337)
+    const lugar = recortaACaja({ x: caja.left + r.x * sx, y: caja.top + r.y * sy,
+      ancho: Math.max(24, r.ancho * sx), alto: Math.max(18, r.alto * sy) }, caja);
+    if (!lugar) return;
+    campoTexto.style.left = lugar.x + "px";
+    campoTexto.style.top = lugar.y + "px";
+    campoTexto.style.width = lugar.ancho + "px";
+    campoTexto.style.height = lugar.alto + "px";
     campoTexto.style.fontSize = Math.max(12, Math.min(28, r.alto * sy * 0.7)) + "px";
   }
 

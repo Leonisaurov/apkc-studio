@@ -1194,6 +1194,13 @@ const conductor = `(async () => {
     const campo = document.activeElement;
     r.fidelidadTeclado.foco = !!campo && campo.className === "previa-campo-texto";
     if (r.fidelidadTeclado.foco) {
+      // §337: la capa del campo no puede enseñarse fuera del canvas; se mide con el mismo
+      // getBoundingClientRect que usará el oráculo cuando el bloque CDP pueda correr.
+      const rc = campo.getBoundingClientRect(), rl = lienzoCampo.getBoundingClientRect();
+      r.fidelidadTeclado.caja = {
+        campo: { x: rc.left, y: rc.top, ancho: rc.width, alto: rc.height },
+        lienzo: { x: rl.left, y: rl.top, ancho: rl.width, alto: rl.height },
+      };
       campo.value = "  hola  ";
       campo.dispatchEvent(new Event("input", { bubbles: true }));
       r.fidelidadTeclado.valor = campo.value;
@@ -1680,6 +1687,11 @@ const pixelCercano = (pix, esperado) => Array.isArray(pix) && pix.length === 3 &
     comprueba(fk.editable === true && fk.idRef === "0x7f010001",
       "editableEnPunto no elige el EditText del modelo: " + JSON.stringify(fk));
     comprueba(fk.foco === true, "el toque sobre el EditText no enfoca el campo real");
+    const cj = fk.caja;
+    comprueba(cj && cj.campo.x >= cj.lienzo.x - 1 && cj.campo.y >= cj.lienzo.y - 1 &&
+      cj.campo.x + cj.campo.ancho <= cj.lienzo.x + cj.lienzo.ancho + 1 &&
+      cj.campo.y + cj.campo.alto <= cj.lienzo.y + cj.lienzo.alto + 1,
+      "el campo del EditText se ve fuera del canvas: " + JSON.stringify(fk.caja));
     comprueba(fk.valor === "  hola  ", "el campo no conserva lo tecleado: " + JSON.stringify(fk.valor));
     comprueba(Array.isArray(fk.guion) && fk.guion.some((p) => /\/  hola  $/.test(String(p))),
       "los espacios finales no sobreviven a --escribir: " + JSON.stringify(fk.guion));

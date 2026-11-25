@@ -1003,6 +1003,25 @@ if (botonesHueco.length !== 5 || paresBotones.length !== 0) {
     JSON.stringify({ paresBotones, botones: botonesHueco }));
 }
 console.log("paresBotones (huecos de 64 dp): " + JSON.stringify(paresBotones));
+// §337. la pintura sigue recortada al marco y la capa del EditText se recorta al canvas. El
+// `getBoundingClientRect()` real sobre chromium queda en el bloque CDP condicionado.
+const fuenteVistaPrevia = fs.readFileSync(path.join(__dirname, "vista-previa.js"), "utf8");
+if (!/ctx\.clip\(\)/.test(fuenteVistaPrevia)) mal("vista-previa.js ya no recorta la pintura al marco");
+const cajaCanvas = { left: 100, top: 50, width: 720, height: 1280 };
+const recortes = [
+  [{ x: 90, y: 40, ancho: 88, alto: 40 }, { x: 100, y: 50, ancho: 78, alto: 30 }],
+  [{ x: 800, y: 1300, ancho: 100, alto: 100 }, { x: 800, y: 1300, ancho: 20, alto: 30 }],
+  [{ x: 140, y: 70, ancho: 200, alto: 40 }, { x: 140, y: 70, ancho: 200, alto: 40 }],
+];
+for (const [entrada, esperado] of recortes) {
+  const salida = vistaPrevia.recortaACaja(entrada, cajaCanvas);
+  if (!salida || Object.keys(esperado).some((k) => salida[k] !== esperado[k])) {
+    mal("recortaACaja no contiene la capa en el canvas: " + JSON.stringify({ entrada, salida }));
+  }
+}
+if (vistaPrevia.recortaACaja({ x: NaN, y: 0, ancho: 1, alto: 1 }, cajaCanvas) !== null) {
+  mal("recortaACaja acepta una coordenada no finita");
+}
 // un nodo sin rect se omite en vez de pintarse en (0,0); y la cota corta un árbol desmedido
 const sinRect = { pantalla: { ancho: 100, alto: 100 }, raiz: { tipo: "X", hijos: [{ tipo: "Y" }] } };
 if (vistaPrevia.rectsEscalados(sinRect, 100, 100).length !== 0) mal("rectsEscalados pinta un nodo sin rect");
