@@ -1,0 +1,4 @@
+[submodule "apkc-emulador"]
+	path = apkc-emulador
+	url = https://github.com/Leonisaurov/apkc-emulador.git
+	branch = emulador-modulo
