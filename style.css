@@ -445,7 +445,7 @@ kbd {
   gap: 18px;
   align-items: stretch;
   flex: 1 1 auto;
-  height: min(72vh, 760px);
+  height: min(72dvh, 760px);
   min-height: 360px;
 }
 .previa-zona-vista {
@@ -505,7 +505,7 @@ kbd {
   width: var(--previa-ancho, 380px);
   max-width: calc(100% - 8px);
   height: auto;
-  max-height: 40vh;
+  max-height: 40dvh;
   margin-top: 0;
   flex: 0 0 auto;
 }
@@ -526,7 +526,7 @@ kbd {
   left: auto;
   height: auto;
   margin-top: 0;
-  max-width: calc(100vw - 16px);
+  max-width: calc(100dvw - 16px);
 }
 .marco-vista-lado.minimizado {
   width: max-content;
@@ -683,7 +683,7 @@ kbd {
   bottom: 4px;
   /* §341: antes `height:46%` la hacía nacer grande; sin preferencia manda el default de 240 px */
   height: auto;
-  max-height: 40vh;
+  max-height: 40dvh;
   min-height: 0;
   display: flex;
   flex-direction: column;
@@ -725,7 +725,7 @@ kbd {
   bottom: auto;
   left: auto;
   height: auto;
-  max-width: calc(100vw - 16px);
+  max-width: calc(100dvw - 16px);
 }
 .previa-inspector.minimizado {
   width: max-content;
@@ -806,6 +806,198 @@ kbd {
 }
 #previa-render.pantalla-completa { overflow: hidden; }
 #vista-cuerpo.pantalla-completa { height: auto; min-height: 0; }
+
+/* ---- modo teléfono: pantalla completa con teclado virtual ----------------
+   La clase `.modo-telefono` (en <html>) es el camino robusto: funciona aunque
+   `requestFullscreen` no exista o sea rechazado, que es lo habitual en móvil.
+   La Fullscreen API se pide además como refuerzo; sus estilos van al final.
+   Se usan `dvh`/`dvw` para que la barra del navegador y el teclado no dejen un
+   hueco muerto, y `env(safe-area-inset-*)` para notch y barras del sistema. */
+html.modo-telefono {
+  --telefono-barra-alto: 56px;
+  width: 100dvw;
+  height: 100dvh;
+  /* el foco no quede debajo de la barra al abrir el teclado virtual */
+  scroll-padding-bottom: max(4.5rem, env(safe-area-inset-bottom, 0px));
+}
+html.modo-telefono body {
+  width: 100dvw;
+  height: 100dvh;
+  margin: 0;
+  overflow: clip;
+}
+
+/* Se pliega todo el cromo del editor: título, actividad, explorador, pestañas
+   de vista, barra de estado, cabecera y pestañas de la Pantalla, controles del
+   emulador, notas, línea de estado y la columna de registro y consola. Sigue
+   intacto fuera del modo: esto solo aplica con la clase puesta. */
+html.modo-telefono .barra-titulo,
+html.modo-telefono .actividad,
+html.modo-telefono .lateral,
+html.modo-telefono .pestanas,
+html.modo-telefono .barra-estado,
+html.modo-telefono .previa-cab,
+html.modo-telefono .previa-modos,
+html.modo-telefono .previa-controles,
+html.modo-telefono .previa-estado,
+html.modo-telefono .nota,
+html.modo-telefono #marco-vista-lado,
+html.modo-telefono #vista-inspector-abrir,
+html.modo-telefono #vista-layout,
+html.modo-telefono #previa-inspector,
+html.modo-telefono .panel-inferior {
+  display: none !important;
+}
+
+/* La superficie del emulador hereda todo el viewport, sin márgenes ni scroll
+   propio, para que el marco del teléfono pueda centrar el canvas. */
+html.modo-telefono .marco,
+html.modo-telefono .cuerpo,
+html.modo-telefono .area,
+html.modo-telefono .vistas,
+html.modo-telefono .vista,
+html.modo-telefono #vista,
+html.modo-telefono #vista-cuerpo,
+html.modo-telefono .previa-zona-vista {
+  display: block;
+  position: relative;
+  width: 100dvw;
+  height: 100dvh;
+  min-height: 0;
+  max-width: none;
+  max-height: none;
+  margin: 0;
+  padding: 0;
+  overflow: visible;
+  background: var(--fondo);
+}
+html.modo-telefono #vista-emulador { position: static; }
+
+/* El marco centra el lienzo de 360×640 sin recortarlo. La barra y los insets
+   del sistema se descuentan del alto; `--telefono-alto-vv` lo escribe el
+   `visualViewport` cuando se abre el teclado, así el dibujo se reencaja sobre
+   el área visible en vez de quedar tapado. */
+html.modo-telefono #vista-cuerpo .previa-marco-vista[data-modulo="previa"] {
+  position: absolute;
+  inset: 0;
+  width: 100dvw;
+  height: calc(var(--telefono-alto-vv, 100dvh) - var(--telefono-barra-alto, 56px)
+               - env(safe-area-inset-top, 0px) - env(safe-area-inset-bottom, 0px));
+  min-height: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  box-sizing: border-box;
+  padding: max(8px, env(safe-area-inset-top, 0px))
+           max(8px, env(safe-area-inset-right, 0px))
+           max(8px, env(safe-area-inset-bottom, 0px))
+           max(8px, env(safe-area-inset-left, 0px));
+  border: 0;
+  border-radius: 0;
+  background: var(--fondo);
+}
+html.modo-telefono #vista-cuerpo .previa-canvas-vista,
+html.modo-telefono #previa-render.pantalla-completa .previa-canvas-lateral {
+  max-width: 100%;
+  max-height: 100%;
+  touch-action: manipulation;
+}
+
+/* Si se entra desde la vista dividida, el editor también se pliega y su superficie de emulador
+   recibe el mismo reparto centrado que la vista Pantalla. Fuera del modo nada de esto se aplica. */
+html.modo-telefono .editor { display: none !important; }
+html.modo-telefono #previa-render.pantalla-completa {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  height: calc(var(--telefono-alto-vv, 100dvh) - var(--telefono-barra-alto, 56px)
+               - env(safe-area-inset-top, 0px) - env(safe-area-inset-bottom, 0px));
+  padding: max(8px, env(safe-area-inset-top, 0px))
+           max(8px, env(safe-area-inset-right, 0px))
+           max(8px, env(safe-area-inset-bottom, 0px))
+           max(8px, env(safe-area-inset-left, 0px));
+  box-sizing: border-box;
+}
+html.modo-telefono #previa-render.pantalla-completa .previa-marco-lateral {
+  flex: 0 1 auto;
+  width: 100%;
+  height: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+/* Barra mínima de salida (Esc/botón) y de acción. Vive fuera de `.marco`, así
+   sobrevive al `:fullscreen`. Todas las variables táctiles miden 44 px. */
+.telefono-barra {
+  position: fixed;
+  z-index: 90;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  min-height: var(--telefono-barra-alto, 56px);
+  padding: 4px max(8px, env(safe-area-inset-right, 0px))
+           max(6px, env(safe-area-inset-bottom, 0px))
+           max(8px, env(safe-area-inset-left, 0px));
+  box-sizing: border-box;
+  background: var(--superficie);
+  border-top: 1px solid var(--borde2);
+}
+.telefono-barra[hidden] { display: none; }
+.telefono-barra-titulo {
+  flex: 1 1 auto;
+  min-width: 0;
+  color: var(--texto-fuerte);
+  font-size: 12px;
+  text-align: center;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.telefono-control,
+.telefono-entrar {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  min-width: 44px;
+  min-height: 44px;
+  padding: 0 10px;
+  border: 1px solid var(--borde2);
+  border-radius: 8px;
+  background: var(--boton);
+  color: var(--texto-fuerte);
+  font: inherit;
+  font-size: 12px;
+  cursor: pointer;
+  touch-action: manipulation;
+}
+.telefono-control svg,
+.telefono-entrar svg {
+  width: 20px;
+  height: 20px;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 2;
+}
+.telefono-control:hover,
+.telefono-entrar:hover { background: var(--boton-hover); color: var(--blanco); }
+.telefono-control:focus-visible,
+.telefono-entrar:focus-visible { outline: 2px solid var(--acento); outline-offset: 2px; }
+
+/* Refuerzo de la Fullscreen API: el reparto ya lo hizo la clase, aquí solo se
+   garantiza el fondo y que la barra siga fijada al borde real del viewport. */
+html:fullscreen,
+html:-webkit-full-screen {
+  width: 100dvw;
+  height: 100dvh;
+  background: var(--fondo);
+}
+:fullscreen .telefono-barra { position: fixed; }
 
 /* ---- vista dividida: editor + previa del teléfono ------------------------
    La fila sustituye al editor suelto como hijo flexible de #pestana: el editor conserva su
@@ -2315,7 +2507,7 @@ pre {
   /* §343: antes `34vh` fijo; ahora manda la geometría del módulo `compilacion` (480 px) */
   height: var(--modulo-alto, 480px);
   min-height: 11rem;
-  max-height: 55vh;
+  max-height: 55dvh;
   display: flex;
   flex-direction: column;
   background: var(--fondo);
@@ -2329,7 +2521,7 @@ pre {
   left: 8px;
   right: 8px;
   bottom: 8px;
-  max-height: 55vh;
+  max-height: 55dvh;
   z-index: calc(40 + var(--z, 0));
 }
 .panel-tabs {
@@ -2549,7 +2741,7 @@ pre {
 /* ---- pantalla de carga ---------------------------------------------------- */
 
 .dialogo-sdk {
-  width: min(620px, calc(100vw - 32px));
+  width: min(620px, calc(100dvw - 32px));
   padding: 18px 20px;
   border: 1px solid var(--borde2);
   border-radius: 6px;
@@ -2639,14 +2831,14 @@ pre {
   .area { grid-column: 2; grid-row: 2; }
   .vista:not(.vista-editor) { padding: 16px 16px 44px; }
   .editor-tab { max-width: 22ch; }
-  .panel-inferior { height: var(--modulo-alto, 42vh); }
+  .panel-inferior { height: var(--modulo-alto, 42dvh); }
   /* en táctil la vista previa pasa debajo del editor: sin tiradores que arrastrar y con aviso */
   .editor-fila { flex-direction: column; }
   .tirador-previa { display: none; }
   .previa-aviso-estrecho { display: block; }
   .marco-previa,
   .marco-previa[data-alto="propio"] {
-    flex: 0 0 38vh;
+    flex: 0 0 38dvh;
     align-self: stretch;
     height: auto;
     margin-top: 0;
@@ -2981,13 +3173,13 @@ pre {
   display: flex;
   align-items: flex-start;
   justify-content: center;
-  padding-top: 12vh;
+  padding-top: 12dvh;
   background: rgba(0, 0, 0, .55);
 }
 .paleta[hidden] { display: none; }
 .paleta-caja {
-  width: min(34rem, calc(100vw - 24px));
-  max-height: 70vh;
+  width: min(34rem, calc(100dvw - 24px));
+  max-height: 70dvh;
   display: flex;
   flex-direction: column;
   padding: 8px;

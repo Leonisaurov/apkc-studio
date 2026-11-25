@@ -987,6 +987,10 @@ export function crearPreviaPanel({ hospedador, proyecto, estadoPestana, editor, 
     return contadorZ;
   }
   const completa = { panel: false, vista: false };
+  // Modo teléfono: la clase `.modo-telefono` en <html> es el camino robusto (móvil donde la
+  // Fullscreen API no existe o se rechaza); la API se pide además como refuerzo. `vv` es el
+  // visualViewport, que encoge al abrirse el teclado virtual.
+  const telefono = { activo: false, superficie: null, vv: null };
   let ultimaMeta = null;
   // el apk que respalda el modelo en pantalla: el del build o la copia estable. Los clics repiten
   // `apkc preview` sobre el mismo fichero, así no dependen de que `build/app.apk` siga ahí.
@@ -2830,6 +2834,67 @@ export function crearPreviaPanel({ hospedador, proyecto, estadoPestana, editor, 
     pintarRender();
   }
 
+  // --- modo teléfono: Fullscreen API + fallback por clase + teclado virtual -----------------
+  // `requestFullscreen` solo se puede pedir dentro del gesto del usuario, por eso se llama desde
+  // el manejador del botón (a través de `aplicarCompleta`) y nunca desde un observer. Si el navegador
+  // no lo ofrece o lo rechaza, la clase `.modo-telefono` ya dejó el canvas a pantalla completa.
+  function pedirFullscreen() {
+    const raiz = typeof document !== "undefined" ? document.documentElement : null;
+    if (!raiz || typeof raiz.requestFullscreen !== "function") return;
+    if (typeof document !== "undefined" && document.fullscreenElement) return;
+    try {
+      const promesa = raiz.requestFullscreen();
+      if (promesa && typeof promesa.catch === "function") promesa.catch(() => {});
+    } catch (_) { /* el fallback por clase ya está activo */ }
+  }
+
+  function salirFullscreen() {
+    if (typeof document === "undefined" || !document.fullscreenElement) return;
+    if (typeof document.exitFullscreen !== "function") return;
+    try {
+      const promesa = document.exitFullscreen();
+      if (promesa && typeof promesa.catch === "function") promesa.catch(() => {});
+    } catch (_) { /* la clase se quita igual */ }
+  }
+
+  function alinearTelefono() {
+    if (!telefono.activo || typeof document === "undefined" || !document.documentElement) return;
+    const raiz = document.documentElement;
+    if (!telefono.vv) { raiz.style.removeProperty("--telefono-alto-vv"); return; }
+    // con `interactive-widget=resizes-content` el viewport visible es el área libre real: al abrir
+    // el teclado se encoge y el canvas se reencaja sobre ella, sin quedar tapado ni recortado.
+    raiz.style.setProperty("--telefono-alto-vv", Math.max(1, Math.round(telefono.vv.height)) + "px");
+  }
+
+  function activarTelefono(superficie) {
+    if (typeof document === "undefined" || !document.documentElement) return;
+    // modo teléfono es el emulador: si estaba delante la otra pestaña, se trae esta
+    const modo = el(superficie === "panel" ? "previa-modo-render" : "vista-modo-emulador");
+    if (modo && modo.getAttribute("aria-selected") !== "true") modo.click();
+    telefono.activo = true;
+    telefono.superficie = superficie;
+    document.documentElement.classList.add("modo-telefono");
+    const barra = el("telefono-barra");
+    if (barra) barra.hidden = false;
+    const titulo = el("telefono-barra-titulo");
+    if (titulo) titulo.textContent = superficie === "panel" ? "Modo teléfono · emulador" : "Modo teléfono · Pantalla";
+    alinearTelefono();
+    pedirFullscreen();
+  }
+
+  function desactivarTelefono(superficie) {
+    if (telefono.superficie && telefono.superficie !== superficie) return;
+    telefono.activo = false;
+    telefono.superficie = null;
+    if (typeof document !== "undefined" && document.documentElement) {
+      document.documentElement.classList.remove("modo-telefono");
+      document.documentElement.style.removeProperty("--telefono-alto-vv");
+    }
+    const barra = el("telefono-barra");
+    if (barra) barra.hidden = true;
+    salirFullscreen();
+  }
+
   function aplicarCompleta(superficie, valor) {
     completa[superficie] = !!valor;
     const contenedor = superficie === "panel" ? el("previa-render") : el("vista-cuerpo");
@@ -2838,7 +2903,9 @@ export function crearPreviaPanel({ hospedador, proyecto, estadoPestana, editor, 
     const salir = el(superficie === "panel" ? "previa-salir-completa" : "vista-salir-completa");
     if (entrar) entrar.hidden = completa[superficie];
     if (salir) salir.hidden = !completa[superficie];
-    const ajustar = () => { ajustarPantallas(); pintarRender(); };
+    if (completa[superficie]) activarTelefono(superficie);
+    else desactivarTelefono(superficie);
+    const ajustar = () => { alinearTelefono(); ajustarPantallas(); pintarRender(); };
     // se ajusta ya (leer clientWidth fuerza el layout con la clase puesta) y otra vez en el
     // siguiente cuadro por si el navegador termina de medir la superficie fija
     ajustar();
@@ -3066,6 +3133,51 @@ export function crearPreviaPanel({ hospedador, proyecto, estadoPestana, editor, 
     }
     conectarFlotante("panel");
     conectarFlotante("vista");
+
+    // Modo teléfono: botón explícito de entrada, salida con Esc/botón y una acción. La barra es
+    // única para las dos superficies y solo se muestra con la clase `.modo-telefono` puesta.
+    const entrarTelefono = el("modo-telefono");
+    if (entrarTelefono) entrarTelefono.addEventListener("click", () => aplicarCompleta("vista", true));
+    const salirTelefono = el("telefono-salir");
+    if (salirTelefono) salirTelefono.addEventListener("click", () => {
+      if (telefono.superficie) aplicarCompleta(telefono.superficie, false);
+    });
+    const accionTelefono = el("telefono-accion");
+    if (accionTelefono) accionTelefono.addEventListener("click", () => reiniciarEmulador());
+
+    // El teclado virtual encoge el viewport visible: el canvas se reencaja sobre el área libre
+    // en vez de quedar tapado. `interactive-widget=resizes-content` hace que `dvh` también siga
+    // al teclado; esta variable afina el centro del dibujo con la medida real del viewport.
+    if (typeof window !== "undefined" && window.visualViewport) {
+      telefono.vv = window.visualViewport;
+      const alinear = () => {
+        if (!telefono.activo) return;
+        alinearTelefono();
+        pintarRender();
+      };
+      if (typeof telefono.vv.addEventListener === "function") {
+        telefono.vv.addEventListener("resize", alinear);
+        telefono.vv.addEventListener("scroll", alinear);
+      }
+    }
+    // Salir del fullscreen nativo con Esc debe cerrar también el modo por clase. Y Esc dentro del
+    // modo cierra el teléfono, salvo que se esté escribiendo en un campo (ese Esc es del campo).
+    if (typeof document !== "undefined") {
+      document.addEventListener("fullscreenchange", () => {
+        if (!document.fullscreenElement && telefono.activo && telefono.superficie) {
+          aplicarCompleta(telefono.superficie, false);
+        }
+      });
+      document.addEventListener("keydown", (e) => {
+        if (e.key !== "Escape" || !telefono.activo || !telefono.superficie || e.defaultPrevented) return;
+        const destino = e.target;
+        if (destino && typeof destino.tagName === "string" &&
+            /^(INPUT|TEXTAREA|SELECT)$/.test(destino.tagName)) return;
+        e.preventDefault();
+        aplicarCompleta(telefono.superficie, false);
+      });
+    }
+
     // una pantalla completa no puede sobrevivir a cambiar de vista: taparía la vista nueva
     if (typeof MutationObserver === "function" && document.body) {
       new MutationObserver(() => {

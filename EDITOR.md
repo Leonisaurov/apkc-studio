@@ -85,6 +85,49 @@ el del panel.
 | `#marco-vista-lado` y sus ocho `#vista-tirador-*` | la columna de estado y consola, redimensionable |
 | `#vista-lado` | la columna; su ancho y su alto viven en `--previa-ancho`/`--previa-alto` |
 
+### Modo teléfono (pantalla completa)
+
+La vista Pantalla tiene un botón explícito, **`#modo-telefono`** («Modo teléfono»), que abre el
+emulador a pantalla completa imitando al teléfono: se pliegan la barra de título, la barra de
+actividad, el explorador, las pestañas de vista, la barra de estado, la cabecera y pestañas de la
+Pantalla, los controles del emulador, las notas y la columna de registro y consola. Queda el canvas
+del emulador centrado y una **única barra mínima** (`#telefono-barra`) con salida
+(`#telefono-salir`, también `Esc`) y una acción (`#telefono-accion`, reinicia desde `onCreate`).
+Los botones antiguos `#vista-pantalla-completa`/`#vista-salir-completa` (y sus gemelos `previa-` del
+panel) siguen siendo la misma orden, así que el atajo y los ocho tiradores no cambian fuera del modo.
+
+El modo se activa con el botón o con `#vista-pantalla-completa` y se sale con `Esc`, con
+`#telefono-salir` o con `#vista-salir-completa`. Cambiar de vista también lo cierra: una pantalla
+completa no puede tapar la vista nueva. Al entrar se fuerza la pestaña **Emulador**, porque el modo
+teléfono es el propio emulador, no el layout dibujado.
+
+| Id | Qué es |
+| --- | --- |
+| `#modo-telefono` | el botón de entrada del modo teléfono, con `aria-label` |
+| `#telefono-barra` | la barra mínima; `hidden` fuera del modo, `role="toolbar"` |
+| `#telefono-salir` | salir (`aria-keyshortcuts="Escape"`, `aria-label`) |
+| `#telefono-barra-titulo` | el rótulo de la barra |
+| `#telefono-accion` | la acción única: reiniciar el emulador |
+
+**Dos caminos, uno visible.** `previa-panel.js` pone la clase **`.modo-telefono`** en `<html>`: es
+el camino robusto y funciona aunque `requestFullscreen` no exista o sea rechazado, que es lo normal
+en navegadores móviles. Además, dentro del gesto del botón, pide `requestFullscreen()` sobre el
+documento para ganar la barra real del sistema; si el navegador lo concede, los estilos
+`:fullscreen` garantizan el fondo y que la barra siga fijada. Un `fullscreenchange` que vuelva a
+`null` cierra el modo por clase, así que `Esc` del navegador y `Esc` de la página hacen lo mismo.
+La clase es la fuente de verdad del reparto; la API es un refuerzo, nunca un requisito.
+
+**Teclado virtual.** El `<meta name="viewport">` lleva `viewport-fit=cover` e
+`interactive-widget=resizes-content`: el área de composición encoge el viewport en vez de tapar el
+contenido. `window.visualViewport` (cuando existe) publica su altura en `--telefono-alto-vv` y
+repinta el canvas al abrir o cerrar el teclado; el marco descuenta esa altura, la barra y los insets
+del sistema, y centra el lienzo de 360×640 sin recortarlo. Todo el modo usa `dvh`/`dvw`, y los
+bordes usan `env(safe-area-inset-*)` para el notch y las barras del sistema. Los tres mandos
+táctiles miden al menos **44×44 CSS px** y llevan `aria-label` (los de icono, `title` y
+`aria-label`). Fuera del modo, la vista previa y los ocho tiradores siguen intactos: ninguna de
+estas reglas CSS se aplica sin la clase y el JS no escribe en OPFS, en `estadoPestana` ni en
+`#codigo`. La comparación visual en un móvil real queda pendiente de la Fase G.
+
 `vista-previa.js` sigue siendo el pintor y el dueño del modelo (`pintarModelo`, `modeloActual`,
 evento `apkc:previa-actualizada`): la vista solo aporta la caja y las pestañas. Al entrar en Pantalla,
 `vistas.js` llama a `repintarVistaPrevia()` y a `PREVIA_PANEL.repintar()`: compilar puede ocurrir con

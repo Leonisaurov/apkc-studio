@@ -1476,6 +1476,44 @@ for (const id of ["#previa-render", "#vista-cuerpo"]) {
 if (!/superficie === "panel" \? el\("previa-render"\) : el\("vista-cuerpo"\)/.test(fuentePreviaEstado)) {
   mal("previa-panel.js no aplica la pantalla completa al contenedor de cada superficie");
 }
+
+// Modo teléfono: entrada explícita, barra mínima de salida y acción, fallback por clase y teclado
+// virtual. Estas aseveraciones son estáticas; la comparación visual en móvil real queda para Fase G.
+for (const [id, que] of [
+  ["modo-telefono", "el botón de entrada al modo teléfono"],
+  ["telefono-barra", "la barra mínima del modo teléfono"],
+  ["telefono-salir", "el botón de salida del modo teléfono"],
+  ["telefono-accion", "el botón de acción del modo teléfono"],
+]) {
+  if (!new RegExp(`id="${id}"`).test(html)) mal(`index.html no lleva ${que} (id="${id}")`);
+}
+if (!/name="viewport"[^>]*viewport-fit=cover[^>]*interactive-widget=resizes-content/.test(html)) {
+  mal("index.html no pone viewport-fit=cover e interactive-widget=resizes-content en el viewport");
+}
+for (const [id, que] of [["telefono-salir", "salida"], ["telefono-accion", "acción"], ["modo-telefono", "entrada"]]) {
+  if (!new RegExp(`id="${id}"[^>]*[\\s\\S]{0,220}?aria-label="`).test(html)) {
+    mal(`index.html no da aria-label al botón de ${que} del modo teléfono (${id})`);
+  }
+}
+if (!/modo-telefono/.test(fuentePreviaEstado) || !/visualViewport/.test(fuentePreviaEstado) ||
+    !/requestFullscreen/.test(fuentePreviaEstado) || !/fullscreenchange/.test(fuentePreviaEstado)) {
+  mal("previa-panel.js no implementa el modo teléfono con Fullscreen API, fallback por clase y visualViewport");
+}
+if (!/dvh/.test(fuenteEstilo) || !/dvw/.test(fuenteEstilo)) {
+  mal("style.css no usa unidades dvh/dvw en el modo teléfono");
+}
+if (!/env\(safe-area-inset-/.test(fuenteEstilo)) {
+  mal("style.css no usa env(safe-area-inset-*) para notch y barras del sistema");
+}
+if (!/min-width:\s*44px/.test(fuenteEstilo) || !/min-height:\s*44px/.test(fuenteEstilo)) {
+  mal("style.css no garantiza controles táctiles de 44×44 px en el modo teléfono");
+}
+if (!/:fullscreen/.test(fuenteEstilo) || !/\.modo-telefono/.test(fuenteEstilo)) {
+  mal("style.css no tiene estilos :fullscreen y .modo-telefono para el modo teléfono");
+}
+if (!/name="viewport"[^>]*width=device-width/.test(html)) {
+  mal("index.html perdió width=device-width en el viewport");
+}
 // Las dos superficies comparten el motor de capa desprendida, y el arrastre empieza en el asa: la
 // cabecera entera ya no mueve nada.
 for (const superficie of ["panel", "vista"]) {

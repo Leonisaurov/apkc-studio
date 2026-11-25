@@ -2,7 +2,7 @@
 <html lang="es">
 <head>
 <meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, interactive-widget=resizes-content">
 <title>apkc studio — crear una app Android sin Gradle</title>
 <meta name="description" content="Crea, edita, compila y firma apps Android en el navegador. Sin Gradle, sin backend y sin dependencias.">
 <meta name="theme-color" content="#1e1e1e">
@@ -1019,6 +1019,12 @@
               <strong>Emulador</strong> pinta el modelo de <code>apkc preview</code> con lo que ejecutó
               la app. Es una aproximación declarada y de solo lectura: el layout no se arrastra ni se
               edita, aunque sobre el emulador se puede soltar un <code>.apk</code> para abrirlo.</p>
+            <button id="modo-telefono" class="previa-control telefono-entrar" type="button"
+                    title="Abrir el emulador a pantalla completa, como un teléfono"
+                    aria-label="Abrir el emulador en modo teléfono">
+              <svg viewBox="0 0 24 24" aria-hidden="true"><rect x="6" y="2" width="12" height="20" rx="2"/><path d="M11 18h2"/></svg>
+              <span class="texto-boton">Modo teléfono</span>
+            </button>
           </div>
           <div class="previa-modos previa-modos-vista" role="tablist" aria-label="Contenido de la pantalla">
             <button id="vista-modo-previa" class="previa-modo activo" type="button" role="tab"
@@ -1361,6 +1367,22 @@
       <span class="separador">·</span><span>UTF-8</span>
     </span>
   </footer>
+</div>
+
+<!-- Barra mínima del modo teléfono: sale y una acción. Vive fuera de .marco para seguir visible
+     cuando el navegador pone el documento en :fullscreen; el modo se activa con #modo-telefono. -->
+<div id="telefono-barra" class="telefono-barra" role="toolbar" aria-label="Barra del modo teléfono" hidden>
+  <button id="telefono-salir" class="telefono-control" type="button" title="Salir del modo teléfono (Esc)"
+          aria-label="Salir del modo teléfono" aria-keyshortcuts="Escape">
+    <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M9 4v5H4"/><path d="M15 4v5h5"/><path d="M9 20v-5H4"/><path d="M15 20v-5h5"/></svg>
+    <span class="texto-boton">Salir</span>
+  </button>
+  <span id="telefono-barra-titulo" class="telefono-barra-titulo">Modo teléfono</span>
+  <button id="telefono-accion" class="telefono-control" type="button" title="Reiniciar el emulador desde onCreate"
+          aria-label="Reiniciar el emulador">
+    <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M20 11a8 8 0 10-2.3 5.7"/><path d="M20 4v7h-7"/></svg>
+    <span class="texto-boton">Reiniciar</span>
+  </button>
 </div>
 
 <input type="file" id="subir-ficheros" multiple hidden aria-label="Subir archivos al proyecto">
