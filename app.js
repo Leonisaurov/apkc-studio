@@ -1357,9 +1357,9 @@ import android.widget.TextView;
 // Cronometro con Handler.postDelayed: la propia actividad es el Runnable que se reprograma cada
 // 50 ms mientras corre. El tiempo sale de SystemClock.elapsedRealtime() (monotonico, no de pared),
 // asi que pausar y reanudar suma sin deriva; el tick solo repinta.
-// Ademas del tiempo se cuentan los pulsos: es lo unico que apkc preview puede ver del reloj, que
-// no finge (no hay SystemClock en sus stubs), y en el aparato sirve para comparar el tick real con
-// el logico de la sonda.
+// Ademas del tiempo se cuentan los pulsos: apkc preview SI tiene SystemClock.elapsedRealtime y
+// postDelayed en sus stubs, y su reloj logico avanza con --avanzar N; cada tick del Runnable
+// cuenta un pulso comparable con el del aparato.
 // Las cuentas de tiempo van partidas en metodos pequenos porque cada expresion deja su registro
 // reservado para todo el metodo en el emisor Go.
 public class MainActivity extends Activity implements View.OnClickListener, Runnable {

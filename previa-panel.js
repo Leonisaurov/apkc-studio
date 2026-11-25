@@ -279,7 +279,7 @@ export function resumenEjecucion(modelo) {
     .map(comoTexto)
     .filter((a) => a.trim() !== "");
   // la consola de la app es un canal aparte del registro: cada línea lleva su origen y el orden en
-  // que se emitió, porque el reloj no existe en el intérprete y no se finge
+  // que se emitió, porque el reloj lógico no da una hora de pared y esa hora no se finge
   const consola = (Array.isArray(ejecucion.consola) ? ejecucion.consola : [])
     .filter((l) => l && typeof l === "object")
     .map((l) => ({ origen: comoTexto(l.origen), texto: comoTexto(l.texto), secuencia: comoCuenta(l.secuencia) }))
@@ -380,6 +380,94 @@ function argvDePasos(pasos) {
 // la misma máquina para todos los pasos, sin repetir los anteriores.
 export function argvDeOrden(paso, idSesion) {
   return ["preview", "--sesion", String(idSesion), ...argvDePasos([paso])];
+}
+
+// Cadencia del pulso de pared que mueve el reloj lógico de la pestaña. Coincide con los 50 ms con
+// los que la plantilla `cronometro` se reprograma; el intérprete solo acepta milisegundos enteros y
+// no negativos, así que la orden se recorta antes de mandarla.
+export const LATIDO_RELOJ_MS = 50;
+
+// Una orden de reloj para la sesión viva: el mismo `--sesion` que un clic, con `--avanzar <ms>`.
+// Avanzar no es una interacción: no entra en `guion` ni en `pulsos` y no cambia el id de sesión.
+// Es la forma que ya tenía el comando, LA MISMA tanto para el bombeo como para quien avance a mano.
+export function argvDeAvance(idSesion, ms = LATIDO_RELOJ_MS) {
+  const numero = Number(ms);
+  const delta = Number.isFinite(numero) && numero > 0 ? Math.floor(numero) : 0;
+  return ["preview", "--sesion", String(idSesion), "--avanzar", String(delta)];
+}
+
+// El cronómetro corre cuando el TextView `estado` dice «corriendo - pulsos N». Se lee del MODELO
+// publicado por `apkc preview`, no del documento: es estado de la ejecución y viaja en
+// `ejecucion.capturas`. Se acepta `id/estado` (el nombre que da la tabla de recursos) y el sufijo
+// `/estado` para no depender de la tabla de un apk de prueba.
+export function cronometroCorriendo(modelo) {
+  if (!modelo || typeof modelo !== "object") return false;
+  const resumen = resumenEjecucion(modelo);
+  const porCaptura = !!resumen && resumen.capturas.some((c) =>
+    (c.id === "estado" || c.id.endsWith("/estado")) && /^corriendo\b/.test(c.texto));
+  if (porCaptura) return true;
+  // el mismo estado viaja al nodo como `textoDinamico`, que es lo que ve el canvas: si un apk de
+  // prueba no trae capturas, el texto pintado sigue bastando para saber que el Runnable corre
+  return nodosAplanados(modelo).some(({ nodo }) =>
+    typeof nodo.id === "string" && (nodo.id === "estado" || nodo.id.endsWith("/estado")) &&
+    /^corriendo\b/.test(String(nodo.textoDinamico || "")));
+}
+
+// Bombeo del reloj lógico en la ruta VIVA de la pestaña. No sabe nada del DOM: el panel le entrega
+// cómo ejecutar la orden, cómo leer el modelo y un reloj de pared (el del navegador, o uno falso
+// en la prueba de node). El reloj no corre solo: lo mueve `--avanzar` con una cadencia de pared
+// mientras el modelo siga diciendo que la app tiene un Runnable pendiente. Devuelve el control
+// para arrancarlo, pararlo y contar los avances; ninguna prueba lo enciende por su cuenta.
+export function crearBombeoReloj({
+  ejecutar, modeloActual, idSesion, puedeAvanzar, cadencia = LATIDO_RELOJ_MS,
+  estaCorriendo = cronometroCorriendo,
+  temporizador = typeof setTimeout === "function" ? setTimeout : null,
+  cancelar = typeof clearTimeout === "function" ? clearTimeout : null,
+} = {}) {
+  let activo = false;
+  let enCurso = false;
+  let manga = 0;
+  let avances = 0;
+
+  // Se reprograma al terminar cada orden, no con un intervalo fijo: así dos golpes de reloj no se
+  // amontonan aunque el comando vaya despacio, y el worker sigue con su cola de una orden por vez.
+  function programar() {
+    if (!activo || manga || typeof temporizador !== "function") return;
+    if (typeof modeloActual !== "function" || !estaCorriendo(modeloActual())) return;
+    manga = temporizador(latir, cadencia);
+  }
+
+  async function latir() {
+    manga = 0;
+    if (enCurso) { programar(); return; }
+    if (!activo || typeof modeloActual !== "function" || !estaCorriendo(modeloActual())) return;
+    if (typeof puedeAvanzar === "function" && !puedeAvanzar()) { programar(); return; }
+    enCurso = true;
+    let bien = false;
+    try {
+      const id = typeof idSesion === "function" ? idSesion() : idSesion;
+      bien = await ejecutar(argvDeAvance(id, cadencia)) !== false;
+      if (bien) avances++;
+    } catch (e) {
+      bien = false;
+    } finally {
+      enCurso = false;
+    }
+    // Si el modelo ya no dice «corriendo» (pausa, reinicio, apagado) no se programa otro golpe.
+    if (bien) programar();
+  }
+
+  return {
+    arrancar() { activo = true; programar(); },
+    detener() {
+      activo = false;
+      if (manga && typeof cancelar === "function") cancelar(manga);
+      manga = 0;
+    },
+    latir,
+    avances: () => avances,
+    activo: () => activo,
+  };
 }
 
 // Solo para el arranque clásico sin sesión (y para las pruebas de fixture con un binario anterior
@@ -855,6 +943,30 @@ export function crearPreviaPanel({ hospedador, proyecto, estadoPestana, editor, 
   // negro y evita ejecutar; encender vuelve a pedir `apkc preview` sobre la copia estable.
   let apagado = leerClave(CLAVE_ENERGIA, "encendido") === "apagado";
   let pantalla = leerPantalla();
+  // El reloj lógico no avanza solo: esta pestaña lo bombea con `--avanzar` mientras el modelo diga
+  // que el cronómetro corre. Es un temporizador SOLO de esta ruta viva: el comando `apkc preview`
+  // y las pruebas de node siguen siendo deterministas porque nadie más lo enciende. La sesión, el
+  // guion y los clics no se tocan; avanzar no es una interacción del usuario.
+  const bombeoReloj = crearBombeoReloj({
+    cadencia: LATIDO_RELOJ_MS,
+    idSesion: () => idSesion,
+    modeloActual: () => modeloActual(),
+    puedeAvanzar: () => !pulsando && !apagado,
+    ejecutar: async (argv) => {
+      await hospedador.cwd(carpeta);
+      const r = await hospedador.ejecutar(argv);
+      recordarInstancias(r);
+      const modelo = modeloDeSalida(r && r.consola);
+      if (!modelo) {
+        mensajeVistaPreviaRender("el reloj no pudo avanzar: la orden no devolvió un modelo");
+        return false;
+      }
+      // es el MISMO modelo de la MISMA sesión: no reinicia `pulsos` ni el id al repintar
+      modeloDeClics = modelo;
+      pintarVistaPrevia(modelo);
+      return true;
+    },
+  });
   let inspectorAbierto = {
     panel: leerClave(CLAVE_INSPECTOR_PANEL, "1") !== "0",
     vista: leerClave(CLAVE_INSPECTOR_VISTA, "1") !== "0",
@@ -1818,7 +1930,11 @@ export function crearPreviaPanel({ hospedador, proyecto, estadoPestana, editor, 
       // identidad se guarda ANTES de avisar: el listener del evento ya puede reconocerlo como
       // «modelo de un clic» y no reiniciar `pulsos`, ni siquiera si el repintado llega más tarde.
       modeloDeClics = modelo;
-      return pintarVistaPrevia(modelo);
+      const pintado = pintarVistaPrevia(modelo);
+      // el clic que arranca un Runnable pendiente enciende el pulso de pared; si la app no tiene
+      // tareas vivas, `arrancar` no programa ningún golpe
+      bombeoReloj.arrancar();
+      return pintado;
     } catch (e) {
       guion.length = desde;
       const motivo = "no se pudo ejecutar la orden: " + (e && e.message ? e.message : e);
@@ -2203,6 +2319,33 @@ export function crearPreviaPanel({ hospedador, proyecto, estadoPestana, editor, 
     return pintado;
   }
 
+  // Avanzar a mano usa la MISMA orden y la MISMA sesión que el bombeo: es la opción que el
+  // intérprete ya tenía por línea de orden, conservada en la pestaña. No añade pasos al guion ni
+  // cambia el id de sesión; solo mueve el reloj lógico y repinta lo que la app publica.
+  async function avanzarManualmente(ms) {
+    if (apagado || pulsando) return null;
+    const numero = Number(ms);
+    const delta = Number.isFinite(numero) && numero > 0 ? Math.floor(numero) : 0;
+    pulsando = true;
+    mensajeVistaPreviaRender("Avanzando el reloj " + delta + " ms…");
+    try {
+      await hospedador.cwd(carpeta);
+      const r = await hospedador.ejecutar(argvDeAvance(idSesion, delta));
+      recordarInstancias(r);
+      const modelo = modeloDeSalida(r && r.consola);
+      if (!modelo) return null;
+      modeloDeClics = modelo;
+      const pintado = pintarVistaPrevia(modelo);
+      bombeoReloj.arrancar();
+      return pintado;
+    } catch (e) {
+      mensajeVistaPreviaRender("no se pudo avanzar el reloj: " + (e && e.message ? e.message : e));
+      return null;
+    } finally {
+      pulsando = false;
+    }
+  }
+
   // Despliega el menú de opciones: añade `--menu` al guion y pinta los ítems que la app construyó
   // con `menu.add` en su `onCreateOptionsMenu`. Sin ejecución no se inventa nada: se pide compilar.
   async function abrirMenu() {
@@ -2268,6 +2411,9 @@ export function crearPreviaPanel({ hospedador, proyecto, estadoPestana, editor, 
   // Un modelo nuevo (compilación, apk soltada, reinicio) empieza otra ejecución: los clics y las
   // órdenes del menú anteriores dejan de valer y el desplegable se cierra.
   function reiniciarGuion() {
+    // una apk o un build nuevo cierra la máquina anterior: ningún golpe pendiente puede avanzar
+    // el reloj de la sesión que se acaba de descartar
+    bombeoReloj.detener();
     cerrarCampoTexto(false);
     pulsos = [];
     guion = [];
@@ -2548,6 +2694,7 @@ export function crearPreviaPanel({ hospedador, proyecto, estadoPestana, editor, 
     if (apagado) {
       // apagar no ejecuta ni borra la última apk: solo deja el lienzo en negro. El campo de texto
       // se cierra y lo tecleado deja de valer, como el foco de un dispositivo que se apaga.
+      bombeoReloj.detener();
       cerrarCampoTexto(false);
       textosEscritos.clear();
       cerrarProgresoApk();
@@ -3481,6 +3628,9 @@ export function crearPreviaPanel({ hospedador, proyecto, estadoPestana, editor, 
       // el modelo cambió: el canvas y los dos paneles se pintan ya. Un rAF dejaría la consola con
       // las capturas del build anterior justo cuando el preview falla, que es cuando más importa.
       pintarRender(detalle.mensaje);
+      // un modelo que llega de fuera (apk soltada, build, encendido) también puede traer el
+      // cronómetro corriendo: el pulso se enciende igual que tras un clic
+      bombeoReloj.arrancar();
       // el layout del modelo puede decir cuál es el layout del proyecto si aún no hay ninguno vivo
       if (modo === "vivo" && !modeloVivo) programarVivo(ESPERA_PREVIA);
     });
@@ -5121,6 +5271,8 @@ export function crearPreviaPanel({ hospedador, proyecto, estadoPestana, editor, 
     modeloParaEmulador,
     // un clic desde fuera (la prueba de chromium): la misma orden que el puntero del canvas
     pulsar,
+    // avanzar el reloj a mano sobre la sesión viva, sin tocar el guion de clics
+    avanzar: avanzarManualmente,
     // teclear desde fuera (pruebas y consola): el mismo paso `--escribir` que el campo real
     escribir: enviarEscritura,
     // lectura para las pruebas: el campo real y el EditText con el foco en este momento
