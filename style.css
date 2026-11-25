@@ -820,11 +820,13 @@ html.modo-telefono {
   /* el foco no quede debajo de la barra al abrir el teclado virtual */
   scroll-padding-bottom: max(4.5rem, env(safe-area-inset-bottom, 0px));
 }
+/* No se fija `overflow` ni en `html` ni en `body`: recortarlo aquí anularía el
+   `scroll-padding-bottom` de arriba y dejaría el foco debajo de la barra. El único
+   scroller es el documento, que ya mide `100dvh` y respeta los insets. */
 html.modo-telefono body {
   width: 100dvw;
   height: 100dvh;
   margin: 0;
-  overflow: clip;
 }
 
 /* Se pliega todo el cromo del editor: título, actividad, explorador, pestañas

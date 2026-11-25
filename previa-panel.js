@@ -990,7 +990,7 @@ export function crearPreviaPanel({ hospedador, proyecto, estadoPestana, editor, 
   // Modo teléfono: la clase `.modo-telefono` en <html> es el camino robusto (móvil donde la
   // Fullscreen API no existe o se rechaza); la API se pide además como refuerzo. `vv` es el
   // visualViewport, que encoge al abrirse el teclado virtual.
-  const telefono = { activo: false, superficie: null, vv: null };
+  const telefono = { activo: false, superficie: null, vv: null, foco: null };
   let ultimaMeta = null;
   // el apk que respalda el modelo en pantalla: el del build o la copia estable. Los clics repiten
   // `apkc preview` sobre el mismo fichero, así no dependen de que `build/app.apk` siga ahí.
@@ -2873,6 +2873,9 @@ export function crearPreviaPanel({ hospedador, proyecto, estadoPestana, editor, 
     if (modo && modo.getAttribute("aria-selected") !== "true") modo.click();
     telefono.activo = true;
     telefono.superficie = superficie;
+    // se guarda antes de que la clase oculte los controles: es el destino del foco al salir
+    telefono.foco = typeof document !== "undefined" && document.activeElement
+      ? document.activeElement : null;
     document.documentElement.classList.add("modo-telefono");
     const barra = el("telefono-barra");
     if (barra) barra.hidden = false;
@@ -2893,6 +2896,13 @@ export function crearPreviaPanel({ hospedador, proyecto, estadoPestana, editor, 
     const barra = el("telefono-barra");
     if (barra) barra.hidden = true;
     salirFullscreen();
+    // WCAG 2.4.3/2.4.7: tras mostrar los controles, el foco vuelve al botón que abrió el modo
+    const objetivo = telefono.foco;
+    telefono.foco = null;
+    if (objetivo && typeof objetivo.focus === "function" && typeof document !== "undefined" &&
+        document.documentElement && document.documentElement.contains(objetivo)) {
+      objetivo.focus();
+    }
   }
 
   function aplicarCompleta(superficie, valor) {
@@ -3165,6 +3175,9 @@ export function crearPreviaPanel({ hospedador, proyecto, estadoPestana, editor, 
     if (typeof document !== "undefined") {
       document.addEventListener("fullscreenchange", () => {
         if (!document.fullscreenElement && telefono.activo && telefono.superficie) {
+          // el Esc que cierra el teclado de un campo también dispara fullscreenchange: ese Esc es
+          // del campo, no del modo (misma guardia que el manejador de `keydown`)
+          if (/^(INPUT|TEXTAREA|SELECT)$/.test(document.activeElement?.tagName)) return;
           aplicarCompleta(telefono.superficie, false);
         }
       });

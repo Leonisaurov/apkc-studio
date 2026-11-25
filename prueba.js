@@ -1514,6 +1514,28 @@ if (!/:fullscreen/.test(fuenteEstilo) || !/\.modo-telefono/.test(fuenteEstilo)) 
 if (!/name="viewport"[^>]*width=device-width/.test(html)) {
   mal("index.html perdió width=device-width en el viewport");
 }
+// Los tres hallazgos corregidos también son contrato estático: sin recorte en html/body (para
+// que `scroll-padding-bottom` siga sirviendo), con guardia de campo en `fullscreenchange` y con
+// foco restaurado al botón de entrada al salir (WCAG 2.4.3/2.4.7).
+const bloqueRaizTelefono = /html\.modo-telefono\s*\{([^}]*)\}/.exec(fuenteEstilo);
+const bloqueCuerpoTelefono = /html\.modo-telefono body\s*\{([^}]*)\}/.exec(fuenteEstilo);
+if (!bloqueRaizTelefono || !/scroll-padding-bottom/.test(bloqueRaizTelefono[1])) {
+  mal("style.css perdió scroll-padding-bottom en html.modo-telefono");
+}
+if (!bloqueCuerpoTelefono || /overflow/.test(bloqueCuerpoTelefono[1])) {
+  mal("style.css recorta el body del modo teléfono (overflow: clip/overflow-x: hidden)");
+}
+if (/html\.modo-telefono[^{}]*\{[^}]*overflow-x:\s*hidden/.test(fuenteEstilo)) {
+  mal("style.css fuerza overflow-x: hidden en el modo teléfono");
+}
+if (!/fullscreenchange[\s\S]{0,600}?document\.activeElement\?\.tagName/.test(fuentePreviaEstado)) {
+  mal("previa-panel.js no protege fullscreenchange cuando el foco está en un campo de texto");
+}
+if (!/telefono\.foco\s*=/.test(fuentePreviaEstado) ||
+    !/document\.documentElement\.contains\(objetivo\)/.test(fuentePreviaEstado) ||
+    !/objetivo\.focus\(\)/.test(fuentePreviaEstado)) {
+  mal("previa-panel.js no guarda ni restaura el foco al salir del modo teléfono");
+}
 // Las dos superficies comparten el motor de capa desprendida, y el arrastre empieza en el asa: la
 // cabecera entera ya no mueve nada.
 for (const superficie of ["panel", "vista"]) {
