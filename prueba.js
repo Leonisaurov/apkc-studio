@@ -1789,6 +1789,14 @@ if (!/export function reiniciarContadorDeSesion/.test(fuenteHospedador) ||
     !/cerradaAProposito/.test(fuenteHospedador)) {
   mal("la falsación no conserva el contador de la sesión: daría 1 en vez de 2");
 }
+// §326: el locale del arranque clásico se transporta a la sesión en APKC_SESION_LOCALE y se quita
+// del argv, porque `preview --sesion` solo registra `-sesion`. Sin esto la sesión vuelve a la base
+// en el primer `--pulsar`, aunque el panel siga enseñando el idioma elegido.
+if (!/APKC_SESION_LOCALE: localeArranque/.test(fuenteHospedador) ||
+    !/localeArranque = argumentoDe\(argv, "--locale"\)/.test(fuenteHospedador) ||
+    !/arranque\[i\] === "--locale"/.test(fuenteHospedador)) {
+  mal("el worker no transporta el locale al crear la sesión ni lo quita del argv de arranque");
+}
 const fuentePestanaSesion = fs.readFileSync(path.join(__dirname, "pestana.js"), "utf8");
 if (!/e\.data\.tipo === "apkc:fin-orden"/.test(fuentePestanaSesion) ||
     !/postMessage\(\{ tipo: "fin-orden"/.test(fuentePestanaSesion)) {

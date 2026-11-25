@@ -39,6 +39,7 @@ let ordenes = [];             // órdenes nuevas para el bucle Go, una por invoc
 const finOrdenes = new Map(); // id de orden → { resuelve }; lo llena `ejecutar`, lo vacía `fin-orden`
 let siguienteOrden = 0;
 let ultimoPreview = null;     // argv del `preview` que abrió la sesión: de aquí sale la apk
+let localeArranque = "";      // idioma de ese arranque: viaja a la sesión por APKC_SESION_LOCALE
 let ocupado = false;
 let cola = [];
 let entregarRaiz = null;
@@ -211,10 +212,20 @@ async function usarSesion(id, argv) {
       throw new Error("la sesión necesita un preview anterior con la apk: abre una apk o compila primero");
     }
     const go = new Go();
-    go.argv = ["apkc", "preview", "--sesion", id, ...ultimoPreview.slice(1)];
+    // El locale viaja en el entorno, no como bandera: `preview --sesion` solo registra `-sesion` y
+    // un `--locale` repetido en el argv de arranque haría fallar su FlagSet. La sesión lo lee una
+    // sola vez y lo conserva en las órdenes vivas, que no llevan esa bandera (§326).
+    const arranque = ultimoPreview.slice(1);
+    const sinLocale = [];
+    for (let i = 0; i < arranque.length; i++) {
+      if (arranque[i] === "--locale") { i += 1; continue; }
+      sinLocale.push(arranque[i]);
+    }
+    go.argv = ["apkc", "preview", "--sesion", id, ...sinLocale];
     go.env = {
       HOME: "/home/usuario", ANDROID_HOME: "/android", JAVA_HOME: "/jvm",
       APKC_SESION_ID: id,
+      APKC_SESION_LOCALE: localeArranque,
     };
     go.exit = (c) => {
       // Resolver _exitPromise aquí mataría la máquina en la primera orden: la sesión vive hasta
@@ -276,6 +287,7 @@ async function ejecutar(argv, env, idSesion) {
     // cerrar aquí convertiría cada clic en un arranque nuevo y el timeline volvería a empezar.
     if (sesion) await cerrarSesion();
     ultimoPreview = argv.slice();
+    localeArranque = argumentoDe(argv, "--locale") || "";
   }
 
   if (!bytesModule) {
