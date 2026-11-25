@@ -190,6 +190,44 @@ if (!leidoTraducido || leidoTraducido.paquete !== "com.hola.traducido") {
   }
 }
 
+// 2c-quater. Proxy de nodo del criterio de la Fase E (§362): `apkc preview` ya publica el tema en
+// los campos que el modelo tenía (`fondo` en la raíz, `color` en el texto) y las filas del adaptador
+// como `hijos` del ListView con su texto real. La vista consume ESE JSON, sin añadir claves ni
+// textos de señuelo. La comparación visual en navegador (CDP) queda pendiente: esta ronda no levanta
+// chromium y no puede falsificar lo que se ve, solo lo que el modelo entrega al pintor.
+const modeloConTema = JSON.parse(`{"paquete":"com.hola.tema","version":"0.1","actividad":".MainActivity","layout":"res/layout/main.xml","pantalla":{"x":0,"y":0,"ancho":360,"alto":640},"aproximado":true,"nodos":5,"ejecucion":{"actividad":"com.hola.tema.MainActivity","metodo":"onCreate","pasos":9},"raiz":{"tipo":"LinearLayout","ancho":"match_parent","alto":"match_parent","fondo":"#ffffff","rect":{"x":0,"y":0,"ancho":360,"alto":640},"hijos":[{"tipo":"TextView","id":"id/titulo","texto":"Tema","color":"#123456","ancho":"wrap_content","alto":"wrap_content","rect":{"x":8,"y":8,"ancho":64,"alto":24}},{"tipo":"ListView","id":"id/lista","ancho":"match_parent","alto":"wrap_content","rect":{"x":0,"y":40,"ancho":360,"alto":80},"hijos":[{"tipo":"TextView","id":"id/fila0","texto":"fila","textoDinamico":"Fila 0: Alfa","color":"#123456","ancho":"match_parent","alto":"wrap_content","rect":{"x":0,"y":40,"ancho":360,"alto":24}},{"tipo":"TextView","id":"id/fila1","texto":"fila","textoDinamico":"Fila 1: Beta","color":"#123456","ancho":"match_parent","alto":"wrap_content","rect":{"x":0,"y":64,"ancho":360,"alto":24}}]}]}}`);
+const lineaConTema = "un aviso suelto\n" + JSON.stringify(modeloConTema) + "\n[apkc] finished in 1ms\n";
+const leidoConTema = vistaPrevia.modeloDeSalida(lineaConTema);
+if (!leidoConTema) {
+  mal("Fase E: modeloDeSalida no lee el JSON con tema y filas");
+} else {
+  if (JSON.stringify(leidoConTema) !== JSON.stringify(modeloConTema)) {
+    mal("Fase E: la vista no consume el mismo JSON que apkc preview");
+  }
+  const filas = vistaPrevia.nodosAplanados(leidoConTema)
+    .filter((x) => x.nodo.id === "id/fila0" || x.nodo.id === "id/fila1");
+  if (filas.length !== 2) mal("Fase E: el adaptador no dejó dos filas en el modelo: " + filas.length);
+  const esperadas = ["Fila 0: Alfa", "Fila 1: Beta"];
+  for (let i = 0; i < filas.length; i++) {
+    const visible = vistaPrevia.textoDeNodo(filas[i].nodo);
+    if (visible !== esperadas[i]) mal("Fase E: la fila " + i + " dice " + JSON.stringify(visible));
+    if (filas[i].nodo.color !== "#123456") mal("Fase E: la fila " + i + " no trae el color del tema");
+  }
+  // las dos superficies (panel y Pantalla) pasan por el mismo camino de mínimos y reescalado
+  const paraEmulador = previaPanel.modeloParaEmulador(leidoConTema, 360, 720);
+  if (paraEmulador.raiz.fondo !== "#ffffff") {
+    mal("Fase E: el fondo del tema no sobrevive al modelo del emulador");
+  }
+  const rects = vistaPrevia.rectsEscalados(paraEmulador, 360, 720);
+  if (!rects.some((r) => r.fondo === "#ffffff")) mal("Fase E: el pintor no ve el fondo del tema");
+  if (!rects.some((r) => r.colorTexto === "#123456")) mal("Fase E: el pintor no ve el color del tema");
+  const textos = rects.map((r) => r.texto).filter(Boolean);
+  for (const esperado of esperadas) {
+    if (!textos.includes(esperado)) mal("Fase E: el pintor no ve la fila " + JSON.stringify(esperado));
+  }
+  if (textos.some((t) => /FALLO/.test(t))) mal("Fase E: apareció texto de señuelo FALLO en el modelo");
+}
+
 // 2d. las cinco apps de banco/apps-ejemplo son plantillas de verdad: su opcion esta en el selector
 //     de la pagina y buildProject escribe sus fuentes completas, no el esqueleto de Hola mundo.
 //     e2e.sh no las compila todavia; la compilacion se midio en el banco y esta prueba vigila que
