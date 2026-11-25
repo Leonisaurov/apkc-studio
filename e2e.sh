@@ -81,6 +81,20 @@ printf 'dex' >"$TMP/studio-aab-src/base/dex/classes.dex"
 avisa() { printf '  %s\n' "$*"; }
 falla() { FALLOS=$((FALLOS + 1)); avisa "FALLO: $*"; }
 
+# Un único preflight para las cuatro ramas de omisión que permitían decir «todo en orden» sin
+# pestaña. Con EXIGIR_PESTANA=0 se conserva el comportamiento antiguo para corridas parciales.
+EXIGIR_PESTANA=${EXIGIR_PESTANA:-1}
+APK_FIXTURE=${APK_FIXTURE:-$(find "$TMP/studio-e2e-java" -name app.apk -path "*/build/*" 2>/dev/null | head -1)}
+preflight_pestana() {
+  [ "$EXIGIR_PESTANA" = 1 ] || return 0
+  faltan=""
+  [ -n "$APK_FIXTURE" ] || faltan="$faltan APK_FIXTURE"
+  [ -f "${APKC_WASM:-}" ] || faltan="$faltan APKC_WASM"
+  [ -n "$CHROME" ] || faltan="$faltan CHROME"
+  [ -z "${STUDIO_NO_BROWSER:-}" ] || faltan="$faltan STUDIO_NO_BROWSER"
+  [ -z "$faltan" ] || falla "pestaña omitida: falta$faltan"
+}
+
 # 0. fixtures que antes se esperaban de una sesión anterior. En un runner limpio no existen y
 # la pestaña se omitía en silencio; aquí se generan con el mismo buildProject de la página.
 sembrar_proyecto() { # $1 carpeta, $2 package, $3 plantilla
@@ -426,6 +440,8 @@ variancia() { # $1 nombre, $2 kotlin (0/1)
 variancia java 0
 variancia kotlin 1
 
+preflight_pestana
+
 # 3. el navegador real, si esta y si no se pidio omitirlo: el DOM, el click de descarga y el
 #    localStorage bajo file:// son justo lo que node no puede ejercitar
 if [ -z "${STUDIO_NO_BROWSER:-}" ] && [ -n "$CHROME" ]; then
@@ -450,7 +466,6 @@ fi
 
 # 4. la pestaña con apkc.wasm dentro de chromium: crea, edita en OPFS, sobrevive a recargar y
 #    firma. Solo se prueba si hay binario wasm; sin él esta parte queda avisada, no dada por buena.
-APK_FIXTURE=$(find "$TMP/studio-e2e-java" -name app.apk -path "*/build/*" 2>/dev/null | head -1)
 if [ -n "${APKC_WASM:-}" ] && [ -f "$APKC_WASM" ] && [ -n "$APK_FIXTURE" ] && [ -n "$CHROME" ]; then
   if ! APKC_WASM="$APKC_WASM" APK_EJEMPLO="$APK_FIXTURE" KS_EJEMPLO="${KS_EJEMPLO:-$HOME/.android/debug.keystore}" \
        KS_RELEASE="$KS_RELEASE" AAB_EJEMPLO="$AAB_EJEMPLO" \
@@ -464,7 +479,12 @@ if [ -n "${APKC_WASM:-}" ] && [ -f "$APKC_WASM" ] && [ -n "$APK_FIXTURE" ] && [ 
     grep -q 'v1 scheme (JAR signing): true' "$TMP/studio-pestana-verify.log" || falla "apk de pestaña sin v1"
     grep -q 'v2 scheme (APK Signature Scheme v2): true' "$TMP/studio-pestana-verify.log" || falla "apk de pestaña sin v2"
     if ! zipcheck "$firmada" >/dev/null 2>&1; then falla "zipcheck rechaza la apk de la pestaña"; fi
-    avisa "pestaña: $(grep -c '^  ok' "$TMP/studio-pestana.log") comprobaciones, apk firmada dentro de chromium de $(wc -c <"$firmada" | tr -d ' ') bytes y verificada"
+    n=$(grep -c '^  ok' "$TMP/studio-pestana.log")
+    [ "$n" -gt 0 ] || falla "pestaña: 0 comprobaciones"
+    if grep -q 'sin chromium\|sin APKC_WASM' "$TMP/studio-pestana.log"; then
+      falla "pestaña: aviso de omisión en el log"
+    fi
+    avisa "pestaña: $n comprobaciones, apk firmada dentro de chromium de $(wc -c <"$firmada" | tr -d ' ') bytes y verificada"
 
     # 4a-bis. el apk firmado en la pestaña con el keystore de release: apksigner tiene que leer el
     # certificado que la página enseñó antes de firmar, no el de debug.
