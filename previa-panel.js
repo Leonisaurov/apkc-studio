@@ -284,6 +284,18 @@ export function argvDePrevia(guion, apk, locale = "") {
 // El swap que nace de un build lleva además `--intercambiar-recursos build/app.apk` en la MISMA orden:
 // el apk se ha escrito antes en la zona OPFS de la sesión y el intérprete re-parsea ARSC/AXML sin
 // reiniciar. El swap avanzado de un dex suelto no lo lleva, porque no hay apk nuevo que repintar.
+
+// El apk del hot swap solo puede venir del `build/` de la propia pestaña. `fs-fragmento.js` acota
+// la raíz a `/`, pero la ruta cruza un postMessage y no hay que fiarse de ella: se rechaza la barra
+// inicial, las barras inversas, cualquier `..` y todo lo que no empiece por `build/`. Una ruta
+// rechazada se omite, así que la orden sigue siendo de solo código, como la del dex suelto.
+function rutaDeRecursosValida(ruta) {
+  if (typeof ruta !== "string" || !ruta || ruta.startsWith("/") || ruta.includes("\\")) return false;
+  const partes = ruta.split("/");
+  return partes.length >= 2 && partes[0] === "build" &&
+    partes.every((parte) => parte !== "" && parte !== "." && parte !== "..");
+}
+
 function argvDePasos(pasos) {
   const argv = [];
   for (const paso of Array.isArray(pasos) ? pasos : []) {
@@ -298,7 +310,9 @@ function argvDePasos(pasos) {
     }
     else if (tipo === "intercambiar") {
       argv.push("--intercambiar", String(paso.firma) + "=" + String(paso.ruta));
-      if (paso.recursosRuta) argv.push("--intercambiar-recursos", String(paso.recursosRuta));
+      if (paso.recursosRuta && rutaDeRecursosValida(paso.recursosRuta)) {
+        argv.push("--intercambiar-recursos", String(paso.recursosRuta));
+      }
     } else argv.push("--pulsar", String(paso && paso.valor));
   }
   return argv;
@@ -2091,8 +2105,9 @@ export function crearPreviaPanel({ hospedador, proyecto, estadoPestana, editor, 
     registrarSwap("intercambio automático desde " + nombre + ": " + String(firma || ""), "aviso");
     const copia = new Uint8Array(bytes || []);
     const archivo = { name: nombre, arrayBuffer: async () => copia.buffer };
-    const recursos = apkBytes && apkBytes.length
-      ? { bytes: apkBytes, ruta: "build/app.apk" }
+    const rutaRecursosBuild = "build/app.apk";
+    const recursos = apkBytes && apkBytes.length && rutaDeRecursosValida(rutaRecursosBuild)
+      ? { bytes: apkBytes, ruta: rutaRecursosBuild }
       : null;
     const pintado = await intercambiarDexSoltado(archivo, SUPERFICIES[0].id, firma, recursos);
     if (!pintado) return null;

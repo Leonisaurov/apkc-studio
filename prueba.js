@@ -1742,6 +1742,19 @@ if (JSON.stringify(previaPanel.argvDeOrden({
 ])) {
   mal("el swap de un dex suelto no debe llevar --intercambiar-recursos");
 }
+// Defensa en profundidad: la ruta del apk cruza un postMessage, así que `../../etc/passwd` no
+// puede convertirse en `--intercambiar-recursos` aunque el paso la traiga. La orden rechazada
+// sigue siendo de solo código, sin inventar recursos ni romper el swap avanzado de arriba.
+for (const rutaMala of ["../../etc/passwd", "/etc/passwd", "etc/passwd",
+  "build/../secreto.apk", "build//app.apk", "build/"]) {
+  const argv = previaPanel.argvDeOrden({
+    tipo: "intercambiar", firma: "Lx;/m()V", ruta: "/previa-soltada/intercambio-3.dex",
+    recursosRuta: rutaMala,
+  }, "s1");
+  if (argv.includes("--intercambiar-recursos") || argv.includes(rutaMala)) {
+    mal(`argvDeOrden aceptó la ruta de recursos ${rutaMala}: ${JSON.stringify(argv)}`);
+  }
+}
 const fuenteSwapPestana = fs.readFileSync(path.join(__dirname, "pestana.js"), "utf8");
 if (!/PREVIA_PANEL\.intercambiarDelBuild\(dex, firma, build\.apk\)/.test(fuenteSwapPestana)) {
   mal("pestana.js no manda el apk del build junto al dex al intercambiar");
