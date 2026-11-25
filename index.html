@@ -774,7 +774,22 @@
             </div>
           </div>
 
-          <div class="panel-inferior" id="panel-inferior" hidden>
+          <div class="panel-inferior modulo" id="panel-inferior" data-modulo="compilacion" hidden>
+            <div class="modulo-cab">
+              <button class="modulo-asa" type="button" tabindex="-1" title="Mover la consola de compilación"
+                      aria-label="Mover la consola de compilación"></button>
+              <span class="modulo-titulo">Consola de compilación</span>
+            </div>
+            <div class="modulo-tiradores" aria-hidden="true">
+              <span class="modulo-tirador" data-eje="norte"></span>
+              <span class="modulo-tirador" data-eje="sur"></span>
+              <span class="modulo-tirador" data-eje="este"></span>
+              <span class="modulo-tirador" data-eje="oeste"></span>
+              <span class="modulo-tirador" data-eje="noreste"></span>
+              <span class="modulo-tirador" data-eje="noroeste"></span>
+              <span class="modulo-tirador" data-eje="sureste"></span>
+              <span class="modulo-tirador" data-eje="suroeste"></span>
+            </div>
             <div class="panel-tabs" role="tablist" aria-label="Panel inferior">
               <button class="panel-tab activo" type="button" role="tab" aria-selected="true" data-panel="salida">
                 <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 6h16v12H4z"/><path d="M7 10l3 2-3 2"/></svg>

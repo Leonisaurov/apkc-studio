@@ -2836,6 +2836,24 @@ if (!/id="previa-consola"[^>]*aria-label="Consola de la app"/.test(html)) {
   mal("el panel de salida no se llama «Consola de la app»");
 }
 if (!/id="consola-pestana"/.test(html)) mal("la consola de los comandos desapareció del panel inferior");
+
+// §343: el panel inferior es el módulo `compilacion`. El id y el `aria-controls` del botón
+// «Compilar» son contrato: si falta cualquiera de los dos, la prueba debe fallar aquí.
+if (!/id="panel-inferior"/.test(html)) mal('index.html no tiene id="panel-inferior"');
+if (!/aria-controls="panel-inferior"/.test(html)) mal('index.html no tiene aria-controls="panel-inferior"');
+if (!/id="panel-inferior"[^>]*data-modulo="compilacion"/.test(html)) {
+  mal('index.html no declara #panel-inferior como módulo "compilacion"');
+}
+const ejesModulo = [...html.matchAll(/data-eje="([^"]+)"/g)].map((m) => m[1]);
+for (const eje of ["norte", "sur", "este", "oeste", "noreste", "noroeste", "sureste", "suroeste"]) {
+  if (!ejesModulo.includes(eje)) mal(`falta el tirador ${eje} del módulo compilacion`);
+}
+if (/height: 34vh/.test(fuenteEstilo) || !/height: var\(--modulo-alto/.test(fuenteEstilo)) {
+  mal("style.css no sustituye el alto fijo del panel inferior por la geometría del módulo");
+}
+if (!/aplicarModuloCompilacion/.test(pestana)) {
+  mal("pestana.js no aplica la geometría del módulo al panel inferior");
+}
 // el canvas del render se puede pulsar: sin foco ni manejador no habría forma de tocar la app
 if (!/<canvas id="previa-lateral-canvas"[^>]*tabindex="0"/.test(html)) {
   mal("el canvas del render no es enfocable: no se puede pulsar con el teclado");

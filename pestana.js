@@ -14,6 +14,7 @@ import { crearPanelDeps } from "./deps.js";
 import { guardarUltimaApk, EVENTO_ULTIMA_APK } from "./ultima-apk.js";
 import { CONTRATO_NUCLEO } from "./wisp.js";
 import { instalarPuenteWisp } from "./wisp-puente.js";
+import { MODULOS, instanciaModulo } from "./paneles.js";
 
 // La pestaña que hace: editor de fuente + un arbol en OPFS + los comandos de apkc.wasm.
 //
@@ -2258,9 +2259,30 @@ async function nuevoFichero(carpeta) {
 }
 
 // --- el panel inferior -------------------------------------------------------------------
+// §343: es una instancia del módulo `compilacion`. Su altura la da la preferencia del módulo y
+// el asa lo trae al frente dentro de la banda z 40-59. No se renombran ids ni se toca el botón
+// «Compilar»: siguen siendo el contrato del editor y de las pruebas.
+const moduloCompilacion = instanciaModulo("compilacion", "");
+function aplicarModuloCompilacion(panel) {
+  if (!panel) return;
+  const def = MODULOS.compilacion;
+  panel.dataset.modulo = def.id;
+  panel.style.setProperty("--modulo-alto", def.altoPref + "px");
+  panel.style.setProperty("--z", String(moduloCompilacion.estado.z));
+  const asa = panel.querySelector(".modulo-asa");
+  if (asa && !asa.dataset.conectado) {
+    asa.dataset.conectado = "1";
+    asa.addEventListener("pointerdown", () => {
+      moduloCompilacion.estado.z += 1;
+      panel.style.setProperty("--z", String(moduloCompilacion.estado.z));
+    });
+  }
+}
+
 function mostrarPanel(nombre) {
   const panel = document.getElementById("panel-inferior");
   if (!panel) return;
+  aplicarModuloCompilacion(panel);
   panel.hidden = false;
   for (const b of document.querySelectorAll(".panel-tab")) {
     const activo = b.dataset.panel === nombre;

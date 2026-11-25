@@ -2229,11 +2229,47 @@ pre {
   text-overflow: ellipsis;
 }
 
+/* ---- módulos flotantes ---------------------------------------------------- */
+/* Banda z 40-59: por encima del canvas y del panel, por debajo de las capas del modo editar
+   (z 60) y de los diálogos (z 80+). `--z` lo sube `traerAlFrente` sin cambiar esos niveles. */
+.modulo { position: relative; z-index: calc(40 + var(--z, 0)); }
+.modulo-cab {
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-height: 18px;
+  padding: 2px 6px;
+  border-bottom: 1px solid var(--borde2);
+  background: var(--superficie2);
+}
+.modulo-asa {
+  flex: none;
+  width: 16px;
+  height: 10px;
+  padding: 0;
+  border: 0;
+  cursor: move;
+  background: repeating-linear-gradient(to bottom, var(--texto2) 0 1px, transparent 1px 4px);
+}
+.modulo-titulo { font-size: .78rem; color: var(--texto2); }
+.modulo-tiradores { position: absolute; inset: 0; pointer-events: none; }
+.modulo-tirador { position: absolute; pointer-events: auto; }
+.modulo-tirador[data-eje="norte"] { top: 0; left: 7px; right: 7px; height: 6px; cursor: ns-resize; }
+.modulo-tirador[data-eje="sur"] { bottom: 0; left: 7px; right: 7px; height: 6px; cursor: ns-resize; }
+.modulo-tirador[data-eje="este"] { right: 0; top: 7px; bottom: 7px; width: 6px; cursor: ew-resize; }
+.modulo-tirador[data-eje="oeste"] { left: 0; top: 7px; bottom: 7px; width: 6px; cursor: ew-resize; }
+.modulo-tirador[data-eje="noreste"] { right: 0; top: 0; width: 12px; height: 12px; cursor: nesw-resize; }
+.modulo-tirador[data-eje="noroeste"] { left: 0; top: 0; width: 12px; height: 12px; cursor: nwse-resize; }
+.modulo-tirador[data-eje="sureste"] { right: 0; bottom: 0; width: 12px; height: 12px; cursor: nwse-resize; }
+.modulo-tirador[data-eje="suroeste"] { left: 0; bottom: 0; width: 12px; height: 12px; cursor: nesw-resize; }
+
 /* ---- panel inferior ------------------------------------------------------- */
 
 .panel-inferior {
   flex: 0 0 auto;
-  height: 34vh;
+  /* §343: antes `34vh` fijo; ahora manda la geometría del módulo `compilacion` (480 px) */
+  height: var(--modulo-alto, 480px);
   min-height: 11rem;
   max-height: 55vh;
   display: flex;
@@ -2549,7 +2585,7 @@ pre {
   .area { grid-column: 2; grid-row: 2; }
   .vista:not(.vista-editor) { padding: 16px 16px 44px; }
   .editor-tab { max-width: 22ch; }
-  .panel-inferior { height: 42vh; }
+  .panel-inferior { height: var(--modulo-alto, 42vh); }
   /* en táctil la vista previa pasa debajo del editor: sin tiradores que arrastrar y con aviso */
   .editor-fila { flex-direction: column; }
   .tirador-previa { display: none; }
