@@ -397,9 +397,30 @@ function colocarLineal(nodo, caja, vertical) {
     const cruz = medidaCruz(p.nodo, cruzMax, vertical);
     p.tam = vertical ? { ancho: cruz, alto: principal } : { ancho: principal, alto: cruz };
   }
-  const tamPila = piezas.reduce((s, p) => s + (vertical
+  let tamPila = piezas.reduce((s, p) => s + (vertical
     ? p.margen.arriba + p.tam.alto + p.margen.abajo
     : p.margen.izq + p.tam.ancho + p.margen.der), 0);
+  // Cinco botones con mínimos de 88dp no caben en una fila de 360dp. En vez de podar la fila,
+  // refluimos: encogemos proporcionalmente tamaños y márgenes para que todos sigan visibles
+  // dentro del padre, sin cambiar el centro de una fila de un solo botón (§293).
+  if (tamPila > principalMax && principalMax > 0 && piezas.length > 1) {
+    const factor = principalMax / tamPila;
+    for (const p of piezas) {
+      if (p.flexible) continue;
+      if (vertical) {
+        p.tam = { ancho: p.tam.ancho, alto: Math.max(1, Math.round(p.tam.alto * factor)) };
+        p.margen = { ...p.margen, arriba: Math.round(p.margen.arriba * factor),
+          abajo: Math.round(p.margen.abajo * factor) };
+      } else {
+        p.tam = { ancho: Math.max(1, Math.round(p.tam.ancho * factor)), alto: p.tam.alto };
+        p.margen = { ...p.margen, izq: Math.round(p.margen.izq * factor),
+          der: Math.round(p.margen.der * factor) };
+      }
+    }
+    tamPila = piezas.reduce((s, p) => s + (vertical
+      ? p.margen.arriba + p.tam.alto + p.margen.abajo
+      : p.margen.izq + p.tam.ancho + p.margen.der), 0);
+  }
   const gravedad = local(nodo.atributos, "gravity");
   let cursor = vertical ? caja.y : caja.x;
   if (vertical) {

@@ -953,6 +953,56 @@ const aMediaPantalla = vistaPrevia.rectsEscalados({ pantalla: { ancho: 360, alto
 if (aMediaPantalla.length !== 2 || aMediaPantalla[1].ancho !== 50 || aMediaPantalla[1].alto !== 24) {
   mal("el alto no se escala con la pantalla a media medida: " + JSON.stringify(aMediaPantalla[1]));
 }
+// §336. los cinco botones del bloc de notas, con los rect que emite `apkc preview` sobre 360 dp.
+// Los mínimos de ART ensanchan cada caja a 88dp; sin reflow el quinto se sale del marco.
+const filaNotas = {
+  pantalla: { ancho: 360, alto: 640 },
+  raiz: { tipo: "LinearLayout", rect: { x: 0, y: 0, ancho: 360, alto: 640 }, hijos: [
+    { tipo: "LinearLayout", rect: { x: 0, y: 72, ancho: 360, alto: 48 }, hijos: [
+      { tipo: "Button", id: "id/anterior", texto: "Anterior", rect: { x: 0, y: 72, ancho: 80, alto: 48 } },
+      { tipo: "Button", id: "id/siguiente", texto: "Siguiente", rect: { x: 80, y: 72, ancho: 88, alto: 48 } },
+      { tipo: "Button", id: "id/nueva", texto: "Nueva", rect: { x: 168, y: 72, ancho: 56, alto: 48 } },
+      { tipo: "Button", id: "id/guardar", texto: "Guardar", rect: { x: 224, y: 72, ancho: 72, alto: 48 } },
+      { tipo: "Button", id: "id/borrar", texto: "Borrar", rect: { x: 296, y: 72, ancho: 64, alto: 48 } },
+    ] },
+  ] },
+};
+const botonesFila = vistaPrevia.rectsEscalados(vistaPrevia.modeloConMinimos(filaNotas), 360, 640)
+  .filter((r) => r.tipo === "Button");
+if (botonesFila.length !== 5) mal("la fila de notas no conserva sus cinco botones: " + JSON.stringify(botonesFila));
+for (const b of botonesFila) {
+  if (!Number.isFinite(b.x) || b.x < 0 || b.x + b.ancho > 360) {
+    mal("un botón de notas se sale del marco de 360 dp: " + JSON.stringify(b));
+  }
+}
+const textosFila = ["Anterior", "Siguiente", "Nueva", "Guardar", "Borrar"];
+for (let i = 0; i < botonesFila.length; i++) {
+  if (botonesFila[i].texto !== textosFila[i]) {
+    mal("el reflow podó el texto del botón " + i + ": " + JSON.stringify(botonesFila[i]));
+  }
+}
+console.log("rectsEscalados (cinco botones en 360 dp): " + JSON.stringify(
+  botonesFila.map((b) => ({ id: b.id, x: b.x, ancho: b.ancho, texto: b.texto }))));
+// Caso separado: la variante con huecos de 64 dp entre hermanos, donde el primero salía por la
+// izquierda. La no-intersección NO se afirma de `notas` (sus botones se tocan en un borde): aquí
+// se mide sola, con rects propios y una lista `paresBotones` vacía.
+const conHuecos = JSON.parse(JSON.stringify(filaNotas));
+const xHuecos = [-12, 140, 292, 444, 596];
+conHuecos.raiz.hijos[0].hijos.forEach((b, i) => { b.rect.x = xHuecos[i]; b.rect.ancho = 88; });
+const botonesHueco = vistaPrevia.rectsEscalados(vistaPrevia.modeloConMinimos(conHuecos), 360, 640)
+  .filter((r) => r.tipo === "Button");
+const paresBotones = [];
+for (let i = 0; i < botonesHueco.length; i++) {
+  for (let j = i + 1; j < botonesHueco.length; j++) {
+    const a1 = botonesHueco[i], b1 = botonesHueco[j];
+    if (a1.x < b1.x + b1.ancho && b1.x < a1.x + a1.ancho) paresBotones.push([i, j]);
+  }
+}
+if (botonesHueco.length !== 5 || paresBotones.length !== 0) {
+  mal("los botones con huecos de 64 dp se solapan o se perdieron: " +
+    JSON.stringify({ paresBotones, botones: botonesHueco }));
+}
+console.log("paresBotones (huecos de 64 dp): " + JSON.stringify(paresBotones));
 // un nodo sin rect se omite en vez de pintarse en (0,0); y la cota corta un árbol desmedido
 const sinRect = { pantalla: { ancho: 100, alto: 100 }, raiz: { tipo: "X", hijos: [{ tipo: "Y" }] } };
 if (vistaPrevia.rectsEscalados(sinRect, 100, 100).length !== 0) mal("rectsEscalados pinta un nodo sin rect");

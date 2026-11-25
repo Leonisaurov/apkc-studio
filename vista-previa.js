@@ -200,6 +200,36 @@ export function escalaPara(modelo, ancho, alto) {
 // ejes, porque agrandar la caja por la izquierda y arriba desplazaba el botón (y su texto) respecto
 // de ART. Al hacerlo aquí, `modeloConPantalla` de `previa-panel.js` escala ya el rect final: con una
 // pantalla de 180×320 el botón mide 44×20 en vez de volver a 88×48 «porque sí».
+// Refluye una fila de botones que, después de aplicar los mínimos de ART, no cabe en su padre.
+// No quita ningún botón ni recorta su texto: reduce proporcionalmente anchos y huecos, con el
+// mismo centro relativo, para que los cinco botones de `notas` queden dentro de 360 dp (§336).
+// Una fila con un solo botón no se toca: es el caso medido en §293, cuyo centro se conserva.
+function refluyeFilaBotones(nodo) {
+  if (!nodo || typeof nodo !== "object") return;
+  if (Array.isArray(nodo.hijos)) {
+    for (const hijo of nodo.hijos) refluyeFilaBotones(hijo);
+    const botones = nodo.hijos.filter((h) => h && h.tipo === "Button" && h.rect &&
+      [h.rect.x, h.rect.y, h.rect.ancho, h.rect.alto].every(Number.isFinite));
+    if (botones.length > 1 && nodo.rect && Number.isFinite(nodo.rect.ancho)) {
+      const y = botones[0].rect.y;
+      const mismaFila = botones.filter((b) => Math.abs(b.rect.y - y) < 1);
+      if (mismaFila.length > 1) {
+        const izq = Math.min(...mismaFila.map((b) => b.rect.x));
+        const der = Math.max(...mismaFila.map((b) => b.rect.x + b.rect.ancho));
+        const padre = nodo.rect.x;
+        const disponible = nodo.rect.ancho;
+        if (der - izq > disponible && disponible > 0) {
+          const factor = disponible / (der - izq);
+          for (const b of mismaFila) {
+            b.rect.ancho = Math.max(1, b.rect.ancho * factor);
+            b.rect.x = padre + (b.rect.x - izq) * factor;
+          }
+        }
+      }
+    }
+  }
+}
+
 export function modeloConMinimos(modelo) {
   if (!modelo || typeof modelo !== "object" || !modelo.raiz) return modelo;
   const copiar = (nodo) => {
@@ -226,7 +256,9 @@ export function modeloConMinimos(modelo) {
     if (Array.isArray(nodo.hijos)) copia.hijos = nodo.hijos.map(copiar);
     return copia;
   };
-  return { ...modelo, raiz: copiar(modelo.raiz) };
+  const raiz = copiar(modelo.raiz);
+  refluyeFilaBotones(raiz);
+  return { ...modelo, raiz };
 }
 
 // Los rectángulos ya escalados, en el orden de pintado. Un nodo sin `rect` numérico se omite en
