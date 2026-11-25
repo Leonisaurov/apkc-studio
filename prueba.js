@@ -21,6 +21,7 @@ import * as layoutEditor from "./layout-editor.js";
 import * as depsMod from "./deps.js";
 import * as coordMod from "./deps-coordenada.js";
 import * as wispMod from "./wisp.js";
+import { CAS_WISP_PEM, CAS_WISP_SHA256 } from "./cas-wisp.js";
 import { bufferDelManifiesto } from "./ajustes.js";
 import { crearFs } from "./fs-fragmento.js";
 
@@ -5117,6 +5118,8 @@ public final class R {
           return { bytes: bytesBuenos, sha256: hashBueno, ruta: peticion.destino + "prueba-1.0.jar" };
         },
       },
+      // con bundle oficial por defecto, el núcleo simulado acepta CAs antes de `obtener`
+      apkcWispCargarCAs: async () => ({ ok: true }),
     };
     const conNucleo = await wispMod.resolverPorWisp({
       relay: "wss://wisp.local/wisp/", coordenada: "com.example:prueba:1.0",
@@ -5132,6 +5135,7 @@ public final class R {
     // Un núcleo falso se cierra con su mensaje literal y no entrega respuesta.
     const nucleoQueDevuelve = (respuesta) => ({
       apkcWisp: { version: "apkc-wisp/1", obtener: async () => respuesta },
+      apkcWispCargarCAs: async () => ({ ok: true }),
     });
     const rechaza = async (hacer, mensaje, etiqueta) => {
       let devuelto = null;
@@ -5189,8 +5193,9 @@ public final class R {
       if (!fallo) mal("destinoDeCoordenada acepta una coordenada rota: " + JSON.stringify(mala));
     }
 
-    // el contrato de CAs: el bundle sale del dispositivo, se valida como `CargarCAsPEM` y se pasa
-    // al núcleo como `{pem, huella}`. La clave es texto: no hay ningún binario versionado.
+    // el contrato de CAs: el bundle oficial va en el propio origen y un PEM local es override;
+    // los dos se validan como `CargarCAsPEM` y se pasan al núcleo como `{pem, huella}`. La clave
+    // es texto: no hay ningún binario versionado.
     const derCA = "MIIDAjCCAeqgAwIBAgIUcfLu8HtBeK0Pc4ZtX36u3FU77OswDQYJKoZIhvcNAQEL" +
       "BQAwITEfMB0GA1UEAwwWYXBrYy1zdHVkaW8gcHJ1ZWJhIENBczAeFw0yNjExMjQw" +
       "NDE2MzZaFw0zNjExMjEwNDE2MzZaMCExHzAdBgNVBAMMFmFwa2Mtc3R1ZGlvIHBy" +
@@ -5249,6 +5254,40 @@ public final class R {
       await wispMod.prepararCAS({ nombre: "ca.pem", bytes: bytesCA, huellaEsperada: "00".repeat(32) });
     } catch (e) { huellaMala = String(e && e.message ? e.message : e); }
     if (!/no coincide/.test(huellaMala)) mal("prepararCAS acepta un bundle con la huella equivocada: " + huellaMala);
+
+    // el bundle oficial incrustado: huella exacta, tres bloques y preparación con esa huella fija
+    if (!/^[0-9a-f]{64}$/.test(CAS_WISP_SHA256)) {
+      mal("CAS_WISP_SHA256 no es un sha256 hexadecimal de 64 dígitos: " + CAS_WISP_SHA256);
+    }
+    const bytesOficiales = new TextEncoder().encode(CAS_WISP_PEM);
+    const huellaOficialCalculada = await depsMod.sha256Hex(bytesOficiales);
+    if (bytesOficiales.length !== 3494 || huellaOficialCalculada !== CAS_WISP_SHA256) {
+      mal("el bundle oficial no es el medido en §349: " + bytesOficiales.length + " bytes, sha256 " +
+        huellaOficialCalculada);
+    }
+    if (wispMod.validarCAsPEM(CAS_WISP_PEM) ||
+        (CAS_WISP_PEM.match(/-----BEGIN CERTIFICATE-----/g) || []).length !== 3) {
+      mal("el bundle oficial no trae tres bloques CERTIFICATE válidos");
+    }
+    const preparadoOficial = await wispMod.prepararCASOficial();
+    if (preparadoOficial.pem !== CAS_WISP_PEM || preparadoOficial.huella !== CAS_WISP_SHA256 ||
+        preparadoOficial.nombre !== "cas-wisp.pem") {
+      mal("prepararCASOficial no devuelve el bundle con su huella fija: " +
+        JSON.stringify(preparadoOficial).slice(0, 160));
+    }
+    // falsación: cambiar un byte del PEM contradice la huella fija y se rechaza antes del núcleo
+    const pemOficialFalsificado = CAS_WISP_PEM.replace("MIICCTCC", "MIICCTCD");
+    let oficialFalsificado = "";
+    try {
+      await wispMod.prepararCAS({
+        nombre: "cas-wisp.pem", bytes: new TextEncoder().encode(pemOficialFalsificado),
+        huellaEsperada: CAS_WISP_SHA256,
+      });
+    } catch (e) { oficialFalsificado = String(e && e.message ? e.message : e); }
+    if (!/no coincide/.test(oficialFalsificado)) {
+      mal("el bundle oficial falsificado no se rechaza por huella: " + oficialFalsificado);
+    }
+
     let casGrande = "";
     try {
       await wispMod.prepararCAS({ nombre: "ca.pem", bytes: new Uint8Array(64 * 1024 + 1).fill(10) });
@@ -5311,6 +5350,57 @@ public final class R {
     });
     if (ordenCA.join(",") !== "cas,obtener") {
       mal("resolverPorWisp no carga las CAs antes de usar el relay: " + ordenCA.join(","));
+    }
+
+    // sin `File` local, el resolver prepara el bundle oficial y lo carga antes de `obtener`
+    const ordenOficial = [];
+    const payloadOficial = [];
+    const globalOficial = {
+      apkcWisp: {
+        version: "apkc-wisp/1",
+        obtener: async () => {
+          ordenOficial.push("obtener");
+          return { bytes: new Uint8Array([1]), sha256: hashUnByte, ruta: "/deps/x" };
+        },
+      },
+      apkcWispCargarCAs: async (peticion) => {
+        ordenOficial.push("cas");
+        payloadOficial.push(peticion);
+        return { ok: true };
+      },
+    };
+    await wispMod.resolverPorWisp({
+      relay: "wss://wisp.local/wisp/", coordenada: "com.example:prueba:1.0",
+      hospedador: hospedadorFalso, global: globalOficial,
+    });
+    if (ordenOficial.join(",") !== "cas,obtener") {
+      mal("sin File, resolverPorWisp no carga el bundle oficial antes de obtener: " + ordenOficial.join(","));
+    }
+    if (!payloadOficial[0] || payloadOficial[0].pem !== CAS_WISP_PEM ||
+        payloadOficial[0].huella !== CAS_WISP_SHA256 ||
+        Object.keys(payloadOficial[0]).sort().join(",") !== "huella,pem") {
+      mal("el núcleo no recibe {pem,huella} del bundle oficial: " +
+        JSON.stringify(payloadOficial[0]).slice(0, 160));
+    }
+    // SIN_CAS: si el núcleo rechaza el bundle, avisa y no abre el relay
+    let relayAbierto = false;
+    let motivoOficial = "";
+    const globalSinCAS = {
+      apkcWisp: {
+        version: "apkc-wisp/1",
+        obtener: async () => { relayAbierto = true; return {}; },
+      },
+      apkcWispCargarCAs: async () => ({ ok: false, error: "bundle no fijado" }),
+    };
+    try {
+      await wispMod.resolverPorWisp({
+        relay: "wss://wisp.local/wisp/", coordenada: "com.example:prueba:1.0",
+        hospedador: hospedadorFalso, global: globalSinCAS,
+        alFalloCAS: (motivo) => { motivoOficial = motivo; },
+      });
+    } catch (e) { /* se espera: fallo cerrado */ }
+    if (relayAbierto || !/rechazó el bundle de CAs/.test(motivoOficial)) {
+      mal("SIN_CAS abre el relay o no explica el motivo en #wisp-cas-estado: " + motivoOficial);
     }
 
     // El BOM UTF-8 marca el fichero, no el PEM: la huella se calcula sobre el texto que se entrega
@@ -5393,6 +5483,17 @@ public final class R {
       if (!textoAviso.includes(frase.replace(/\s+/g, " ").trim())) {
         mal("el aviso de WISP no dice: «" + frase + "»");
       }
+    }
+    // el sentido nuevo se dice explícitamente y el viejo no queda duplicado
+    if (!/repo1\.maven\.org/.test(textoAviso)) mal("el aviso no nombra el host repo1.maven.org");
+    if (/se lee de tu dispositivo|nunca del relay/.test(textoAviso)) {
+      mal("el aviso conserva el sentido viejo de las CAs");
+    }
+    const desdeCasEstado = html.indexOf('id="wisp-cas-estado"');
+    const textoCasEstado = desdeCasEstado < 0 ? ""
+      : html.slice(desdeCasEstado, desdeCasEstado + 300).replace(/\s+/g, " ");
+    if (!/CAs oficiales del sitio/.test(textoCasEstado)) {
+      mal("#wisp-cas-estado no dice que las CAs oficiales vienen del sitio");
     }
     for (const id of ["wisp-aviso", "wisp-aviso-activar", "wisp-aviso-cancelar", "wisp-recordar",
       "wisp-estado", "wisp-activar", "wisp-desactivar", "wisp-selector", "wisp-relay", "wisp-url",
@@ -5567,11 +5668,14 @@ public final class R {
 
       // (e) procedencia por relay: el núcleo (falso) escribe en OPFS y no hay petición de página
       const nucleoAnterior = globalThis.apkcWisp;
+      const puenteAnterior = globalThis.apkcWispCargarCAs;
       globalThis.apkcWisp = {
         version: wispMod.CONTRATO_NUCLEO,
         obtener: async () => ({ bytes: bytesDep, sha256: hashDep,
           ruta: "/deps/com/example/prueba/1.0/prueba-1.0.jar" }),
+        apkcWispCargarCAs: async () => ({ ok: true }),
       };
+      globalThis.apkcWispCargarCAs = globalThis.apkcWisp.apkcWispCargarCAs;
       porId["deps-coordenada"].value = "com.example:prueba:1.0";
       const panelRelay = depsMod.crearPanelDeps({
         hospedador: hospedadorFalso,
@@ -5584,6 +5688,8 @@ public final class R {
         globalThis.fetch = globalThis.fetchOriginal;
         if (nucleoAnterior === undefined) delete globalThis.apkcWisp;
         else globalThis.apkcWisp = nucleoAnterior;
+        if (puenteAnterior === undefined) delete globalThis.apkcWispCargarCAs;
+        else globalThis.apkcWispCargarCAs = puenteAnterior;
       }
       if (peticionesRelay !== 0 || !/^listo/.test(String(porId["deps-estado"].textContent)) ||
           porId["deps-origen"].textContent !== "relay wisp.local (WISP)" ||
@@ -5604,6 +5710,7 @@ public final class R {
       const barraAntes = barra.hidden;
       velo.hidden = true;
       const nucleoPrevioCarga = globalThis.apkcWisp;
+      const puentePrevioCarga = globalThis.apkcWispCargarCAs;
       let liberarNucleo;
       const esperaNucleo = new Promise((r) => { liberarNucleo = r; });
       globalThis.apkcWisp = {
@@ -5613,7 +5720,9 @@ public final class R {
           return { bytes: bytesDep, sha256: hashDep,
             ruta: "/deps/com/example/prueba/1.0/prueba-1.0.jar" };
         },
+        apkcWispCargarCAs: async () => ({ ok: true }),
       };
+      globalThis.apkcWispCargarCAs = globalThis.apkcWisp.apkcWispCargarCAs;
       porId["deps-coordenada"].value = "com.example:prueba:1.0";
       const panelConCarga = depsMod.crearPanelDeps({
         hospedador: hospedadorFalso,
@@ -5639,7 +5748,9 @@ public final class R {
         globalThis.apkcWisp = {
           version: wispMod.CONTRATO_NUCLEO,
           obtener: async () => { await new Promise((r) => setTimeout(r, 140)); throw new Error("relay caído"); },
+          apkcWispCargarCAs: async () => ({ ok: true }),
         };
+        globalThis.apkcWispCargarCAs = globalThis.apkcWisp.apkcWispCargarCAs;
         porId["deps-coordenada"].value = "com.example:prueba:1.0";
         const panelQueFalla = depsMod.crearPanelDeps({
           hospedador: hospedadorFalso,
@@ -5654,6 +5765,8 @@ public final class R {
         liberarNucleo();
         if (nucleoPrevioCarga === undefined) delete globalThis.apkcWisp;
         else globalThis.apkcWisp = nucleoPrevioCarga;
+        if (puentePrevioCarga === undefined) delete globalThis.apkcWispCargarCAs;
+        else globalThis.apkcWispCargarCAs = puentePrevioCarga;
       }
 
       // (f) un clasificador no se recorta para que encaje en los tres tramos del núcleo

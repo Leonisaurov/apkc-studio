@@ -1274,9 +1274,8 @@
                   <input type="text" id="wisp-cas-huella" placeholder="64 dígitos hex; vacío = la del fichero"
                          autocomplete="off" spellcheck="false" class="ruta">
                 </label>
-                <p class="nota" id="wisp-cas-estado" role="status" aria-live="polite">sin CAs: el
-                  bundle se lee de tu dispositivo y se pasa al núcleo; nunca se descarga por el
-                  relay.</p>
+                <p class="nota" id="wisp-cas-estado" role="status" aria-live="polite">CAs oficiales
+                  del sitio, verificadas con huella fija; tu PEM local las sustituye.</p>
                 <p class="nota">Relays de terceros, sin auditar; la latencia es la de un
                   handshake de prueba y cambia. La URL de un WISP propio tiene que acabar en «/».</p>
               </div>
@@ -1440,21 +1439,18 @@
         aria-describedby="wisp-aviso-cuerpo">
   <h2 id="wisp-aviso-titulo">Antes de activar el módulo WISP</h2>
   <div id="wisp-aviso-cuerpo">
-    <p>El módulo WISP es opcional y está apagado.</p>
-    <p>Sirve para saltarse el CORS: Maven no manda cabeceras CORS y un relay WISP abre la conexión
-      TCP desde su servidor, así que la respuesta llega por el WebSocket como si fuera del mismo
-      origen. Nada de eso ocurre hasta que lo actives aquí.</p>
-    <p>Descarga archivos extra del módulo desde este mismo origen: el binario del núcleo WISP
-      (<code>wasm</code>) y su lista de relays. Sin red externa no se descarga nada más.</p>
-    <p>Si el núcleo TLS propio no está en esta compilación, el contenido viaja en claro por el
-      relay: el relay, y cualquiera en su camino, puede leerlo y sustituirlo (MITM). El TLS del
-      propio núcleo es la opción segura; sin él, esto sirve para pruebas, no para dependencias
-      reales.</p>
-    <p>Los relays de la lista son de terceros y no están auditados: nadie revisó quién los opera.
-      Si levantas tu propio WISP, escribe su URL en el campo de URL personalizada.</p>
-    <p>El bundle de CAs se lee de tu dispositivo (un fichero PEM local), nunca del relay: se pasa
-      al núcleo para que verifique el TLS. Si cargas el bundle de CAs de otro, conviertes a ese
-      relay en una CA: podría firmar el certificado de cualquier host y leer lo que pase.</p>
+    <p>El módulo WISP es opcional y está apagado; al activarlo, un relay abre la conexión TCP para
+      saltarse el CORS y la respuesta llega por el WebSocket.</p>
+    <p>El módulo hace peticiones TLS a los repos de dependencias repo1.maven.org y
+      repo.maven.apache.org.</p>
+    <p>El sitio incluye las CAs oficiales de esos repos en su propio origen, sin peticiones
+      externas, y las usa para verificar el certificado del servidor.</p>
+    <p>El bundle lleva una huella fijada: cualquier cambio queda en el historial de git y puedes
+      revisarlo.</p>
+    <p>Puedes aportar tu propio PEM local como override; el relay no aporta CAs.</p>
+    <p>Si el núcleo TLS propio no está en esta compilación, el contenido viaja en claro por el relay
+      y cualquiera en su camino puede leerlo o sustituirlo.</p>
+    <p>Los relays de la lista son de terceros y no están auditados.</p>
   </div>
   <label class="dialogo-check">
     <input type="checkbox" id="wisp-recordar">

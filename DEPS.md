@@ -146,16 +146,18 @@ un muro. Eso rompe la regla 4 (nada fuera del origen) y por eso es un módulo **
 aviso; el modo por defecto sigue con **cero peticiones ajenas**.
 
 **El aviso.** Al pulsar **Resolver** con el módulo sin decidir, se abre `#wisp-aviso` sin tocar la
-red. Dice las seis cosas que importan: (1) sirve para saltarse el CORS abriendo TCP desde el
-relay; (2) descarga **archivos extra del módulo** desde este mismo origen —el binario del núcleo
-`wasm` y la lista de relays—; (3) si el **TLS propio del núcleo** no está en esta compilación, el
-contenido viaja **en claro** por el relay y cualquiera en su camino puede leerlo o sustituirlo:
-el TLS del núcleo es la opción segura y, sin él, esto es solo para pruebas; (4) el bundle de CAs
-se lee **del dispositivo**, nunca del relay; (5) un bundle de CAs ajeno convertiría al relay en
-una CA que puede firmar el certificado de cualquier host; (6) los relays son de **terceros y no
-están auditados**. Ofrece «Activar para esta sesión» y «Cancelar», con la casilla
-**«Recordar elección»** desmarcada. Cancelar deja el módulo apagado, no guarda nada y esa misma
-pulsación sigue por `deps-index.json` del propio origen.
+red. Dice las siete cosas que importan, en este orden: (1) el módulo es opcional y está apagado;
+al activarlo un relay abre la conexión TCP para saltarse el CORS y la respuesta llega por el
+WebSocket; (2) el módulo hace peticiones TLS a `repo1.maven.org` y `repo.maven.apache.org`;
+(3) el sitio incluye las CAs oficiales de esos repos **en su propio origen**, sin peticiones
+externas, y las usa para verificar el certificado del servidor; (4) el bundle lleva una **huella
+fijada**: cualquier cambio queda en el historial de git y se puede revisar con
+`git diff -- studio/cas-wisp.js`; (5) puedes aportar tu propio PEM local como **override** y el
+relay no aporta CAs; (6) si el **TLS propio del núcleo** no está en esta compilación, el contenido
+viaja **en claro** por el relay y cualquiera en su camino puede leerlo o sustituirlo; (7) los
+relays son de **terceros y no están auditados**. Ofrece «Activar para esta sesión» y «Cancelar»,
+con la casilla **«Recordar elección»** desmarcada. Cancelar deja el módulo apagado, no guarda nada
+y esa misma pulsación sigue por `deps-index.json` del propio origen.
 
 | elección | `localStorage["apkc-studio/wisp"]` | qué hace Resolver |
 | --- | --- | --- |
@@ -234,23 +236,31 @@ globalThis.apkcWispCargarCAs({ pem, huella }) =>
   Promise<{ ok: true } | { ok: false, error: string }>
 ```
 
-- `pem` es el texto del fichero **local** que la persona elige en `#wisp-cas` (`input file`,
-  same-origin, sin red): solo `.pem`/`.crt`, hasta **64 KiB**, con uno o más bloques
-  `CERTIFICATE` y cero bytes fuera de bloque. La página lo valida con `prepararCAS()` antes de
-  llamar al núcleo, que vuelve a validarlo con `CargarCAsPEM` (`apkc/depswisp.go:257`).
+- `pem` es, por defecto, el bundle oficial de los dos repos incrustado en `cas-wisp.js`: tres
+  bloques `CERTIFICATE` del store del sistema (GTS Root R4 self-signed, ISRG Root X1 y X2), 3494
+  bytes y sha256 fijo `c52dbce4…08dade` (`§349`). Viaja **en el propio origen como texto**: sin
+  `fetch`, sin MIME nuevo y sin entrada en `sw.js`. El fichero **local** que la persona elige en
+  `#wisp-cas` (`input file`, same-origin, sin red) es **override**: solo `.pem`/`.crt`, hasta
+  **64 KiB**, con uno o más bloques `CERTIFICATE` y cero bytes fuera de bloque. La página valida
+  los dos con el mismo `prepararCAS()` antes de llamar al núcleo, que vuelve a validarlos con
+  `CargarCAsPEM` (`apkc/depswisp.go:257`).
 - `huella` es `sha256(pem)` calculado sobre el PEM **entregado**, no sobre el fichero crudo: un BOM
-  inicial se quita y cualquier otro `U+FEFF` se rechaza (`wisp.js:341-381`). La huella esperada de
+  inicial se quita y cualquier otro `U+FEFF` se rechaza (`prepararCAS`). La huella esperada de
   `#wisp-cas-huella` se normaliza —separadores `:` y mayúsculas— antes de compararse
-  (`wisp.js:326-335`), y `cargarCAsEnNucleo()` vuelve a exigir `sha256(pem) === huella`
-  (`wisp.js:391-403`). El núcleo la decodifica con `hex.DecodeString` y pide 32 bytes
+  (`normalizarHuella`), y `cargarCAsEnNucleo()` vuelve a exigir `sha256(pem) === huella`.
+  El núcleo la decodifica con `hex.DecodeString` y pide 32 bytes
   (`apkc/puente_wisp_js.go:186-200`) antes de fijarla con `CargarCAsPEMFijadas`
   (`apkc/depswisp.go:319`).
-- `resolverPorWisp({ cas })` llama a `apkcWispCargarCAs` **antes** de `obtener` (`wisp.js:213-215`).
-  Sin núcleo, el error es el de siempre; con un núcleo que no acepta CAs, dice **«núcleo WISP sin
-  carga de CAs en esta compilación»** y no abre el relay.
-- El bundle **nunca** llega por el relay: un bundle ajeno convertiría al relay en una CA capaz de
+- `resolverPorWisp({ cas })` usa el `File` si hay y, si no, prepara el bundle oficial con su huella
+  fija (`prepararCASOficial`), y llama a `apkcWispCargarCAs` **antes** de `obtener`. Si la huella
+  falla, es `SIN_CAS`: el motivo se escribe en `#wisp-cas-estado` y no se abre ningún socket; el
+  modo por defecto sigue siendo `deps-index.json`. Sin núcleo, el error es el de siempre; con un
+  núcleo que no acepta CAs, dice **«núcleo WISP sin carga de CAs en esta compilación»** y no abre
+  el relay.
+- El bundle **nunca** llega **del** relay: un bundle ajeno convertiría al relay en una CA capaz de
   firmar cualquier host. La página no descarga CAs de ninguna URL y rechaza un nombre con esquema
-  (`https://…`) antes de leer el fichero.
+  (`https://…`) antes de leer el fichero. En el núcleo en reposo el PEM propio viaja en la petición
+  `wisp-get` y se fija con `CargarCAsPEMFijadas` antes de tocar la red; el relay solo transporta.
 
 **Qué queda y qué no.** El puente ya está implementado de punta a punta en el código: el registro
 en `init()` con build tag `js && wasm`, el framing y el TLS en `apkc/`, la doble validación del

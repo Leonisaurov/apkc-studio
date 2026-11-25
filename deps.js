@@ -519,11 +519,15 @@ export function crearPanelDeps({ hospedador, conBloqueo, alImportar, wisp } = {}
         const relay = modulo.relayActual();
         const cas = typeof modulo.casActual === "function" ? modulo.casActual() : null;
         decir("módulo WISP: pidiendo «" + coord + "» por " + hostDeRelay(relay) +
-          (cas ? " con las CAs del dispositivo (" + cas.huella.slice(0, 16) + "…)" : " sin bundle de CAs") + "…");
+          (cas ? " con tu PEM local (" + cas.huella.slice(0, 16) + "…)" : " con las CAs oficiales del sitio") + "…");
         // El velo de `conCarga` cubre solo la llamada al núcleo: `try/finally` lo retira tanto si
         // el relay responde como si falla, y no toca `#deps-progreso` (que es de la vía local).
+        // `alFalloCAS` escribe el motivo en #wisp-cas-estado y el resolver no abre ningún socket.
         const r = await conCarga("Descargando módulo…", () => resolverPorWisp({
           relay, coordenada: coord, destino: destinoDeCoordenada(coord), hospedador, cas,
+          alFalloCAS: (motivo) => {
+            if (typeof modulo.decirFalloCAS === "function") modulo.decirFalloCAS(motivo);
+          },
         }));
         pintarWisp(r, relay);
         decir("listo: «" + coord + "» traído por el relay " + hostDeRelay(relay) +

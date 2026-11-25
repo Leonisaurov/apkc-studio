@@ -10,6 +10,8 @@
 // `apkc/`; aquí están el aviso, la elección de la persona, la lista de relays y el contrato con
 // ese núcleo, que se documenta en DEPS.md.
 
+import { CAS_WISP_PEM, CAS_WISP_SHA256 } from "./cas-wisp.js";
+
 export const RUTA_RELAYS = "./wisp-relays.json";
 export const CLAVE_ELECCION = "apkc-studio/wisp";
 export const VERSION_RELAYS = 1;
@@ -199,7 +201,7 @@ export function destinoDeCoordenada(coordenada) {
 
 // La llamada al núcleo. Sin él, el error dice exactamente qué falta y no se abre ningún socket:
 // esta página no trae cliente WISP ni cliente TLS en JavaScript (ver DEPS.md).
-export async function resolverPorWisp({ relay, coordenada, destino, hospedador, cas, global = globalThis } = {}) {
+export async function resolverPorWisp({ relay, coordenada, destino, hospedador, cas, alFalloCAS, global = globalThis } = {}) {
   const problema = urlRelayValida(relay);
   if (problema) throw new Error(problema);
   const coord = String(coordenada == null ? "" : coordenada).trim();
@@ -215,16 +217,25 @@ export async function resolverPorWisp({ relay, coordenada, destino, hospedador, 
     throw new Error("núcleo WISP no disponible en esta compilación: el módulo no está construido en " +
       "esta página, así que no se abre ningún relay; Resolver sigue limitado a deps-index.json del propio origen");
   }
-  // Las CAs se cargan antes de abrir el relay. El bundle ya viene verificado por `prepararCAS`:
-  // con núcleo vivo se pasa `{pem, huella}` aparte; en reposo viajan en la petición de `wisp-get`,
+  // Las CAs se cargan antes de abrir el relay. Un `File` local gana; si no hay, se usa el bundle
+  // oficial incrustado en el propio origen (cero peticiones). Su huella fija se comprueba aquí,
+  // antes de tocar la red: si falla, es SIN_CAS, se avisa al panel y no se abre ningún socket.
+  // Con núcleo vivo se pasa `{pem, huella}` aparte; en reposo viajan en la petición de `wisp-get`,
   // que las fija con `CargarCAsPEMFijadas` antes de tocar la red. En los dos casos la respuesta se
   // contrasta abajo con `validarRespuestaNucleo` antes de pintarse.
-  if (cas && nucleoVivo) await cargarCAsEnNucleo({ pem: cas.pem, huella: cas.huella, global });
+  let bundle;
+  try {
+    bundle = cas || await prepararCASOficial();
+    if (nucleoVivo) await cargarCAsEnNucleo({ pem: bundle.pem, huella: bundle.huella, global });
+  } catch (e) {
+    if (typeof alFalloCAS === "function") alFalloCAS(String((e && e.message) || e));
+    throw e;
+  }
   const peticion = {
     version: CONTRATO_NUCLEO, relay: String(relay).trim(), coordenada: coord,
     destino: destino || destinoDeCoordenada(coord),
   };
-  if (reposo && cas) { peticion.pem = cas.pem; peticion.huella = cas.huella; }
+  if (reposo) { peticion.pem = bundle.pem; peticion.huella = bundle.huella; }
   const respuesta = nucleoVivo
     ? await global.apkcWisp.obtener(peticion)
     : await reposo.obtener(peticion);
@@ -392,6 +403,19 @@ export async function prepararCAS({ nombre, bytes, huellaEsperada } = {}) {
   return { pem: texto, huella, nombre: String(nombre), bytes: bytesPEM.length };
 }
 
+// El bundle oficial de los dos repos autorizados viaja en el propio origen como texto, sin
+// `fetch`, sin MIME nuevo y sin entrada en el service worker: `cas-wisp.js` es un módulo más del
+// sitio. El nombre `cas-wisp.pem` es lógico y pasa `nombreCASValido`; no hay fichero ni petición.
+// La huella fija se comprueba con el mismo `prepararCAS` que valida un `File` local: si alguien
+// cambia el PEM, esto falla cerrado y no se abre el relay.
+export async function prepararCASOficial() {
+  return prepararCAS({
+    nombre: "cas-wisp.pem",
+    bytes: new TextEncoder().encode(CAS_WISP_PEM),
+    huellaEsperada: CAS_WISP_SHA256,
+  });
+}
+
 // El puente con el núcleo, congelado en DEPS.md: `globalThis.apkcWispCargarCAs({ pem, huella })`.
 // Se registra aparte de `globalThis.apkcWisp` para que la carga de CAs no cambie el contrato de
 // `obtener`. Devuelve la respuesta del núcleo y exige `ok: true`.
@@ -434,13 +458,13 @@ export async function cargarCAsEnNucleo({ pem, huella, global = globalThis } = {
 // sobre el texto que se pinta en `index.html`, no sobre una copia: si alguien suaviza el aviso,
 // la comprobación falla.
 export const AVISO = [
-  "El módulo WISP es opcional y está apagado.",
-  "Sirve para saltarse el CORS: Maven no manda cabeceras CORS y un relay WISP abre la conexión TCP desde su servidor, así que la respuesta llega por el WebSocket como si fuera del mismo origen.",
-  "Descarga archivos extra del módulo desde este mismo origen: el binario del núcleo WISP (wasm) y su lista de relays.",
-  "Si el núcleo TLS propio no está en esta compilación, el contenido viaja en claro por el relay: el relay, y cualquiera en su camino, puede leerlo y sustituirlo (MITM).",
-  "El bundle de CAs se lee de tu dispositivo (un fichero PEM local), nunca del relay: se pasa al núcleo para que verifique el TLS.",
-  "Si cargas el bundle de CAs de otro, conviertes a ese relay en una CA: podría firmar el certificado de cualquier host y leer lo que pase.",
-  "Los relays de la lista son de terceros y no están auditados: nadie revisó quién los opera.",
+  "El módulo WISP es opcional y está apagado; al activarlo, un relay abre la conexión TCP para saltarse el CORS y la respuesta llega por el WebSocket.",
+  "El módulo hace peticiones TLS a los repos de dependencias repo1.maven.org y repo.maven.apache.org.",
+  "El sitio incluye las CAs oficiales de esos repos en su propio origen, sin peticiones externas, y las usa para verificar el certificado del servidor.",
+  "El bundle lleva una huella fijada: cualquier cambio queda en el historial de git y puedes revisarlo.",
+  "Puedes aportar tu propio PEM local como override; el relay no aporta CAs.",
+  "Si el núcleo TLS propio no está en esta compilación, el contenido viaja en claro por el relay y cualquiera en su camino puede leerlo o sustituirlo.",
+  "Los relays de la lista son de terceros y no están auditados.",
 ];
 
 // --- el panel ---------------------------------------------------------------------------------
@@ -471,8 +495,9 @@ export function crearPanelWisp({ hospedador, almacen, fetchImpl, documento } = {
   let cargando = null;
   let cargaError = "";
   let resolverAviso = null;
-  // El bundle de CAs ya validado (`{ pem, huella, nombre, bytes }`) o null. Se lee del disco al
-  // elegir el fichero y no se toca más: el payload que recibe el núcleo es este.
+  // El `File` de CAs ya validado (`{ pem, huella, nombre, bytes }`) o null. Se lee del disco al
+  // elegirlo; si no hay, `resolverPorWisp` usa el bundle oficial incrustado. El payload que recibe
+  // el núcleo es uno u otro.
   let cas = null;
 
   const decir = (texto, clase) => {
@@ -636,8 +661,14 @@ export function crearPanelWisp({ hospedador, almacen, fetchImpl, documento } = {
 
   const quitarCAS = () => {
     cas = null;
-    decirCAS("sin CAs: el bundle se lee del dispositivo y se pasa al núcleo; nunca se descarga " +
-      "por el relay", "");
+    decirCAS("sin tu PEM local: se usan las CAs oficiales del sitio, verificadas con huella fija; " +
+      "tu PEM local las sustituye", "");
+  };
+
+  // Si la huella fija del bundle oficial falla, el resolver se corta antes de abrir un socket y
+  // el motivo se escribe aquí, en el estado de CAs: SIN_CAS como mensaje, nunca como solución.
+  const decirFalloCAS = (motivo) => {
+    decirCAS("CAs rechazadas: " + String(motivo || ""), "mal");
   };
 
   if (botonActivar) botonActivar.addEventListener("click", () => { abrirAviso(); });
@@ -670,8 +701,10 @@ export function crearPanelWisp({ hospedador, almacen, fetchImpl, documento } = {
     relays: () => relays,
     eleccion,
     pintar,
-    // El contrato de CAs: lo elegido se lee del disco y se pasa al núcleo como `{pem, huella}`.
+    // El contrato de CAs: el `File` elegido (o, si no hay, el bundle oficial del propio origen)
+    // se pasa al núcleo como `{pem, huella}`.
     casActual: () => cas,
+    decirFalloCAS,
     seleccionarCAS,
     quitarCAS,
     // Fija la elección sin pasar por el diálogo: lo usan las pruebas de node, y sirve para un
