@@ -1271,6 +1271,28 @@ if (!/^Emulador aproximado de el layout/.test(vistaPrevia.textoDelModelo({ panta
 // flotante de registro y consola y en el `title` del canvas. Así ningún modelo puede cambiar la
 // altura del dibujo. `textoDelModelo` sigue siendo la fuente única de ese detalle.
 const fuenteEstilo = fs.readFileSync(path.join(__dirname, "style.css"), "utf8");
+// §338: el campo del emulador usa el tema del aparato también al enfocarse. Los cuatro literales
+// que comprueba CDP en `prueba-pestana.js` se aseveran aquí en origen, porque el bloque CDP
+// solo corre con el equipo frío y autorización; esto basta para detectar una regresión de CSS.
+const bloqueCampo = /\.previa-campo-texto\s*\{([^}]*)\}/.exec(fuenteEstilo);
+if (!bloqueCampo || !/background:\s*#ffffff/.test(bloqueCampo[1]) ||
+    !/color:\s*#30323a/.test(bloqueCampo[1]) ||
+    !/caret-color:\s*#30323a/.test(bloqueCampo[1]) ||
+    !/border:\s*1px solid transparent/.test(bloqueCampo[1]) ||
+    /color-mix|--superficie2|--texto-fuerte|--acento/.test(bloqueCampo[1])) {
+  mal("style.css no da al EditText el tema del aparato en reposo");
+}
+if (!/\.previa-campo-texto:focus\s*\{[^}]*border-color:\s*transparent/.test(fuenteEstilo)) {
+  mal("style.css devuelve el color del editor al EditText al enfocarlo");
+}
+if (!/\.previa-campo-texto/.test(fuenteEstilo) ||
+    /\.previa-campo-texto\s*\{[^}]*#e7e7e7/.test(fuenteEstilo)) {
+  mal("style.css reintroduce el color del editor en el EditText");
+}
+if (!/\.replace\(\/\\s\/g,\s*""\)/.test(fs.readFileSync(path.join(__dirname, "prueba-pestana.js"), "utf8")) ||
+    !/rgb\(255,255,255\)/.test(fs.readFileSync(path.join(__dirname, "prueba-pestana.js"), "utf8"))) {
+  mal("prueba-pestana.js no normaliza los estilos computados del EditText");
+}
 if (!/\.previa-estado-oculto\s*\{[^}]*position:\s*absolute/.test(fuenteEstilo)) {
   mal("style.css no saca del flujo la línea de estado del emulador (.previa-estado-oculto)");
 }

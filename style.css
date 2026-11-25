@@ -1190,13 +1190,14 @@ body.arrastrando-paleta { cursor: grabbing; }
   box-sizing: border-box;
   margin: 0;
   padding: 0 3px;
-  border: 1px solid var(--acento);
+  /* §338: es la vista del aparato, no un campo del editor: tema claro de Android, sin caja. */
+  border: 1px solid transparent;
   border-radius: 2px;
-  background: color-mix(in srgb, var(--superficie2) 88%, transparent);
-  color: var(--texto-fuerte);
+  background: #ffffff;
+  color: #30323a;
   font-family: inherit;
   line-height: 1.2;
-  caret-color: var(--acento);
+  caret-color: #30323a;
 }
 .previa-campo-texto[hidden] { display: none; }
 /* El progreso del apk soltado: una barra indeterminada centrada sobre el marco del teléfono, en
@@ -1649,6 +1650,10 @@ input, textarea, select {
   min-width: 0;
 }
 input:focus, textarea:focus, select:focus { border-color: var(--foco); }
+/* §338: el EditText del emulador conserva el tema del aparato al enfocarse; la regla genérica
+   de inputs no le devuelve el color del editor. */
+.previa-campo-texto:focus { border-color: transparent; background: #ffffff; color: #30323a;
+  caret-color: #30323a; }
 /* No se suprime el indicador de foco: se refuerza solo en :focus-visible (§174). */
 input:focus-visible, textarea:focus-visible, select:focus-visible {
   outline: 2px solid var(--foco, #007acc); outline-offset: 1px;

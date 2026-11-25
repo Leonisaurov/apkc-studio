@@ -2257,6 +2257,12 @@ async function conductor() {
           enfocado: !!(campo && document.activeElement === campo),
           valor: campo ? campo.value : null,
           idRef: typeof PREVIA_PANEL !== "undefined" ? PREVIA_PANEL.campoTexto().idRef : null,
+          // §338: el tema del aparato, no el del editor. CSSOM devuelve espacios en rgb(...),
+          // así que cada valor se normaliza ANTES de compararlo con el literal escribible.
+          fondo: campo ? getComputedStyle(campo).backgroundColor.replace(/\s/g, "") : null,
+          color: campo ? getComputedStyle(campo).color.replace(/\s/g, "") : null,
+          caret: campo ? getComputedStyle(campo).caretColor.replace(/\s/g, "") : null,
+          borde: campo ? getComputedStyle(campo).borderTopColor.replace(/\s/g, "") : null,
         };
       })()`);
       comprueba("al pulsar un EditText aparece un campo real enfocado sobre el rect dibujado",
@@ -2264,6 +2270,14 @@ async function conductor() {
         /^0x[0-9a-f]+$/i.test(String(abierto.idRef)) &&
         abierto.idRef !== baseTexto.idRefRaiz,
         JSON.stringify({ abierto, idRefRaiz: baseTexto.idRefRaiz }));
+      comprueba("el EditText no usa el tema del editor: fondo " + abierto.fondo,
+        abierto.fondo === "rgb(255,255,255)");
+      comprueba("el EditText no usa el tema del editor: texto " + abierto.color,
+        abierto.color === "rgb(48,50,58)");
+      comprueba("el EditText no usa el tema del editor: caret " + abierto.caret,
+        abierto.caret === "rgb(48,50,58)");
+      comprueba("el EditText no usa el tema del editor: borde " + abierto.borde,
+        abierto.borde === "rgba(0,0,0,0)");
       await exec("Input.insertText", { text: "Ana Peña/Os" });
       const escrito = await evaluar(`(async () => {
         const vp = await import("/vista-previa.js");
