@@ -1271,6 +1271,24 @@ if (!/asa\.addEventListener\("pointerdown"/.test(fuentePreviaEstado)) {
 if (/cabecera\.addEventListener\("pointerdown"/.test(fuentePreviaEstado)) {
   mal("previa-panel.js vuelve a arrastrar la capa desde la cabecera entera");
 }
+// §311: la marca de duplicado viaja con la secuencia de la consola de la app, no con la posición
+// de pintado. Las cuatro aseveraciones CDP y la regla estrecha se comprueban aquí en origen; el
+// hit-test real queda para CDP, que no corre mientras el equipo no cumpla el umbral frío.
+if (!/MARCA-FIDELIDAD-311/.test(fuentePreviaEstado) ||
+    !/dataset\.fidelidad\s*=\s*MARCA_FIDELIDAD_311/.test(fuentePreviaEstado) ||
+    !/numeroSecuencia === 1/.test(fuentePreviaEstado)) {
+  mal("previa-panel.js no liga la marca de fidelidad a la secuencia 1 de la consola");
+}
+if (!/@media \(max-width: 760px\)/.test(fuenteEstilo) ||
+    !/\.tirador-previa \{ display: none; \}/.test(fuenteEstilo)) {
+  mal("style.css no oculta los tiradores por debajo de 760 px");
+}
+const fuenteNavegador = fs.readFileSync(path.join(__dirname, "prueba-navegador.js"), "utf8");
+for (const clave of ["fidelidadDuplicado", "fidelidadTeclado", "sondaEstrecha", "lienzoInicial"]) {
+  if (!fuenteNavegador.includes(clave)) {
+    mal(`prueba-navegador.js no cubre la aseveración de fidelidad ${clave}`);
+  }
+}
 for (const clave of ["apkc-studio/previa-inspector-modo", "apkc-studio/previa-inspector-borde",
   "apkc-studio/previa-inspector-x", "apkc-studio/previa-inspector-y",
   "apkc-studio/previa-inspector-ancho", "apkc-studio/previa-inspector-alto"]) {

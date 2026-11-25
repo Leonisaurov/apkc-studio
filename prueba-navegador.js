@@ -731,7 +731,7 @@ const conductor = `(async () => {
           // modelo es el del layout dibujado y se queda en «Pulsos: 0» aunque la app ya haya
           // ejecutado veinte clics.
           const capturasSwap = async () => {
-            const vp = await import("/vista-previa.js");
+            const vp = await import("./vista-previa.js");
             const modelo = vp.modeloActual();
             const ejecucion = (modelo && modelo.ejecucion) || {};
             const capturas = Array.isArray(ejecucion.capturas) ? ejecucion.capturas : [];
@@ -910,10 +910,22 @@ const conductor = `(async () => {
       };
     };
     const clic = (id) => { const b = document.getElementById(id); if (b) b.click(); };
+    // §311: acoplar no puede reescalar el canvas; se mide antes y después de los cuatro bordes.
+    const lienzo = document.getElementById("previa-lateral-canvas");
+    const cajaLienzo = () => {
+      if (!lienzo || typeof lienzo.getBoundingClientRect !== "function") return null;
+      const c = lienzo.getBoundingClientRect();
+      return [Math.round(c.width), Math.round(c.height)];
+    };
+    const lienzoInicial = cajaLienzo();
     clic("previa-inspector-acoplar-arriba");
     const arriba = estado();
+    clic("previa-inspector-acoplar-izquierda");
+    const izquierda = estado();
     clic("previa-inspector-acoplar-abajo");
     const abajo = estado();
+    clic("previa-inspector-acoplar-derecha");
+    const derecha = estado();
     clic("previa-inspector-soltar");
     const suelta = estado();
     const tirador = document.getElementById("previa-inspector-tirador-este");
@@ -931,7 +943,8 @@ const conductor = `(async () => {
     const trasTamano = estado();
     clic("previa-inspector-acoplar-abajo");
     const acopladoConTamano = estado();
-    return { arriba, abajo, suelta, trasTamano, acopladoConTamano };
+    return { arriba, izquierda, abajo, derecha, suelta, trasTamano, acopladoConTamano,
+      lienzoInicial, lienzoFinal: cajaLienzo() };
   })();
   // Un Toast repetido con el mismo texto reinicia su cuenta atrás. Se emite a t=0 y otra vez a los
   // 2,9 s: a los 3,1 s del primero tiene que seguir visible (antes se ocultaba con el reloj del
@@ -1039,7 +1052,7 @@ const conductor = `(async () => {
 
   // El emulador pinta el tema de la APP, no el del editor: se mide un lienzo aparte con el
   // modelo de la plantilla Contador. Es la comprobación de píxel que node no puede hacer.
-  const arte = await import("/vista-previa.js");
+  const arte = await import("./vista-previa.js");
   const modeloArte = { layout: "res/layout/main.xml",
     pantalla: { x: 0, y: 0, ancho: 360, alto: 640 }, aproximado: true, nodos: 3,
     raiz: { tipo: "LinearLayout", rect: { x: 0, y: 0, ancho: 360, alto: 640 }, hijos: [
@@ -1068,7 +1081,7 @@ const conductor = `(async () => {
   // una caja de 12px. Se pasa por modeloParaEmulador, el mismo camino que usa el panel. Se
   // muestrean el relleno de la esquina, el centro de la franja inferior y el blanco bajo el borde;
   // todos caen en relleno, nunca en el glifo, para no depender de la fuente instalada.
-  const panelArte = await import("/previa-panel.js");
+  const panelArte = await import("./previa-panel.js");
   const medirMedia = { ancho: 180, alto: 320 };
   const modeloMedia = panelArte.modeloParaEmulador(modeloArte, medirMedia.ancho, medirMedia.alto);
   const lienzoMedia = document.createElement("canvas");
@@ -1106,6 +1119,92 @@ const conductor = `(async () => {
   const pestanaAntes = (document.querySelector(".panel-tab.activo") || {}).dataset?.panel || "";
   if (alternar) alternar.click();
   r.clicUnico = { primero, desdeOtra: medirClicUnico(), pestanaAntes };
+  // §311, escenario de salida duplicada: la marca viaja con la secuencia 1 del modelo, no con el
+  // orden de pintado. Acoplar y soltar no ejecuta nada, así que la cuenta tiene que quedar 1 → 1
+  // con las mismas líneas y la misma secuencia.
+  const energia = document.getElementById("previa-energia");
+  r.fidelidadEnergia = energia ? energia.getAttribute("aria-pressed") : null;
+  if (energia && r.fidelidadEnergia === "false") energia.click();
+  const modeloAnterior = arte.modeloActual();
+  const modeloMarca = {
+    pantalla: { x: 0, y: 0, ancho: 360, alto: 640 },
+    paquete: "com.prueba.fidelidad", version: "1", actividad: "MainActivity",
+    layout: "res/layout/main.xml", nodos: 1, aproximado: true,
+    raiz: { tipo: "LinearLayout", hijos: [] },
+    ejecucion: {
+      actividad: "MainActivity", pasos: 1,
+      capturas: [{ texto: "MARCA-FIDELIDAD-311" }],
+      consola: [
+        { origen: "salida", texto: "MARCA-FIDELIDAD-311", secuencia: 1 },
+        { origen: "salida", texto: "segunda línea", secuencia: 2 },
+      ],
+    },
+  };
+  arte.pintarVistaPrevia(modeloMarca);
+  const marcas = () => document.querySelectorAll(
+    '#previa-consola .previa-consola-linea[data-fidelidad="MARCA-FIDELIDAD-311"] .previa-consola-texto').length;
+  const lineas = () => document.querySelectorAll("#previa-consola .previa-consola-linea").length;
+  const secuencias = () => [...document.querySelectorAll(
+    '#previa-consola .previa-consola-linea[data-fidelidad="MARCA-FIDELIDAD-311"] .previa-consola-secuencia')]
+    .map((n) => n.textContent).join(",");
+  r.fidelidadDuplicado = { antes: marcas(), lineasAntes: lineas(), secuenciasAntes: secuencias() };
+  document.getElementById("previa-inspector-acoplar-abajo").click();
+  document.getElementById("previa-inspector-soltar").click();
+  // El gesto de acoplar no repinta la consola por sí solo: el manejador de
+  // previa-panel.js:2765-2767 llama a acoplar (:2695-2701), que pasa por
+  // aplicarModoFlotantePorModo (:1254-1262) y aplicarModoFlotante (:1182-1252), que solo mueve
+  // la capa. Se fuerza el repintado para que la cuenta 1 → 1 no sea vacua.
+  PREVIA_PANEL.repintar();
+  arte.pintarVistaPrevia(modeloMarca);
+  r.fidelidadDuplicado.despues = marcas();
+  r.fidelidadDuplicado.lineasDespues = lineas();
+  r.fidelidadDuplicado.secuenciasDespues = secuencias();
+
+  // §311, escenario de foco: un toque real sobre el rect de un EditText abre el campo; el texto
+  // tecleado viaja al guion sin recortar sus espacios y el campo se cierra al perder el foco.
+  const modeloCampo = {
+    pantalla: { x: 0, y: 0, ancho: 360, alto: 640 },
+    paquete: "com.prueba.fidelidad", version: "1", actividad: "MainActivity",
+    layout: "res/layout/main.xml", nodos: 1, aproximado: true,
+    raiz: { tipo: "LinearLayout", rect: { x: 0, y: 0, ancho: 360, alto: 640 }, hijos: [
+      { tipo: "EditText", id: "entrada", idRef: "0x7f010001", texto: "", pista: "",
+        rect: { x: 20, y: 20, ancho: 200, alto: 40 }, hijos: [] },
+    ] },
+    ejecucion: { actividad: "MainActivity", pasos: 1, capturas: [], consola: [] },
+  };
+  arte.pintarVistaPrevia(modeloCampo);
+  const lienzoCampo = document.getElementById("previa-lateral-canvas");
+  const espacio = lienzoCampo && lienzoCampo.__espacio;
+  const escalado = espacio ? panelArte.modeloParaEmulador(modeloCampo, espacio.ancho, espacio.alto) : null;
+  const rectCampo = escalado
+    ? arte.rectsEscalados(escalado, espacio.ancho, espacio.alto).find((n) => n.tipo === "EditText")
+    : null;
+  const editable = rectCampo
+    ? panelArte.editableEnPunto(escalado, espacio.ancho, espacio.alto,
+        rectCampo.x + rectCampo.ancho / 2, rectCampo.y + rectCampo.alto / 2)
+    : null;
+  const cajaCampo = lienzoCampo && typeof lienzoCampo.getBoundingClientRect === "function"
+    ? lienzoCampo.getBoundingClientRect() : null;
+  r.fidelidadTeclado = { editable: !!editable, idRef: editable ? editable.idRef : "" };
+  if (rectCampo && cajaCampo && espacio && espacio.ancho > 0 && espacio.alto > 0) {
+    const x = cajaCampo.left + (rectCampo.x + rectCampo.ancho / 2) * (cajaCampo.width / espacio.ancho);
+    const y = cajaCampo.top + (rectCampo.y + rectCampo.alto / 2) * (cajaCampo.height / espacio.alto);
+    lienzoCampo.dispatchEvent(new PointerEvent("pointerdown", { bubbles: true, cancelable: true,
+      button: 0, pointerId: 88, clientX: x, clientY: y }));
+    const campo = document.activeElement;
+    r.fidelidadTeclado.foco = !!campo && campo.className === "previa-campo-texto";
+    if (r.fidelidadTeclado.foco) {
+      campo.value = "  hola  ";
+      campo.dispatchEvent(new Event("input", { bubbles: true }));
+      r.fidelidadTeclado.valor = campo.value;
+      campo.dispatchEvent(new KeyboardEvent("keydown", { bubbles: true, key: "Enter" }));
+      await new Promise((ok) => setTimeout(ok, 250));
+      r.fidelidadTeclado.guion = PREVIA_PANEL.estado().guion.filter((p) => p.indexOf("escribir:") === 0);
+      campo.blur();
+      r.fidelidadTeclado.cerrado = document.activeElement !== campo && campo.hidden === true;
+    }
+  }
+  if (modeloAnterior) arte.pintarVistaPrevia(modeloAnterior);
   return r;
 })()`;
 
@@ -1415,8 +1514,8 @@ const pixelCercano = (pix, esperado) => Array.isArray(pix) && pix.length === 3 &
         // El anclaje NO es el ordinal $N del fuente: javac renumera las anónimas cuando se borra
         // una intermedia. Se toma la clase real del oyente que la ejecución registró para
         // id/pulsar (`ejecucion.oyentes` → `oyenteRegistrado.oyente.clase`).
-        const moduloPreviaSwap = await import("/previa-panel.js");
-        const modeloFirmaSwap = (await import("/vista-previa.js")).modeloActual();
+        const moduloPreviaSwap = await import("./previa-panel.js");
+        const modeloFirmaSwap = (await import("./vista-previa.js")).modeloActual();
         const claseOyenteSwap = moduloPreviaSwap.claseOyenteDe(modeloFirmaSwap,
           sa.idRef || "id/pulsar");
         let firmaDerivadaSwap = "";
@@ -1571,7 +1670,49 @@ const pixelCercano = (pix, esperado) => Array.isArray(pix) && pix.length === 3 &
       api.preferencia === "33",
       "el selector de API no fija el manifiesto ni sincroniza los ocultos: " + JSON.stringify(api));
     console.log("  clic único:", JSON.stringify(cu).slice(0, 500), "| api:", JSON.stringify(api));
+    const fd = v.fidelidadDuplicado || {};
+    comprueba(fd.antes === 1 && fd.despues === 1 && fd.lineasDespues === fd.lineasAntes &&
+      fd.secuenciasDespues === fd.secuenciasAntes,
+      "salida duplicada al acoplar: MARCA-FIDELIDAD-311 " + fd.antes + " → " + fd.despues +
+      " (líneas " + fd.lineasAntes + " → " + fd.lineasDespues + ", secuencias " +
+      fd.secuenciasAntes + " → " + fd.secuenciasDespues + ")");
+    const fk = v.fidelidadTeclado || {};
+    comprueba(fk.editable === true && fk.idRef === "0x7f010001",
+      "editableEnPunto no elige el EditText del modelo: " + JSON.stringify(fk));
+    comprueba(fk.foco === true, "el toque sobre el EditText no enfoca el campo real");
+    comprueba(fk.valor === "  hola  ", "el campo no conserva lo tecleado: " + JSON.stringify(fk.valor));
+    comprueba(Array.isArray(fk.guion) && fk.guion.some((p) => /\/  hola  $/.test(String(p))),
+      "los espacios finales no sobreviven a --escribir: " + JSON.stringify(fk.guion));
+    comprueba(fk.cerrado === true, "el campo no se cierra al perder el foco");
+    comprueba(ca.izquierda && ca.izquierda.borde === "izquierda" &&
+      ca.derecha && ca.derecha.borde === "derecha",
+      "la consola no se acopla a los cuatro bordes: " +
+      JSON.stringify({ izquierda: ca.izquierda, derecha: ca.derecha }));
+    comprueba(Array.isArray(ca.lienzoInicial) && Array.isArray(ca.lienzoFinal) &&
+      JSON.stringify(ca.lienzoInicial) === JSON.stringify(ca.lienzoFinal),
+      "acoplar la consola reescala el canvas: " +
+      JSON.stringify({ inicial: ca.lienzoInicial, final: ca.lienzoFinal }));
   }
+  // §311: a ≤760 px los tiradores se ocultan y queda el aviso; a 1280 px vuelven.
+  const sondaEstrecha = async (ancho) => {
+    await exec("Emulation.setDeviceMetricsOverride",
+      { width: ancho, height: 900, deviceScaleFactor: 1, mobile: false });
+    const res = await exec("Runtime.evaluate", { expression:
+      "JSON.stringify({ ancho: window.innerWidth, tirador: " +
+      "getComputedStyle(document.getElementById('tirador-previa-noroeste')).display, aviso: " +
+      "getComputedStyle(document.getElementById('previa-aviso-estrecho')).display })",
+      returnByValue: true });
+    try { return JSON.parse(res.result && res.result.result && res.result.result.value); }
+    catch (e) { return null; }
+  };
+  const estrecho = await sondaEstrecha(720);
+  const anchoNormal = await sondaEstrecha(1280);
+  await exec("Emulation.clearDeviceMetricsOverride");
+  comprueba(estrecho && estrecho.ancho === 720 && estrecho.tirador === "none" && estrecho.aviso !== "none",
+    "fidelidad-estrecho: los tiradores siguen visibles a 720 px u ocultos a 1280 px: " +
+    JSON.stringify(estrecho));
+  comprueba(anchoNormal && anchoNormal.ancho === 1280 && anchoNormal.tirador !== "none",
+    "fidelidad-estrecho: los tiradores no vuelven a 1280 px: " + JSON.stringify(anchoNormal));
   ws.close();
   navegador.kill("SIGKILL");
   servidor.close();

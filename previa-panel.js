@@ -1701,6 +1701,11 @@ export function crearPreviaPanel({ hospedador, proyecto, estadoPestana, editor, 
     }
   }
 
+  // Marca de la aseveración de fidelidad del §311: identifica la primera línea de la consola de
+  // una ejecución por su secuencia, no por su posición de pintado. `pintarConsola` limpia la lista
+  // antes de repintarla, así que un repintado por acoplar la consola no puede añadir una copia.
+  const MARCA_FIDELIDAD_311 = "MARCA-FIDELIDAD-311";
+
   function pintarConsola(modelo) {
     const resumen = resumenEjecucion(modelo);
     for (const superficie of SUPERFICIES) {
@@ -1715,12 +1720,18 @@ export function crearPreviaPanel({ hospedador, proyecto, estadoPestana, editor, 
         vacio.textContent = "Compila el proyecto para ver lo que la app imprime.";
         continue;
       }
+      let marcada = false;
       for (const linea of resumen.consola) {
+        const numeroSecuencia = Number(linea.secuencia) || lista.children.length + 1;
         const li = document.createElement("li");
+        if (!marcada && numeroSecuencia === 1) {
+          li.dataset.fidelidad = MARCA_FIDELIDAD_311;
+          marcada = true;
+        }
         li.className = "previa-consola-linea";
         const secuencia = document.createElement("span");
         secuencia.className = "previa-consola-secuencia";
-        secuencia.textContent = String(linea.secuencia || lista.children.length + 1);
+        secuencia.textContent = String(numeroSecuencia);
         const origen = document.createElement("span");
         origen.className = "previa-consola-origen";
         origen.textContent = linea.origen || "salida";
