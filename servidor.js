@@ -13,6 +13,8 @@
 //   /wasm_exec.js     el del GOROOT de quien corre: no se versiona (regla 2 del repo)
 //   /android-jar      el android.jar del SDK local, si está instalado; no se versiona
 //   /android-jar-info JSON con versión y tamaño del jar que encuentra (para la pestaña)
+//   /android-stub.json   JSON del jar AOSP publicado (F3): versión, tamaño y SHA-256
+//   /android-stub-34.jar el jar AOSP publicado, del mismo origen; sin ANDROID_STUB_JAR no está
 import http from "node:http";
 import fs from "node:fs";
 import path from "node:path";
@@ -66,6 +68,23 @@ function jarDelSdk() {
     }
   }
   return null;
+}
+
+// F4: el sitio puede publicar el jar sintético de AOSP en su propio origen (F3 lo copia a
+// sitio/android-stub-34.jar y escribe android-stub.json). ANDROID_STUB_JAR apunta al jar cuando se
+// sirve el árbol de desarrollo o un worktree; si no está, se usa el fichero publicado en SITIO_DIR.
+// El JSON es la fuente de la versión y del SHA-256: el nombre `android-stub-34.jar` no encaja con
+// el regex android-(\d+) que saca la API del jar de la SDK.
+function jarDelStub() {
+  const json = path.join(RAIZ_SITIO, "android-stub.json");
+  if (!fs.existsSync(json)) return null;
+  const publicado = path.join(RAIZ_SITIO, "android-stub-34.jar");
+  const jar = (process.env.ANDROID_STUB_JAR && fs.existsSync(process.env.ANDROID_STUB_JAR))
+    ? process.env.ANDROID_STUB_JAR : publicado;
+  if (!fs.existsSync(jar)) return null;
+  try {
+    return { jar, info: JSON.parse(fs.readFileSync(json, "utf8")) };
+  } catch (e) { return null; }
 }
 
 const MIME = {
@@ -131,7 +150,7 @@ const SHELL = [
 ];
 
 const SOLO_RED = [
-  /^\/android-jar/, /^\/keystore/, /^\/apk-ejemplo$/, /^\/aab-ejemplo$/,
+  /^\/android-jar/, /^\/android-stub/, /^\/keystore/, /^\/apk-ejemplo$/, /^\/aab-ejemplo$/,
   /^\/apkc-test\.wasm$/, /^\/deps-index\.json$/, /^\/deps\//,
 ];
 
@@ -243,7 +262,33 @@ const servidor = http.createServer((req, res) => {
     fichero = process.env.KS_EJEMPLO;                      // idem: el keystore de debug del sitio
   } else if (ruta === "/keystore-release" && process.env.KS_RELEASE && fs.existsSync(process.env.KS_RELEASE)) {
     fichero = process.env.KS_RELEASE;                      // el de release, de usar y tirar: contraseña y alias conocidos
+  } else if (ruta === "/android-stub.json") {
+    const stub = jarDelStub();
+    if (!stub) {
+      res.writeHead(404, { "Content-Type": "text/plain; charset=utf-8" });
+      return void res.end("no hay android stub publicado; usa el SDK local o el selector de fichero\n");
+    }
+    res.writeHead(200, { "Content-Type": "application/json; charset=utf-8" });
+    return void res.end(JSON.stringify(stub.info));
+  } else if (ruta === "/android-stub-34.jar") {
+    const stub = jarDelStub();
+    if (!stub) {
+      res.writeHead(404, { "Content-Type": "text/plain; charset=utf-8" });
+      return void res.end("no hay android stub publicado\n");
+    }
+    fichero = stub.jar;                                     // el jar AOSP, servido por el mismo origen
   } else if (ruta === "/android-jar-info") {
+    const stub = jarDelStub();
+    if (stub) {
+      // La versión sale del JSON: `android-stub-34.jar` no lleva el prefijo android-34 que el
+      // regex de abajo espera en la ruta de la SDK, y daría null.
+      res.writeHead(200, { "Content-Type": "application/json; charset=utf-8" });
+      return void res.end(JSON.stringify({
+        disponible: true, version: Number(stub.info.version) || null,
+        bytes: stub.info.bytes || fs.statSync(stub.jar).size,
+        sha256: stub.info.sha256 || "", origen: stub.info.origen || "AOSP",
+      }));
+    }
     const jar = jarDelSdk();
     const version = jar ? Number((/android-(\d+)/.exec(path.basename(path.dirname(jar))) || [])[1]) : null;
     res.writeHead(200, { "Content-Type": "application/json; charset=utf-8" });
@@ -251,12 +296,17 @@ const servidor = http.createServer((req, res) => {
       disponible: !!jar, version, bytes: jar ? fs.statSync(jar).size : 0,
     }));
   } else if (ruta === "/android-jar") {
-    const jar = jarDelSdk();
-    if (!jar) {
-      res.writeHead(404, { "Content-Type": "text/plain; charset=utf-8" });
-      return void res.end("no hay android.jar del SDK local; usa el selector de fichero o tools/entorno.sh jar\n");
+    const stub = jarDelStub();
+    if (stub) {
+      fichero = stub.jar;                                   // el jar AOSP publicado, mismo origen
+    } else {
+      const jar = jarDelSdk();
+      if (!jar) {
+        res.writeHead(404, { "Content-Type": "text/plain; charset=utf-8" });
+        return void res.end("no hay android.jar del SDK local; usa el selector de fichero o tools/entorno.sh jar\n");
+      }
+      fichero = jar;                                        // el jar del SDK, por su origen: la pestaña no habla con nadie más
     }
-    fichero = jar;                                          // el jar del SDK, por su origen: la pestaña no habla con nadie más
   } else if (INDICE_LOCAL && ruta === "/deps-index.json") {
     // Ejemplo local generado por deps-index-local.mjs, no la salida del workflow deps-maven del
     // sitio publicado. El propio JSON lo dice en `origen`; se sirve tal cual, sin reescribirlo.

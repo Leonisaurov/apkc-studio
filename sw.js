@@ -57,7 +57,8 @@ function compararVersiones(a, b) {
   return 0;
 }
 
-// No cachea el jar del SDK, los keystores ni el proyecto (OPFS no pasa por HTTP). El binario wasm
+// No cachea el jar del SDK ni el jar AOSP publicado (este se valida por SHA-256 antes de entrar en
+// OPFS), los keystores ni el proyecto (OPFS no pasa por HTTP). El binario wasm
 // y wasm_exec.js sí se intentan cachear en la instalación; si el host no los sirve, se cachean la
 // primera vez que se usan.
 const SHELL = [
@@ -70,7 +71,7 @@ const SHELL = [
 ];
 
 const SOLO_RED = [
-  /^\/android-jar(\/|$)/, /^\/android-jar-info$/, /^\/keystore/,
+  /^\/android-jar(\/|$)/, /^\/android-jar-info$/, /^\/android-stub/, /^\/keystore/,
   /^\/apk-ejemplo$/, /^\/aab-ejemplo$/, /^\/apkc-test\.wasm$/,
   // el paquete de dependencias es estático y grande: se lee de la red en cada importación y no
   // se duplica en la caché del service worker (el artefacto va a OPFS)

@@ -161,6 +161,48 @@ async function conductor() {
       pwa.estados.every((s) => s === 200),
     JSON.stringify(pwa));
 
+  // F2: el índice de dependencias viaja dentro del paquete (DEPS_DIR en tools/sitio.sh) y se sirve
+  // desde el propio origen. Comprobar que está, que describe un artefacto y que sus bytes y su
+  // SHA-256 son los declarados: el generador local deja exactamente esa forma (DEPS.md).
+  const deps = await evaluar(`(async () => {
+    try {
+      const r = await fetch("./deps-index.json");
+      if (!r.ok) return { estado: r.status, indice: null, artefacto: null };
+      const indice = await r.json();
+      const e = indice.artefactos && indice.artefactos[0];
+      if (!e) return { estado: r.status, indice, artefacto: null };
+      const a = await fetch("./" + e.fichero);
+      const bytes = new Uint8Array(await a.arrayBuffer());
+      const resumen = await crypto.subtle.digest("SHA-256", bytes);
+      const sha256 = Array.from(new Uint8Array(resumen))
+        .map((b) => b.toString(16).padStart(2, "0")).join("");
+      return { estado: r.status, estadoArtefacto: a.status, indice,
+        artefacto: { fichero: e.fichero, bytes: bytes.length, declarados: e.bytes,
+          sha256, declarado: e.sha256 } };
+    } catch (e) {
+      return { estado: 0, error: String(e).slice(0, 120), indice: null, artefacto: null };
+    }
+  })()`);
+  comprueba("el sitio sirve deps-index.json del propio origen",
+    deps.estado === 200 && !!deps.indice && Array.isArray(deps.indice.artefactos) &&
+      deps.indice.artefactos.length > 0, JSON.stringify(deps).slice(0, 220));
+  comprueba("el artefacto del índice coincide en bytes y SHA-256",
+    !!deps.artefacto && deps.estadoArtefacto === 200 &&
+      deps.artefacto.bytes === deps.artefacto.declarados &&
+      deps.artefacto.sha256 === deps.artefacto.declarado,
+    deps.artefacto ? deps.artefacto.fichero + " · " + deps.artefacto.bytes +
+      " bytes · " + deps.artefacto.sha256.slice(0, 12) : JSON.stringify(deps).slice(0, 220));
+  const peticionesDeps = peticiones.filter((u) => {
+    try { const p = new URL(u).pathname; return p === "/deps-index.json" || p.startsWith("/deps/"); }
+    catch (e) { return false; }
+  });
+  const fueraDeps = peticiones.filter((u) => {
+    try { return new URL(u).origin !== ORIGEN; } catch (e) { return true; }
+  });
+  comprueba("deps se sirve sin peticiones fuera del origen",
+    peticionesDeps.length >= 2 && fueraDeps.length === 0,
+    peticionesDeps.length + " peticiones de deps, " + fueraDeps.length + " fuera del origen");
+
   // El módulo de la pestaña publica sus funciones en window al terminar de cargar; esperar a
   // que estén antes de tocar nada, porque la recarga del SW puede haber invalidado un contexto
   // previo donde sí estaban.

@@ -2564,9 +2564,13 @@ function sincronizarApi(guardar) {
   }
 }
 
-// Lo que el servidor local sabe del SDK. En una página servida de forma estática no hay
-// /android-jar-info: el camino es el paquete oficial de Google, el .zip o el .jar.
-const JAR_SDK = { disponible: false, consultado: false, version: null, bytes: 0 };
+// Lo que el servidor local sabe del SDK o del jar AOSP publicado en el propio origen. En una página
+// servida de forma estática sin /android-stub.json ni /android-jar-info, el camino es el paquete
+// oficial de Google, el .zip o el .jar. `url` y `sha256` solo se llenan en la ruta nueva del stub.
+const JAR_SDK = {
+  disponible: false, consultado: false, version: null, bytes: 0,
+  sha256: "", url: "/android-jar", origen: "SDK", tag: "",
+};
 
 // Un keystore por flujo: el del build queda en OPFS (`/sdk/release.keystore`) y el de `sign` en
 // `/keystore`, las rutas que ya usaban los botones. Lo nuevo es la contraseña, el alias que se
@@ -2903,7 +2907,7 @@ async function extraerJarDeZip(datos) {
   return null;
 }
 
-async function ponerJarDeUrl(url) {
+async function ponerJarDeUrl(url, sha256Esperado) {
   // la ruta del servidor local, no de un CDN: la página solo habla con su propio origen, y eso es
   // lo que comprueba la prueba de la pestaña contando las peticiones
   return conCarga("Descargando android.jar…", async () => {
@@ -2915,19 +2919,31 @@ async function ponerJarDeUrl(url) {
       throw new Error("lo que devolvió " + url + " no es un jar (cabecera " +
         Array.from(datos.slice(0, 2)).join(",") + ")");
     }
+    // El SHA-256 solo se exige en la ruta nueva del jar AOSP, cuyo JSON lo publica. El fallback al
+    // SDK local (/android-jar) no trae hash y no debe romperse por esto.
+    if (sha256Esperado) {
+      const suma = Array.from(new Uint8Array(await crypto.subtle.digest("SHA-256", datos)))
+        .map((b) => b.toString(16).padStart(2, "0")).join("");
+      if (suma !== String(sha256Esperado).toLowerCase()) {
+        throw new Error("el jar de " + url + " no coincide con el SHA-256 publicado (" +
+          suma + " ≠ " + sha256Esperado + ")");
+      }
+    }
     await conBloqueo(() => hospedador.escribir(RUTA_JAR, datos));
     await decirEstadoJar();
     return datos.length;
   });
 }
 
-// El servidor busca el SDK local y sirve su android.jar en /android-jar; la pestaña lo pide a
-// su propio origen. La licencia de la SDK no permite versionarlo en el repo, pero sí leerlo de
-// una instalación oficial que ya esté en la máquina.
+// El servidor sirve el jar AOSP publicado (/android-stub-34.jar) o, si no está, el android.jar del
+// SDK local (/android-jar); la pestaña lo pide a su propio origen en los dos casos. La licencia de
+// la SDK no permite versionarla, pero sí leerla de una instalación oficial ya presente.
 async function traerJarDelSdk(silencioso) {
   try {
-    const n = await ponerJarDeUrl("/android-jar");
-    nota("android.jar del SDK local guardado en OPFS (" + n + " bytes)");
+    const n = await ponerJarDeUrl(JAR_SDK.url || "/android-jar", JAR_SDK.sha256 || "");
+    nota(JAR_SDK.origen === "AOSP"
+      ? "android.jar AOSP " + JAR_SDK.tag + " guardado en OPFS (" + n + " bytes)"
+      : "android.jar del SDK local guardado en OPFS (" + n + " bytes)");
     return true;
   } catch (e) {
     if (!silencioso) {
@@ -2939,25 +2955,52 @@ async function traerJarDelSdk(silencioso) {
   }
 }
 
-// Pinta si el servidor ve un SDK local, sin bajar el jar entero: es un JSON pequeño y deja claro
-// si el botón «Traer del SDK local» va a poder hacer algo.
+// Pinta si el servidor ve el jar AOSP publicado o un SDK local, sin bajar el jar entero: es un JSON
+// pequeño y deja claro si el botón «Traer del SDK local» va a poder hacer algo.
 async function consultarJarDelSdk() {
   const aviso = document.getElementById("estado-jar-sdk");
   const boton = document.getElementById("traer-android-jar");
   const sinSdk = "sin servidor local de SDK: descarga el paquete oficial o elige el .jar/.zip";
   if (!aviso) return;
   try {
-    const respuesta = await fetch("/android-jar-info");
-    if (!respuesta.ok) throw new Error("HTTP " + respuesta.status);
-    const info = await respuesta.json();
-    JAR_SDK.disponible = !!info.disponible;
-    JAR_SDK.version = info.version || null;
-    JAR_SDK.bytes = info.bytes || 0;
-    aviso.textContent = JAR_SDK.disponible
-      ? "el servidor ve el android.jar del SDK local: API " + info.version + ", " + info.bytes + " bytes"
-      : sinSdk;
+    // F4: primero el jar AOSP del propio origen. Su JSON trae versión y SHA-256; si el sitio no lo
+    // publica (404 en desarrollo), se cae al /android-jar-info de siempre, sin hash.
+    let conStub = false;
+    try {
+      const respuesta = await fetch("/android-stub.json");
+      if (respuesta.ok) {
+        const info = await respuesta.json();
+        JAR_SDK.disponible = true;
+        JAR_SDK.version = info.version || null;
+        JAR_SDK.bytes = info.bytes || 0;
+        JAR_SDK.sha256 = info.sha256 || "";
+        JAR_SDK.tag = info.tag || "";
+        JAR_SDK.origen = info.origen || "AOSP";
+        JAR_SDK.url = "/android-stub-34.jar";
+        aviso.textContent = "el servidor sirve el android.jar " + JAR_SDK.origen + " (" +
+          JAR_SDK.tag + "): API " + JAR_SDK.version + ", " + JAR_SDK.bytes + " bytes";
+        conStub = true;
+      }
+    } catch (e) { /* sin stub publicado: se mira el SDK local como antes */ }
+    if (!conStub) {
+      JAR_SDK.sha256 = "";
+      JAR_SDK.url = "/android-jar";
+      JAR_SDK.origen = "SDK";
+      JAR_SDK.tag = "";
+      const respuesta = await fetch("/android-jar-info");
+      if (!respuesta.ok) throw new Error("HTTP " + respuesta.status);
+      const info = await respuesta.json();
+      JAR_SDK.disponible = !!info.disponible;
+      JAR_SDK.version = info.version || null;
+      JAR_SDK.bytes = info.bytes || 0;
+      aviso.textContent = JAR_SDK.disponible
+        ? "el servidor ve el android.jar del SDK local: API " + info.version + ", " + info.bytes + " bytes"
+        : sinSdk;
+    }
   } catch (e) {
     JAR_SDK.disponible = false;
+    JAR_SDK.sha256 = "";
+    JAR_SDK.url = "/android-jar";
     aviso.textContent = sinSdk;
   } finally {
     JAR_SDK.consultado = true;

@@ -33,6 +33,11 @@ const JAR_SRC = process.env.ANDROID_JAR || "";
 // el tamaño real del jar que se sirve y se elige de disco: el de Google y el generado desde AOSP
 // (tools/androidjar) no coinciden, y el aviso de la página imprime el que leyó, no un literal.
 const JAR_BYTES = JAR_SRC && fs.existsSync(JAR_SRC) ? fs.statSync(JAR_SRC).size : 0;
+// F3/F4: ANDROID_STUB_JAR apunta al jar AOSP publicado en el propio origen. Sin él, la página
+// debe seguir funcionando por el fallback al SDK local (/android-jar-info y /android-jar, sin hash).
+const STUB_JAR = process.env.ANDROID_STUB_JAR || "";
+const STUB_BYTES = STUB_JAR && fs.existsSync(STUB_JAR) ? fs.statSync(STUB_JAR).size : 0;
+const STUB_SHA = STUB_BYTES ? createHash("sha256").update(fs.readFileSync(STUB_JAR)).digest("hex") : "";
 const PUERTO = Number(process.env.STUDIO_SERVIDOR_PORT || 8791);
 const CDP = process.env.STUDIO_PORT || "9345";
 const URL_PAGINA = "http://127.0.0.1:" + PUERTO + "/index.html";
@@ -95,6 +100,15 @@ if (await puertoOcupado(Number(CDP))) falta("el puerto CDP " + CDP + " ya está 
   if (KS_RELEASE) envServidor.KS_RELEASE = path.resolve(KS_RELEASE);
   if (AAB) envServidor.AAB_EJEMPLO = path.resolve(AAB);
   if (JAR_SRC) envServidor.ANDROID_JAR = path.resolve(JAR_SRC);
+  // El sitio de prueba publica el jar AOSP exactamente como lo dejaría tools/sitio.sh (F3): el jar
+  // y su JSON con versión, tamaño y SHA-256 calculados del fichero real, nunca inventados.
+  if (STUB_BYTES) {
+    fs.writeFileSync(path.join(SITIO_PRUEBA, "android-stub-34.jar"), fs.readFileSync(STUB_JAR));
+    fs.writeFileSync(path.join(SITIO_PRUEBA, "android-stub.json"), JSON.stringify({
+      version: 34, bytes: STUB_BYTES, sha256: STUB_SHA, tag: "android-14.0.0_r75", origen: "AOSP",
+    }));
+    envServidor.ANDROID_STUB_JAR = path.resolve(STUB_JAR);
+  }
   const servidor = spawn(process.execPath, [path.join(__dirname, "servidor.js"), String(PUERTO)], {
     cwd: __dirname,
     env: envServidor,
@@ -295,6 +309,52 @@ async function conductor() {
     comprueba("sin cabeceras del servidor, la página se recargó sola y el SW la controla",
       aislamiento.recarga === "1" && aislamiento.controlado === true && aislamiento.aislada === true,
       JSON.stringify(aislamiento));
+  }
+
+  // 0a-bis (F3/F4). El jar AOSP se publica en el propio origen con su JSON de versión y SHA-256.
+  // La página prueba /android-stub.json antes que /android-jar-info y valida PK, tamaño y hash solo
+  // en esa ruta nueva. Sin ANDROID_STUB_JAR el JSON no existe y queda intacto el fallback al SDK.
+  const antesStub = peticiones.length;
+  await evaluar(`consultarJarDelSdk()`);
+  const stubInfo = await evaluar(`fetch("/android-stub.json").then(async (r) =>
+    r.ok ? { ok: true, json: await r.json() } : { ok: false, status: r.status })
+    .catch((e) => ({ ok: false, error: String(e) }))`);
+  if (STUB_BYTES) {
+    comprueba("el sitio publica /android-stub.json con versión, tamaño y SHA-256 del jar",
+      stubInfo.ok === true && stubInfo.json.version === 34 && stubInfo.json.bytes === STUB_BYTES &&
+        stubInfo.json.sha256 === STUB_SHA && stubInfo.json.origen === "AOSP" &&
+        stubInfo.json.tag === "android-14.0.0_r75",
+      JSON.stringify(stubInfo));
+    comprueba("la página descubre el jar AOSP y guarda su URL y su hash antes que el SDK local",
+      await evaluar(`JAR_SDK.consultado === true && JAR_SDK.disponible === true &&
+        JAR_SDK.url === "/android-stub-34.jar" && JAR_SDK.sha256 === ${JSON.stringify(STUB_SHA)} &&
+        JAR_SDK.version === 34 && JAR_SDK.origen === "AOSP"`),
+      await evaluar(`JSON.stringify({ consultado: JAR_SDK.consultado, disponible: JAR_SDK.disponible,
+        url: JAR_SDK.url, version: JAR_SDK.version, origen: JAR_SDK.origen })`));
+    const stubPuesto = await evaluar(`(async () => {
+      const n = await ponerJarDeUrl("/android-stub-34.jar", ${JSON.stringify(STUB_SHA)});
+      const leido = await hospedador.leer("/sdk/android.jar");
+      return { escrito: n, leido: leido.bytes ? leido.bytes.length : null,
+        cabecera: leido.bytes ? Array.from(leido.bytes.slice(0, 2)) : null };
+    })()`);
+    comprueba("el jar AOSP baja del mismo origen con PK, tamaño y SHA-256 y acaba en OPFS",
+      stubPuesto.escrito === STUB_BYTES && stubPuesto.leido === STUB_BYTES &&
+        String(stubPuesto.cabecera) === "80,75",
+      JSON.stringify(stubPuesto));
+    const hashMalo = await evaluar(`ponerJarDeUrl("/android-stub-34.jar",
+      "0000000000000000000000000000000000000000000000000000000000000000")
+      .then((n) => ({ aceptado: true, n })).catch((e) => ({ aceptado: false, motivo: String(e && e.message || e) }))`);
+    comprueba("un SHA-256 distinto hace rechazar el jar AOSP antes de escribirlo",
+      hashMalo.aceptado === false && /SHA-256/.test(hashMalo.motivo), JSON.stringify(hashMalo));
+    const ajenasStub = peticiones.slice(antesStub).filter((u) =>
+      !u.startsWith("http://127.0.0.1:" + PUERTO) && !/^(?:data|blob):/.test(u));
+    comprueba("la ruta del jar AOSP no pide nada fuera del origen",
+      ajenasStub.length === 0, ajenasStub.slice(0, 3).join(", ") || "cero peticiones ajenas");
+  } else {
+    comprueba("sin ANDROID_STUB_JAR no hay stub y la página cae al SDK local sin hash",
+      stubInfo.ok === false && (await evaluar(`JAR_SDK.consultado === true &&
+        JAR_SDK.url === "/android-jar" && JAR_SDK.sha256 === ""`)),
+      JSON.stringify(stubInfo) + " " + await evaluar(`JSON.stringify({ url: JAR_SDK.url, hash: JAR_SDK.sha256 })`));
   }
 
   // 0b. la vista de Pantalla, antes de compilar nada: se abre, marca `data-vista` y deja el canvas
