@@ -945,6 +945,14 @@ if (vistaPrevia.textoDeNodo({ texto: "Pulsos: 0", textoDinamico: "Pulsos: 3" }) 
   mal("textoDeNodo no prefiere el texto dinámico");
 }
 if (vistaPrevia.textoDeNodo({ texto: "estático", otraCosa: "x" }) !== "estático") mal("textoDeNodo se pierde con campos nuevos");
+// con dos claves de ejecución gana la última en orden alfabético, no la primera
+if (vistaPrevia.textoDeNodo({ texto: "viejo", textoCapturado: "primero", textoDinamico: "ultimo" }) !== "ultimo") {
+  mal("textoDeNodo no prefiere el último texto de ejecución");
+}
+// un último setText vacío también es el estado final: no vuelve a aparecer el texto anterior
+if (vistaPrevia.textoDeNodo({ texto: "Loading...", textoDinamico: "" }) !== "") {
+  mal("textoDeNodo resucita un texto viejo tras un último setText vacío");
+}
 if (vistaPrevia.textoDeNodo(null) !== "" || vistaPrevia.textoDeNodo({}) !== "") mal("textoDeNodo no tolera nodos vacíos");
 const planos = vistaPrevia.nodosAplanados(modeloPrevia);
 if (planos.length !== 3 || planos[0].nodo.tipo !== "LinearLayout" || planos[1].nodo.tipo !== "TextView") {
@@ -1172,6 +1180,18 @@ const modeloRoto = { pantalla: { ancho: 1e400, alto: 640 },
   raiz: { tipo: "X", rect: { x: 0, y: 0, ancho: 1e400, alto: 10 } } };
 if (vistaPrevia.rectsEscalados(modeloRoto, 360, 640).length !== 0) {
   mal("rectsEscalados pinta un rect con 1e400");
+}
+// una vista que la app puso gone o invisible sigue en el modelo, pero no sale en el lienzo
+const modeloOculto = { pantalla: { ancho: 100, alto: 100 }, raiz: { tipo: "X",
+  rect: { x: 0, y: 0, ancho: 100, alto: 100 }, hijos: [
+    { tipo: "Button", id: "id/visible", rect: { x: 0, y: 0, ancho: 10, alto: 10 } },
+    { tipo: "Button", id: "id/gone", visibilidad: "gone", rect: { x: 0, y: 10, ancho: 10, alto: 10 } },
+    { tipo: "Button", id: "id/invisible", visibilidad: "invisible", rect: { x: 0, y: 20, ancho: 10, alto: 10 } },
+  ] } };
+const rectosOcultos = vistaPrevia.rectsEscalados(modeloOculto, 100, 100);
+const hijosVisibles = rectosOcultos.filter((r) => r.id.startsWith("id/")).map((r) => r.id);
+if (hijosVisibles.length !== 1 || hijosVisibles[0] !== "id/visible") {
+  mal("rectsEscalados no filtra las vistas ocultas: " + JSON.stringify(hijosVisibles));
 }
 for (const roto of [null, Infinity, NaN, "no", {}]) {
   const r = vistaPrevia.rectsEscalados(
