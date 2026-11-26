@@ -85,17 +85,19 @@ export function modeloDeSalida(salida) {
   return null;
 }
 
-// El texto visible de un nodo. `texto` es el del layout; si la Fase 2 añade un texto de ejecución
-// (`textoDinamico`, `textoCapturado`, …) gana ese, porque describe la pantalla de verdad. Se mira
-// cualquier clave que empiece por `texto` y no sea `texto`, en orden alfabético, para no depender
-// del nombre exacto que elija la otra fase.
+// El texto visible de un nodo. `texto` es el del layout; si la ejecución añadió un texto
+// (`textoDinamico`, `textoCapturado`, …) gana el ÚLTIMO, porque describe el estado final de la
+// vista: la app puede haber vuelto a escribir una cadena vacía y esa también es la pantalla de
+// verdad. Se miran todas las claves que empiezan por `texto` menos `texto` y se toma la última en
+// orden alfabético, para no depender del nombre exacto que elija la otra fase ni del orden en que
+// el modelo serializó los campos.
 export function textoDeNodo(nodo) {
   if (!nodo || typeof nodo !== "object") return "";
   const dinamicas = Object.keys(nodo)
     .filter((clave) => clave !== "texto" && /^texto[A-Z_]/.test(clave) &&
-      typeof nodo[clave] === "string" && nodo[clave].trim() !== "")
+      typeof nodo[clave] === "string")
     .sort();
-  if (dinamicas.length) return String(nodo[dinamicas[0]]);
+  if (dinamicas.length) return String(nodo[dinamicas[dinamicas.length - 1]]);
   return typeof nodo.texto === "string" ? nodo.texto : "";
 }
 
@@ -344,6 +346,9 @@ export function rectsEscalados(modelo, ancho, alto) {
   for (const { nodo, profundidad } of nodosAplanados(modelo)) {
     const r = nodo.rect;
     if (!r || typeof r !== "object") continue;
+    // una vista que la app puso gone o invisible no se pinta ni responde al clic: el nodo sigue en
+    // el árbol (su id y su sitio los necesita la colocación), pero no sale en el lienzo
+    if (nodo.visibilidad === "gone" || nodo.visibilidad === "invisible") continue;
     // las cuatro medidas se leen con la misma regla que la pantalla: `null` o una cadena vacía
     // no valen cero, valen «este nodo no se puede situar»
     const x = aNumeroOFinito(r.x), y = aNumeroOFinito(r.y);
